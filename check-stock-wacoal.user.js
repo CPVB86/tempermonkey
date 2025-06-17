@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Check Stock | Wacoal & co Clipboard
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      2.7
 // @description  Vergelijkt voorraad op DDO met Wacoal
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/check-stock-wacoal.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/check-stock-wacoal.user.js
 // ==/UserScript==
 
 (function () {
