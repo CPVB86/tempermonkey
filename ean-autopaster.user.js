@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         EAN Autopaster
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      1.3
 // @description  Plak EAN codes automatisch in #tabs-3 op basis van maat en Supplier PID
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-autopaster.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-autopaster.user.js
 // ==/UserScript==
 
 (function () {
