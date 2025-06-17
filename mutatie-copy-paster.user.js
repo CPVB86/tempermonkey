@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Mutatie Copy Paster
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      1.4
 // @description  Genereert EAN en mutaties en kopieert ze automatisch naar het klembord
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/mutatie-copy-paster.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/mutatie-copy-paster.user.js
 // ==/UserScript==
 
 (function() {
