@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Check Stock | Anita & Rosa Faia Clipboard
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      2.8
 // @description  Vergelijkt voorraad op DDO met leverancier stock, herkent bijv. 36A/B als 36 A/B
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/check-stock-anita.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/check-stock-anita.user.js
 // ==/UserScript==
 
 (function () {
