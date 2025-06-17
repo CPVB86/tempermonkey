@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Kopieer Stock | Anita
-// @namespace    https://www.anita.com/
 // @version      1.1
 // @description  Kopieer alle Anita voorraad-tabellen (HTML) voor DDO vergelijking
 // @match        https://b2b.anita.com/nl/shop/*
 // @grant        GM_setClipboard
+copy-stock-wacoal.user.js
 // ==/UserScript==
 
 (function () {
