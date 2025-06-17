@@ -4,7 +4,6 @@
 // @description  Download alle 1200px productfoto's van Wacoal los en netjes, met statusknop rechtsboven.
 // @match        https://b2b.wacoal-europe.com/*
 // @grant        none
-// @namespace    https://runiversity.nl
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber.user.js
