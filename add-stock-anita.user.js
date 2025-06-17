@@ -5,6 +5,9 @@
 // @description  Vult voorraad in DDO automatisch op basis van HTML van de leverancier (dynamisch merk en kleurcode, incl. lege velden)
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/add-stock-anita.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/add-stock-anita.user.js
 // ==/UserScript==
 
 (function () {
