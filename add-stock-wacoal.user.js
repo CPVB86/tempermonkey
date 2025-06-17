@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         Add Stock | Wacoal & co
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      1.2
 // @description  Vult voorraad in DDO automatisch op basis van HTML van de leverancier (dynamisch merk)
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
