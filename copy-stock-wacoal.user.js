@@ -5,6 +5,9 @@
 // @description  Kopieert voorraad HTML + PID van Wacoal, maar alleen als leverbaar ("NOW")
 // @match        https://b2b.wacoal-europe.com/b2b/*
 // @grant        GM_setClipboard
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/copy-stock-wacoal.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/copy-stock-wacoal.user.js
 // ==/UserScript==
 
 (function () {
