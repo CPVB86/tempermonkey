@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Great Picture Tweaker
+  </title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #fafafa;
+      color: #333;
+    }
+    h1.title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 20px;
+      margin: 0;
+      padding-left: 30px;
+    }
+    .header,
+    .gallery {
+      display: none;
+    }
+    .header.visible,
+    .gallery.visible {
+      display: flex;
+    }
+    .header {
+      position: sticky;
+      top: 0;
+      background: #fff;
+      height: 50px;
+      padding: 0;
+      border-bottom: 1px solid #ccc;
+      z-index: 10;
+      justify-content: space-between;
+      align-items: center;
+      gap: 5px;
+      padding-right: 15px;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .header button {
+      height: 35px;
+      width: 35px;
+      border: none;
+      background: #aaa;
+      color: white;
+      font-size: 16px;
+      font-weight: 400;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s;
+      cursor: pointer;
+      position: relative;
+    }
+    .header button:hover:enabled {
+      background: #2e7d32;
+    }
+    .header button:enabled {
+      background: #007bff;
+    }
+    .header button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    .header button:first-child {
+      border-top-left-radius: 12px;
+      border-bottom-left-radius: 12px;
+    }
+    .header button:last-child {
+      border-top-right-radius: 12px;
+      border-bottom-right-radius: 12px;
+    }
+    .header button.checked::after {
+      content: '\f00c';
+      font-family: 'Font Awesome 5 Free', 'Font Awesome 5 Solid', 'FontAwesome';
+      font-weight: 900;
+      position: absolute;
+      top: -5px;
+      right: -3px;
+      font-size: 9px;
+      background: #2e7d32;
+      color: white;
+      border-radius: 50%;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 2px white;
+    }
+    .refresh-btn {
+      display: none;
+    }
+    .upload-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #f4f4f4;
+    }
+    .drop-zone {
+      border: 2px dashed #aaa;
+      padding: 2em;
+      cursor: pointer;
+      background: #fff;
+      border-radius: 8px;
+      transition: background 0.3s, border-color 0.3s;
+      text-align: center;
+      max-width: 90%;
+    }
+    .drop-zone:hover {
+      background: #eee;
+      border-color: #666;
+    }
+    .gallery {
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 2em;
+      padding: 2em;
+    }
+    .photo-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5em;
+    }
+    .photo-wrapper .photo-editor .controls {
+      opacity: 0.3;
+      transition: opacity 0.3s;
+    }
+    .photo-wrapper:hover .photo-editor .controls {
+      opacity: 1;
+    }
+    .photo-editor {
+      position: relative;
+      width: 500px;
+      height: 667px;
+      overflow: hidden;
+      background: #ccc;
+      border: 1px solid #aaa;
+      border-radius: 8px;
+    }
+    .photo-editor.landscape {
+      height: 500px;
+    }
+    .photo-img {
+      position: absolute;
+      top: 0; left: 0;
+      transform-origin: top left;
+      cursor: grab;
+      user-select: none;
+      -webkit-user-drag: none;
+      max-width: 100%;
+      height: auto;
+    }
+    .photo-editor .controls {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      gap: 0.5em;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 0.5em;
+    }
+    .photo-editor.cropped .controls {
+      display: none;
+    }
+    button {
+      padding: 0.6em 1.2em;
+      font-size: 1em;
+      font-weight: 400;
+      cursor: pointer;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      transition: background 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+    }
+    button:hover {
+      background: #2e7d32;
+    }
+    .toggle-ratio-btn {
+      position: relative;
+      width: 60px;
+      height: 32px;
+      background: #007bff;
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 6px;
+      box-sizing: border-box;
+      transition: background 0.3s;
+    }
+    .toggle-ratio-btn:hover {
+      background: #2e7d32;
+    }
+    .toggle-ratio-btn i:first-child,
+    .toggle-ratio-btn i:last-child {
+      color: white;
+      font-size: 14px;
+      font-weight: 400;
+      z-index: 2;
+      flex: 1;
+      text-align: center;
+    }
+    .toggle-ratio-btn .thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 28px;
+      height: 28px;
+      background: white;
+      border-radius: 50%;
+      transition: left 0.3s;
+      z-index: 1;
+    }
+    .toggle-ratio-btn.landscape .thumb {
+      left: 30px;
+    }
+    .duplicate-btn {
+      background: #c0392b;
+      height: 32px;
+      width: 32px;
+      padding: 0;
+      justify-content: center;
+    }
+    .duplicate-btn i {
+      font-size: 16px;
+      font-weight: 400;
+    }
+    .duplicate-btn:hover {
+      background: #e67e22;
+    }
+    .grid-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .grid-line {
+      position: absolute;
+      background: repeating-linear-gradient(to right, transparent, transparent 4px, rgba(0,0,0,0.3) 4px, rgba(0,0,0,0.3) 6px);
+      opacity: 0.7;
+    }
+    .grid-line.vertical {
+      width: 3px;
+      height: 100%;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent 4px,
+        rgba(0, 0, 0, 0.3) 4px,
+        rgba(0, 0, 0, 0.3) 6px
+      );
+    }
+    .grid-line.horizontal {
+      height: 3px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <script>
+function downloadAllImages() {
+  if (!window.croppedImages) return;
+
+  const downloadBtn = document.getElementById('download-btn');
+
+  // Alleen als knop actief is
+  if (downloadBtn.disabled) return;
+
+  window.croppedImages.forEach(({ name, dataUrl }) => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  // Verwijder eerst de class, forceer reflow, voeg daarna weer toe (voor visueel effect)
+  downloadBtn.classList.remove('checked');
+  void downloadBtn.offsetWidth; // Force reflow
+  downloadBtn.classList.add('checked');
+}
+
+  </script>
+  <div class="header" id="header">
+    <div class="header-left">
+        <h1 class="title">Great Picture Tweaker</h1>
+      </div>
+
+    <div class="header-right">
+    <button id="crop-btn" onclick="cropAllImages()">
+      <i class="fas fa-crop"></i>
+    </button>
+    <button id="download-btn" onclick="downloadAllImages()" disabled>
+      <i class="fas fa-download"></i>
+    </button>
+    <button onclick="location.reload()">
+      <i class="fas fa-redo-alt"></i>
+    </button>
+    </div>
+  </div>
+  <div class="upload-container" id="upload-container">
+    <div class="drop-zone" id="drop-zone">Drop of klik om meerdere afbeeldingen te uploaden</div>
+    <input type="file" id="file-input" multiple style="display: none;">
+  </div>
+  <div class="gallery" id="gallery"></div>
+  <script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const gallery = document.getElementById('gallery');
+    const header = document.getElementById('header');
+    const uploadContainer = document.getElementById('upload-container');
+    const cropBtn = document.getElementById('crop-btn');
+    const editors = [];
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.style.background = '#e0e0e0';
+      dropZone.style.borderColor = '#555';
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.background = '#fff';
+      dropZone.style.borderColor = '#aaa';
+    });
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.style.background = '#fff';
+      dropZone.style.borderColor = '#aaa';
+      handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+    function handleFiles(files) {
+      if (!files.length) return;
+      header.classList.add('visible');
+      gallery.classList.add('visible');
+      uploadContainer.style.display = 'none';
+
+      [...files].forEach(file => {
+        const reader = new FileReader();
+        reader.onload = e => loadImage(e.target.result, file.name);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function loadImage(src, fileName, isDuplicate = false) {
+      const img = new Image();
+      img.onload = () => {
+        let isPortrait = img.height > img.width;
+        const editor = document.createElement('div');
+        editor.className = `photo-editor ${isPortrait ? '' : 'landscape'}`;
+        editor.style.height = isPortrait ? '667px' : '500px';
+
+        const innerImg = document.createElement('img');
+        innerImg.src = src;
+        innerImg.className = 'photo-img';
+        innerImg.setAttribute('draggable', 'false');
+        innerImg.setAttribute('data-filename', fileName);
+
+        let scale = 1, offsetX = 0, offsetY = 0, dragging = false, startX, startY;
+
+        const onMouseDown = e => {
+          e.preventDefault(); dragging = true; startX = e.clientX; startY = e.clientY;
+          innerImg.style.cursor = 'grabbing';
+        };
+        const onMouseMove = e => {
+          if (!dragging) return;
+          offsetX += e.clientX - startX; offsetY += e.clientY - startY;
+          startX = e.clientX; startY = e.clientY;
+          updateTransform();
+        };
+        const onMouseUp = () => {
+          dragging = false;
+          innerImg.style.cursor = 'grab';
+        };
+        const onWheel = e => {
+          e.preventDefault();
+          const delta = e.deltaY < 0 ? 1.03 : 0.97;
+          scale *= delta;
+          updateTransform();
+        };
+        function updateTransform() {
+          innerImg.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+        }
+
+        innerImg.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        editor.addEventListener('wheel', onWheel);
+
+        updateTransform();
+        const gridOverlay = document.createElement('div');
+gridOverlay.className = 'grid-overlay';
+
+// Verticale lijnen: 33.3% en 66.6%
+[1, 2].forEach(i => {
+  const vLine = document.createElement('div');
+  vLine.className = 'grid-line vertical';
+  vLine.style.left = `${(i * 100) / 3}%`;
+  gridOverlay.appendChild(vLine);
+});
+
+// Horizontale lijnen: 25%, 50%, 75%
+[1, 2, 3].forEach(i => {
+  const hLine = document.createElement('div');
+  hLine.className = 'grid-line horizontal';
+  hLine.style.top = `${(i * 100) / 4}%`;
+  gridOverlay.appendChild(hLine);
+});
+
+editor.appendChild(gridOverlay);
+
+        editor.appendChild(innerImg);
+
+        const toggleButton = document.createElement('button');
+        toggleButton.className = 'toggle-ratio-btn' + (isPortrait ? '' : ' landscape');
+        toggleButton.innerHTML = `
+          <i class="fas fa-image"></i>
+          <div class="thumb"></div>
+          <i class="fas fa-portrait"></i>`;
+        toggleButton.addEventListener('click', () => {
+          isPortrait = !isPortrait;
+          editor.classList.toggle('landscape', !isPortrait);
+          editor.style.height = isPortrait ? '667px' : '500px';
+          toggleButton.classList.toggle('landscape', !isPortrait);
+        });
+
+        const duplicateButton = document.createElement('button');
+        duplicateButton.className = 'duplicate-btn';
+    duplicateButton.innerHTML = '<i class="fas fa-clone"></i>'; // FontAwesome icoon
+    duplicateButton.onclick = () => {
+      const name = fileName.replace(/(\.[^/.]+)?$/, '_2$1');
+      loadImage(src, name, true);
+    };
+
+const deleteButton = document.createElement('button');
+deleteButton.className = 'duplicate-btn'; // zelfde styling
+deleteButton.innerHTML = '<i class="fas fa-trash-alt"></i>';
+deleteButton.onclick = () => {
+  wrapper.remove();
+  const index = editors.findIndex(e => e.wrapper === wrapper);
+  if (index !== -1) editors.splice(index, 1);
+};
+
+const controls = document.createElement('div');
+controls.className = 'controls';
+controls.appendChild(toggleButton);
+controls.appendChild(duplicateButton);
+controls.appendChild(deleteButton);
+
+editor.appendChild(controls);
+
+const wrapper = document.createElement('div');
+wrapper.className = 'photo-wrapper';
+wrapper.appendChild(editor);
+
+
+
+        gallery.appendChild(wrapper);
+
+        editors.push({
+          editor, innerImg, wrapper, fileName,
+          get offsetX() { return offsetX; },
+          get offsetY() { return offsetY; },
+          get scale() { return scale; },
+          cleanup: () => {
+            innerImg.removeEventListener('mousedown', onMouseDown);
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            editor.removeEventListener('wheel', onWheel);
+          }
+        });
+      };
+      img.src = src;
+    }
+
+    async function compressToTargetSize(canvas, minKB = 35, maxKB = 39) {
+      const targetMin = minKB * 1024;
+      const targetMax = maxKB * 1024;
+      let quality = 0.92;
+      let low = 0.3;
+      let high = 1.0;
+      let bestDataUrl = canvas.toDataURL('image/jpeg', quality);
+      let bestSize = atob(bestDataUrl.split(',')[1]).length;
+
+      for (let i = 0; i < 10; i++) {
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        const size = atob(dataUrl.split(',')[1]).length;
+
+        if (size >= targetMin && size <= targetMax) {
+          return dataUrl; // precies goed
+        }
+
+        if (size < targetMin) {
+          low = quality;
+        } else {
+          high = quality;
+        }
+
+        quality = (low + high) / 2;
+        bestDataUrl = dataUrl;
+        bestSize = size;
+      }
+
+      return bestDataUrl; // meest geschikte benadering
+    }
+
+    async function cropAllImages() {
+      const croppedData = await Promise.all(editors.map(async ({ editor, innerImg, offsetX, offsetY, scale, fileName, cleanup, wrapper }) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = editor.clientWidth;
+        canvas.height = editor.clientHeight;
+        const ctx = canvas.getContext('2d');
+        // Maak de achtergrond wit in plaats van transparant of zwart
+ctx.fillStyle = 'white';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const scaleX = innerImg.naturalWidth / innerImg.width;
+        const scaleY = innerImg.naturalHeight / innerImg.height;
+        const sx = -offsetX / scale * scaleX;
+        const sy = -offsetY / scale * scaleY;
+        const sw = editor.clientWidth / scale * scaleX;
+        const sh = editor.clientHeight / scale * scaleY;
+
+        editor.classList.add('cropped');
+
+        ctx.drawImage(innerImg, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+        innerImg.style.pointerEvents = 'none';
+        innerImg.style.cursor = 'default';
+        cleanup();
+
+        const toggleButton = wrapper.querySelector('.toggle-ratio-btn');
+        const duplicateButton = wrapper.querySelector('.duplicate-btn');
+        const deleteButton = wrapper.querySelector('button .fa-trash-alt')?.parentElement;
+
+        if (toggleButton) toggleButton.remove();
+        if (duplicateButton) duplicateButton.remove();
+        if (deleteButton) deleteButton.remove();
+
+        const baseName = fileName.replace(/\.[^/.]+$/, '');
+        const dataUrl = await compressToTargetSize(canvas, 35, 39);
+
+        return {
+          name: 'c_' + baseName + '.jpg',
+          dataUrl
+        };
+      }));
+
+      document.getElementById('download-btn').disabled = false;
+      document.getElementById('crop-btn').disabled = true;
+      window.croppedImages = croppedData;
+    }
+
+    function downloadAllImages() {
+      if (!window.croppedImages) return;
+      const downloadBtn = document.getElementById('download-btn');
+      if (downloadBtn.disabled) return;
+
+      window.croppedImages.forEach(({ name, dataUrl }) => {
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
+
+      downloadBtn.classList.remove('checked');
+      void downloadBtn.offsetWidth;
+      downloadBtn.classList.add('checked');
+    }
+  </script>
+</body>
+</html>
