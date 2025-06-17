@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Check Stock | Lisca
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      3.3
 // @description  Vergelijkt voorraad op DDO met Wacoal of Lisca (op basis van EAN en actuele voorraad uit sheet)
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/check-stock-lisca.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/check-stock-lisca.user.js
 // ==/UserScript==
 
 (function () {
