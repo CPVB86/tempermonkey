@@ -4,7 +4,9 @@
 // @description  Kopieer alle Anita voorraad-tabellen (HTML) voor DDO vergelijking
 // @match        https://b2b.anita.com/nl/shop/*
 // @grant        GM_setClipboard
-copy-stock-wacoal.user.js
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/copy-stock-anita.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/copy-stock-anita.user.js
 // ==/UserScript==
 
 (function () {
