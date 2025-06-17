@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         Add Stock | Anita & Co
-// @namespace    https://dutchdesignersoutlet.com/
 // @version      1.3
 // @description  Vult voorraad in DDO automatisch op basis van HTML van de leverancier (dynamisch merk en kleurcode, incl. lege velden)
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
