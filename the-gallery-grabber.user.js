@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         🧙‍♂️ The Gallery Grabber
-// @namespace    https://runiversity.nl
 // @version      2.1
 // @description  Download alle 1200px productfoto's van Wacoal los en netjes, met statusknop rechtsboven.
+// @namespace    https://runiversity.nl
+// @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber.user.js
-// @author       C. P. v. Beek
 // @match        https://b2b.wacoal-europe.com/*
 // @grant        none
 // ==/UserScript==
