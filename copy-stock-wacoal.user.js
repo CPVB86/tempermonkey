@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         Kopieer Stock | Wacoal (met PID en datumcheck)
-// @namespace    https://b2b.wacoal-europe.com/
 // @version      1.5
 // @description  Kopieert voorraad HTML + PID van Wacoal, maar alleen als leverbaar ("NOW")
 // @match        https://b2b.wacoal-europe.com/b2b/*
