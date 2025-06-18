@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Wacoal Product Filler
-// @version      1.5
+// @name         Vul productdata automatisch in met knop
+// @version      1.6
 // @description  Plakt HTML uit het klembord en vult automatisch de velden op de backend in
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
@@ -26,7 +26,7 @@
 
         const msg = document.createElement('div');
         msg.id = 'magicMsg';
-        msg.textContent = '✨';
+        msg.textContent = '✨ Let the magic begin!';
         Object.assign(msg.style, {
             fontSize: '1.2em',
             fontWeight: 'bold',
@@ -95,9 +95,15 @@
                 if (match) {
                     brandSelect.value = match.value;
                     brandSelect.dispatchEvent(new Event('change', { bubbles: true }));
-
                     selectModel(name);
                 }
+            }
+
+            // Tags direct invullen in inputveld
+            const tagInput = document.querySelector('input[name="tags_csv"]');
+            if (tagInput) {
+                tagInput.value = 'SYST - Promo, SYST - Extern, SYST - Webwinkelkeur';
+                console.log("🏷️ Tags ingevuld via inputveld");
             }
 
             console.log('✅ Klaar!');
@@ -151,4 +157,5 @@
             }
         }, intervalTime);
     }
+
 })();
