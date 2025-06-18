@@ -56,7 +56,7 @@
         }
       });
 
-      btn.textContent = `🔧 ${changed} stocks aangepast naar 0`;
+      btn.textContent = `🔧 ${changed} maten aangepast naar 0`;
       btn.style.backgroundColor = "#2ecc71";
       btn.disabled = true;
     });
