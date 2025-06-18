@@ -12,7 +12,6 @@
 (function () {
     'use strict';
 
-    // Voeg alleen toe op tabblad 1
     const observer = new MutationObserver(() => {
         const tab1 = document.querySelector('#tabs-1');
         const messageBestaatAl = document.querySelector('#magicMsg');
@@ -45,23 +44,24 @@
         console.log("▶️ Start script");
 
         try {
+            const nameInput = document.querySelector('input[name="name"]');
+            const localName = nameInput?.value.trim() || '';
+
             const html = await navigator.clipboard.readText();
             console.log("📋 HTML gekopieerd:", html.slice(0, 300));
 
             const dom = new DOMParser().parseFromString(html, 'text/html');
             const name = dom.querySelector('.pdp-details_heading')?.textContent.trim() || '';
-            console.log("🧾 Naam:", name);
-
-            const brandImg = dom.querySelector('.pdp-details_branding img');
-            const brandClass = brandImg?.classList?.[0] || 'onbekend';
-            const brandCapital = brandClass.charAt(0).toUpperCase() + brandClass.slice(1);
+            console.log("🧾 Naam leverancier:", name);
 
             const priceText = dom.querySelector('.pdp-details_price__discounted')?.textContent.replace(/[^\d,\.]/g, '') || '0.00';
             const rrpText = dom.querySelector('.pdp-details_price__offer')?.textContent.replace(/[^\d,\.]/g, '') || '0.00';
             const price = priceText.replace(',', '.');
             const rrp = rrpText.replace(',', '.');
 
-            const productCode = dom.querySelector('.pdp-details_product-code')?.nextElementSibling?.querySelector('span')?.textContent.trim() || '';
+            const productCode = [...dom.querySelectorAll('.pdp-details_product-code')]
+                .find(p => p.textContent.includes('Product Code'))
+                ?.querySelector('span')?.textContent.trim() || '';
 
             const aMatch = dom.querySelector('a');
             const reference = aMatch ? ` - [ext]` : '';
@@ -71,8 +71,10 @@
                 if (el) el.value = value;
             };
 
-            set('input[name="name"]', `${brandCapital} ${name}`);
-            set('input[name="title"]', `${brandCapital} ${name}`);
+            const fullTitle = `${localName} ${name}`.trim();
+
+            set('input[name="name"]', fullTitle);
+            set('input[name="title"]', fullTitle);
             set('input[name="price"]', rrp);
             set('input[name="price_advice"]', rrp);
             set('input[name="price_vip"]', '0.00');
@@ -91,7 +93,7 @@
             const brandSelect = document.querySelector('select[name="brand_id"]');
             if (brandSelect) {
                 const match = [...brandSelect.options].find(opt =>
-                    opt.text.trim().toLowerCase() === brandCapital.toLowerCase());
+                    opt.text.trim().toLowerCase() === localName.toLowerCase());
                 if (match) {
                     brandSelect.value = match.value;
                     brandSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -99,7 +101,6 @@
                 }
             }
 
-            // Tags direct invullen in inputveld
             const tagInput = document.querySelector('input[name="tags_csv"]');
             if (tagInput) {
                 tagInput.value = 'SYST - Promo, SYST - Extern, SYST - Webwinkelkeur';
