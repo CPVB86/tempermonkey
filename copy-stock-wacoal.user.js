@@ -69,4 +69,48 @@
   }
 
   window.addEventListener("load", () => setTimeout(createButton, 1500));
+
+    let override = false; // Voeg dit toe buiten de functie
+
+function copyHTML(button) {
+  const infoBlocks = [...document.querySelectorAll(".pdp-details_product-code")];
+
+  const pidBlock = infoBlocks.find(p => p.textContent.toLowerCase().includes("product code:"));
+  const dateBlock = infoBlocks.find(p => p.textContent.toLowerCase().includes("available date:"));
+
+  const pid = pidBlock?.querySelector("span")?.textContent?.trim();
+  const available = dateBlock?.querySelector("span")?.textContent?.trim().toUpperCase();
+
+  if (!pid) {
+    alert("❌ Geen Product Code gevonden.");
+    return;
+  }
+
+  if (available !== "NOW" && !override) {
+    button.innerText = "❌ Nog niet leverbaar!";
+    button.style.backgroundColor = "#E06666";
+    override = true; // Zet override aan voor volgende klik
+    return;
+  }
+
+  const table = document.querySelector("table.scroll-table__table");
+  if (!table) {
+    alert("❌ Geen voorraad­tabel gevonden.");
+    return;
+  }
+
+  const html = table.outerHTML;
+  const combined = `${pid}\n${html}`;
+
+  if (typeof GM_setClipboard !== "undefined") {
+    GM_setClipboard(combined, "text");
+  }
+
+  button.innerText = "📊 Stock + PID Gekopieerd!";
+  button.style.backgroundColor = "#2ecc71";
+  override = false; // Reset override na succesvolle kopie
+}
+
 })();
+
+
