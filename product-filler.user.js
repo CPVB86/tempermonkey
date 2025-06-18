@@ -26,7 +26,7 @@
 
         const msg = document.createElement('div');
         msg.id = 'magicMsg';
-        msg.textContent = '✨ Let the magic begin!';
+        msg.textContent = '✨';
         Object.assign(msg.style, {
             fontSize: '1.2em',
             fontWeight: 'bold',
