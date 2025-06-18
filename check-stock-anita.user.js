@@ -77,7 +77,7 @@
         });
 
         if (!matchingTable) {
-          alert(`❌ Geen tabel gevonden voor artikelnummer "${artikelnummer}" en kleurcode "${kleurCode}".`);
+          alert(`❌ Geen tabel gevonden voor artikelnummer "${artikelnummer}" en kleurcode "${kleurCode}". Controleer of je juiste HTML hebt geplakt.`);
           return;
         }
 
@@ -88,14 +88,10 @@
         rows.forEach(row => {
           const cupmaat = row.querySelector("th")?.textContent.trim();
           const cells = row.querySelectorAll("td");
-
           cells.forEach((td, i) => {
             const bandmaat = headers[i + 1];
-            if (!bandmaat || !cupmaat) return;
-
-            let maat = `${bandmaat} ${cupmaat}`.toUpperCase(); // Let op de SPATIE!
             const stock = parseInt(td.querySelector(".shop-in-stock")?.textContent.trim() || "0");
-
+            const maat = `${bandmaat}${cupmaat}`.replace(/\s+/g, "").toUpperCase();
             if (stock > 4) {
               supplierStatus.set(maat, "in_stock");
             } else if (stock > 0) {
@@ -122,11 +118,11 @@
           const eanInput = item.row.querySelector("input[name*='[barcode]']");
 
           if (item.stock > 0 && (!status || status === "out_of_stock" || status === "low_stock")) {
-            stockInput.style.backgroundColor = "#E06666";
+            stockInput.style.backgroundColor = "#E06666"; // rood
             eanInput.style.backgroundColor = "#E06666";
             afwijkingen++;
           } else if (item.stock === 0 && status === "in_stock") {
-            stockInput.style.backgroundColor = "#93C47D";
+            stockInput.style.backgroundColor = "#93C47D"; // groen
             eanInput.style.backgroundColor = "#93C47D";
             afwijkingen++;
           }
@@ -140,15 +136,15 @@
 
         if (afwijkingen > 0) {
           btn.textContent = `⚠️ Stock van ${brand} wijkt af!`;
-          btn.style.backgroundColor = "#f39c12";
+          btn.style.backgroundColor = "#f39c12"; // Oranje
         } else {
           btn.textContent = `📊 Stock van ${brand} gecheckt!`;
-          btn.style.backgroundColor = "#2ecc71";
+          btn.style.backgroundColor = "#2ecc71"; // Groen
         }
 
       } catch (e) {
         console.error("❌ Fout tijdens verwerken:", e);
-        alert(`Er ging iets mis bij het verwerken van de HTML voor ${brand}.`);
+        alert(`Er ging iets mis bij het verwerken van de geplakte HTML voor ${brand}.`);
       }
     });
   }
