@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Add Stock | Wacoal & co
-// @version      1.2
+// @version      1.3
 // @description  Vult voorraad in DDO automatisch op basis van HTML van de leverancier (dynamisch merk)
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
@@ -35,22 +35,31 @@
       border: none;
       border-radius: 5px;
       cursor: pointer;
-      display: block;
-      margin-bottom: 10px;
     `;
     tab.prepend(btn);
 
-    btn.addEventListener("click", () => {
-      const html = prompt(`📋 Plak hier de HTML van de ${brand} tabel:`);
-      if (!html) {
-        btn.textContent = `❌ Geen HTML geplakt`;
-        btn.style.backgroundColor = "#E06666"; // rood
-        return;
-      }
-
+    btn.addEventListener("click", async () => {
       try {
+        const clipboardText = await navigator.clipboard.readText();
+        if (!clipboardText) {
+          btn.textContent = `❌ Geen HTML op klembord`;
+          btn.style.backgroundColor = "#E06666";
+          return;
+        }
+
         const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
+        const doc = parser.parseFromString(clipboardText, "text/html");
+
+        // Controle op productnummer (PID)
+        const pidField = document.querySelector('#tabs-1 input[name="supplier_pid"]');
+        const currentPID = pidField?.value?.trim();
+        const htmlText = doc.body.textContent || doc.body.innerHTML;
+
+        if (!currentPID || !htmlText.includes(currentPID)) {
+          btn.textContent = `❌ PID mismatch of ontbreekt (${currentPID})`;
+          btn.style.backgroundColor = "#E06666";
+          return;
+        }
 
         const table = doc.querySelector("table.scroll-table__table");
         if (!table) throw new Error(`Geen geldige ${brand} HTML-tabel gevonden.`);
@@ -95,21 +104,17 @@
           if (voorraad !== undefined) {
             stockInput.value = voorraad;
             stockInput.dispatchEvent(new Event("input", { bubbles: true }));
-            console.log(`✅ Maat ${maatInput}: voorraad gezet op ${voorraad}`);
             updated++;
-          } else {
-            console.warn(`⚠️ Maat ${maatInput} niet gevonden in ${brand} tabel`);
           }
         });
 
-        // Feedback via button
-        btn.textContent = `🚛 Stock voor ${updated} maten ingevuld!`;
-        btn.style.backgroundColor = "#2ecc71"; // groen
+        btn.textContent = `✅ Stock voor ${updated} maten ingevuld`;
+        btn.style.backgroundColor = "#2ecc71";
 
       } catch (e) {
-        console.error(`❌ Fout bij verwerken van ${brand}:`, e);
-        btn.textContent = `❌ Fout bij verwerken van ${brand}`;
-        btn.style.backgroundColor = "#E06666"; // rood
+        console.error("❌ Fout bij verwerken:", e);
+        btn.textContent = `❌ Fout bij verwerking`;
+        btn.style.backgroundColor = "#E06666";
       }
     });
   }
