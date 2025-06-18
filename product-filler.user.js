@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Vul productdata automatisch in met knop
+// @name         Wacoal Product Filler
 // @version      1.5
 // @description  Plakt HTML uit het klembord en vult automatisch de velden op de backend in
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
