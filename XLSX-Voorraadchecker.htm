@@ -24,6 +24,7 @@
     h3 { margin-top: 2em; font-size: 16px; font-family: Arial, sans-serif; }
     tr.groen { background-color: #d4edda !important; }
     tr.rood { background-color: #f8d7da !important; }
+
   </style>
 </head>
 <body>
@@ -178,7 +179,6 @@ if (kopieMutatiesBtn) {
     const btn = document.createElement("button");
     btn.id = "check-lisca";
     btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Lisca`;
-    btn.style.backgroundColor = "#007cba";
     headerRight.insertBefore(btn, headerRight.firstChild);
 
     btn.addEventListener("click", async () => {
@@ -269,18 +269,6 @@ if (supplierStock > 4 && stock === 0) {
     const btn = document.createElement("button");
     btn.id = "check-wacoal-btn";
     btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Wacoal`;
-    btn.style.background = "#007cba";
-    btn.style.color = "white";
-    btn.style.fontWeight = "bold";
-    btn.style.border = "none";
-    btn.style.borderRadius = "6px";
-    btn.style.cursor = "pointer";
-    btn.style.padding = "0 12px";
-    btn.style.height = "35px";
-    btn.style.transition = "background 0.3s";
-    btn.style.display = "flex";
-    btn.style.alignItems = "center";
-    btn.style.gap = "6px";
     // Voeg de knop TOE als eerste child (dus links van kopie/refresh)
     headerRight.insertBefore(btn, headerRight.firstChild);
 
@@ -422,66 +410,63 @@ if (supplierStock > 4 && stock === 0) {
     const btn = document.createElement("button");
     btn.id = "check-anita-btn";
     btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Anita Check`;
-    btn.style.background = "#e91e63";
-    btn.style.color = "white";
-    btn.style.fontWeight = "bold";
-    btn.style.border = "none";
-    btn.style.borderRadius = "6px";
-    btn.style.cursor = "pointer";
-    btn.style.padding = "0 12px";
-    btn.style.height = "35px";
-    btn.style.transition = "background 0.3s";
-    btn.style.display = "flex";
-    btn.style.alignItems = "center";
-    btn.style.gap = "6px";
     headerRight.insertBefore(btn, headerRight.firstChild);
 
     btn.addEventListener("click", async () => {
       let html;
       try {
-        const clipboardItems = await navigator.clipboard.read();
-        const htmlItem = clipboardItems.find(item => item.types.includes("text/html"));
-        if (!htmlItem) throw new Error("Geen HTML gevonden in klembord!");
-        html = await htmlItem.getType("text/html").then(blob => blob.text());
-        if (!html) throw new Error("HTML-klembord is leeg!");
+        html = await navigator.clipboard.readText();
+        if (!html) throw new Error("Klembord is leeg!");
       } catch (err) {
-        alert("🚫 Geen toegang tot HTML-klembord of niets gevonden. Geef toestemming in je browser.");
+        alert("🚫 Geen toegang tot klembord of niets gevonden. Geef toestemming in je browser.");
         return;
       }
 
       try {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, "text/html");
-        const supplierTables = [...doc.querySelectorAll("table[data-supplier-id], table[id]")];
-        console.log(`[ANITA] Aantal tabellen in leverancier-html (data-supplier-id of id):`, supplierTables.length);
+        const supplierTables = [...doc.querySelectorAll("table[data-article-number]")];
+        console.log(`[ANITA] Aantal tabellen in leverancier-html:`, supplierTables.length);
 
         let verschillen = 0;
         let vergeleken = 0;
 
         for (const supplierTable of supplierTables) {
-          const supplierId = supplierTable.getAttribute("data-supplier-id") || supplierTable.id || "";
-          if (!supplierId) {
-            console.log(`[ANITA] ⚠️ Geen supplierId gevonden voor een tabel, sla over.`);
+          const art = supplierTable.getAttribute("data-article-number") || "";
+          const color = supplierTable.getAttribute("data-color-number") || "";
+          const supplierId = `${art}-${color}`;
+
+          if (!supplierId || supplierId === "-") {
+            console.log(`[ANITA] ⚠️ Geen artikel/kleur combinatie, sla over`);
             continue;
           }
+
           const ownTable = document.querySelector(`table#${CSS.escape(supplierId)}`);
           if (!ownTable) {
-            console.log(`[ANITA] ⏭️ Geen eigen tabel voor supplierId ${supplierId}, sla over.`);
+            console.log(`[ANITA] ⏭️ Geen eigen tabel voor ${supplierId}, sla over.`);
             continue;
           }
           vergeleken++;
           console.log(`[ANITA] ✅ Vergelijken met eigen tabel: #${supplierId}`);
 
-          const supplierRows = [...supplierTable.querySelectorAll("tbody tr")];
+          const headers = [...supplierTable.querySelectorAll("thead th")].map(h => h.textContent.trim()).slice(1, -1);
           const leverancierStockMap = new Map();
-          supplierRows.forEach(row => {
+
+          [...supplierTable.querySelectorAll("tbody tr")].forEach(row => {
+            const cup = row.querySelector("th")?.textContent.trim().toUpperCase();
             const tds = row.querySelectorAll("td");
-            if (tds.length < 2) return;
-            const size = (tds[0].textContent || "").trim().toUpperCase();
-            const voorraad = parseInt((tds[1].textContent || "").trim()) || 0;
-            if (size) leverancierStockMap.set(size, voorraad);
+            tds.forEach((td, i) => {
+              const bandmaat = headers[i];
+              const input = td.querySelector("input");
+              const voorraad = parseInt(input?.dataset.inStock || "0");
+              const maat = `${bandmaat}${cup}`;
+              leverancierStockMap.set(maat, voorraad);
+            });
           });
+
           console.log(`[ANITA] Leverancier-maten voor ${supplierId}:`, [...leverancierStockMap.entries()]);
+
+          let eersteAfwijking;
 
           ownTable.querySelectorAll("tbody tr").forEach(row => {
             const sizeTd = row.querySelector("td:nth-child(1)");
@@ -501,15 +486,20 @@ if (supplierStock > 4 && stock === 0) {
             if (ownStock > 0 && leverancierStock === 0) {
               [sizeTd, stockTd, eanTd].forEach(td => { if (td) td.style.background = "#E06666"; });
               verschillen++;
+              eersteAfwijking ??= sizeTd;
               console.log(`[ANITA] 🔴 Bij ons voorraad (${ownStock}) maar leverancier 0 [${size}]`);
             } else if (ownStock === 0 && leverancierStock > 0) {
               [sizeTd, stockTd, eanTd].forEach(td => { if (td) td.style.background = "#93C47D"; });
               verschillen++;
+              eersteAfwijking ??= sizeTd;
               console.log(`[ANITA] 🟢 Leverancier voorraad (${leverancierStock}) maar bij ons 0 [${size}]`);
             } else {
               console.log(`[ANITA] ✅ Gelijk (${ownStock} vs ${leverancierStock}) [${size}]`);
             }
           });
+
+          if (eersteAfwijking) eersteAfwijking.scrollIntoView({ behavior: "smooth", block: "center" });
+          zetGroenVinkjeOpTabel(supplierId);
         }
 
         console.log(`[ANITA] ${vergeleken} van de ${supplierTables.length} tabellen worden vergeleken.`);
@@ -518,12 +508,12 @@ if (supplierStock > 4 && stock === 0) {
           btn.textContent = `📊 Afwijkingen!`;
           btn.style.backgroundColor = "#f39c12";
         } else {
-          btn.textContent = `📊 Anita OK!`;
+          btn.textContent = `✅ Anita OK!`;
           btn.style.backgroundColor = "#2ecc71";
         }
         setTimeout(() => {
           btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Anita Check`;
-          btn.style.backgroundColor = "#e91e63";
+          btn.style.backgroundColor = "#007bff";
         }, 2000);
 
       } catch (e) {
