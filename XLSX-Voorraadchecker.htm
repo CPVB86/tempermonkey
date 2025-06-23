@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Voorraadoverzicht XLSX Import</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; background: #fafafa; color: #333; }
+    h1.title { font-family: 'Orbitron', sans-serif; font-size: 20px; margin: 0; padding-left: 30px; }
+    .header { position: sticky; top: 0; background: #fff; height: 50px; border-bottom: 1px solid #ccc; z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; }
+    .header-right { display: flex; gap: 10px; }
+    .header button { height: 35px; border: none; background: #007bff; color: white; font-size: 14px; padding: 0 12px; border-radius: 6px; cursor: pointer; transition: background 0.3s; display: flex; align-items: center; gap: 6px; }
+    .header button:hover { background: #2e7d32; }
+    .upload-container { display: flex; align-items: center; justify-content: center; height: 100vh; background: #f4f4f4; }
+    .drop-zone { border: 2px dashed #aaa; padding: 2em; cursor: pointer; background: #fff; border-radius: 8px; text-align: center; max-width: 90%; transition: 0.3s; }
+    .drop-zone:hover { background: #eee; border-color: #666; }
+    .output { padding: 2em; }
+    table { border-collapse: collapse; margin-bottom: 2em; font-size: 12px; font-family: Arial, sans-serif; width: 350px; }
+    th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; }
+    th:nth-child(1), td:nth-child(1), th:nth-child(2), td:nth-child(2) { width: 75px; }
+    th:nth-child(3), td:nth-child(3) { width: 125px; }
+    h3 { margin-top: 2em; font-size: 16px; font-family: Arial, sans-serif; }
+    tr.groen { background-color: #d4edda !important; }
+    tr.rood { background-color: #f8d7da !important; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 class="title">XLSX Voorraadchecker</h1>
+    <div class="header-right">
+      <button id="kopieMutaties"><i class="fas fa-copy"></i></button>
+      <button id="refresh"><i class="fas fa-redo-alt"></i></button>
+    </div>
+  </div>
+  <div class="upload-container" id="upload-container">
+    <div class="drop-zone" id="drop-zone">Sleep je Excelbestand hierheen of klik om te uploaden</div>
+    <input type="file" id="file-input" accept=".xlsx" style="display: none;">
+  </div>
+  <div class="output" id="output"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const output = document.getElementById('output');
+    const uploadContainer = document.getElementById('upload-container');
+    const refreshBtn = document.getElementById('refresh');
+    let voorraadData = {};
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.background = '#e0e0e0'; dropZone.style.borderColor = '#555'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.background = '#fff'; dropZone.style.borderColor = '#aaa'; });
+    dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.background = '#fff'; dropZone.style.borderColor = '#aaa'; handleFile(e.dataTransfer.files[0]); });
+    fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+    refreshBtn.addEventListener('click', () => location.reload());
+
+    function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const rows = json.slice(1);
+        const grouped = {};
+
+        rows.forEach(row => {
+          const model = row[1];
+          const supplierId = row[2];
+          const color = row[3];
+          const size = row[4];
+          const stock = row[5];
+          const ean = row[8];
+          const productId = row[9];
+
+          if (!model || !supplierId || !productId) return;
+
+          const groupId = productId.toString().substring(0, 5);
+          const key = `${model}||${supplierId}||${color}||${groupId}`;
+          if (!grouped[key]) grouped[key] = [];
+
+          // FIX: alleen size als string pushen
+          grouped[key].push({ size: (size !== undefined && size !== null ? String(size) : ""), stock, ean, productId });
+          if (typeof size === "string" && size) voorraadData[size.toUpperCase()] = parseInt(stock) || 0;
+        });
+
+        output.innerHTML = '';
+        Object.entries(grouped).forEach(([key, items]) => {
+          const [model, supplierId, color, groupId] = key.split('||');
+          const firstProductId = items[0].productId;
+
+          const table = document.createElement('table');
+          table.id = supplierId;
+          table.innerHTML = `
+            <thead>
+              <tr><th colspan="3">${model} ${color} – ${supplierId} – <a href="https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=${firstProductId}" target="_blank">${groupId}</a></th></tr>
+              <tr><th>Size</th><th>Stock</th><th>EAN</th></tr>
+            </thead>
+            <tbody>
+              ${items.map(item => `
+                <tr data-size="${item.size ? String(item.size).toUpperCase() : ''}">
+                  <td>${item.size || ""}</td>
+                  <td>${item.stock}</td>
+                  <td>${item.ean}</td>
+                </tr>`).join('')}
+            </tbody>
+          `;
+          output.appendChild(table);
+        });
+
+        uploadContainer.style.display = 'none';
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  </script>
+
+  <script>
+const kopieMutatiesBtn = document.getElementById('kopieMutaties');
+if (kopieMutatiesBtn) {
+  kopieMutatiesBtn.addEventListener("click", async () => {
+    // Pak alle EAN en voorraad uit ALLE tabellen
+    const rows = [...document.querySelectorAll("table tr[data-size]")];
+    const lines = [];
+    rows.forEach(row => {
+      const tds = row.querySelectorAll("td");
+      if (tds.length < 3) return;
+      const eanTd = tds[2];
+      const stockTd = tds[1];
+      const ean = eanTd.textContent.trim();
+      const stock = parseInt(stockTd.textContent.trim() || "0");
+      const bgColor = eanTd.style.backgroundColor || "";
+      // Exact kleuren volgens het userscript
+      if (bgColor === "rgb(147, 196, 125)") {
+        lines.push(`${ean}\t2`);
+      } else if (
+        bgColor === "rgb(224, 102, 102)" ||
+        bgColor === "rgb(255, 217, 102)"
+      ) {
+        if (stock > 0) {
+          lines.push(`${ean}\t-${stock}`);
+        } else {
+          lines.push(`${ean}\t-2`);
+        }
+      }
+    });
+
+    if (lines.length === 0) {
+      kopieMutatiesBtn.textContent = "⚠️ Geen mutaties gevonden";
+      kopieMutatiesBtn.style.backgroundColor = "#e06666";
+      return;
+    }
+
+    const text = lines.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      kopieMutatiesBtn.textContent = "✅ Mutaties gekopieerd!";
+      kopieMutatiesBtn.style.backgroundColor = "#2ecc71";
+    } catch (err) {
+      console.error("Fout bij kopiëren naar klembord", err);
+      kopieMutatiesBtn.textContent = "❌ Kopieerfout";
+      kopieMutatiesBtn.style.backgroundColor = "#e06666";
+    }
+  });
+}
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // Voeg de knop toe in de header naast de bestaande knoppen, maar alleen als hij er nog niet staat.
+  function addLiscaButton() {
+    if (document.getElementById("check-lisca")) return;
+    const headerRight = document.querySelector(".header-right");
+    if (!headerRight) return;
+    const btn = document.createElement("button");
+    btn.id = "check-lisca";
+    btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Lisca`;
+    btn.style.backgroundColor = "#007cba";
+    headerRight.insertBefore(btn, headerRight.firstChild);
+
+    btn.addEventListener("click", async () => {
+      try {
+        const clipboardText = await navigator.clipboard.readText();
+        if (!clipboardText) return alert("📋 Klembord is leeg of bevat geen geldige CSV.");
+
+        // Parse CSV (EAN \t voorraad)
+        const lines = clipboardText.trim().split("\n").filter(Boolean);
+        const eanMap = new Map();
+        lines.forEach(line => {
+          const [ean, koli] = line.trim().split("\t");
+          if (ean && koli) eanMap.set(ean.trim(), parseInt(koli.trim(), 10));
+        });
+
+        // Loop door alle tabellen in de output
+        document.querySelectorAll("#output table").forEach(table => {
+          table.querySelectorAll("tbody tr").forEach(row => {
+            const tds = row.querySelectorAll("td");
+            if (tds.length < 3) return;
+            const sizeTd = tds[0];
+            const stockTd = tds[1];
+            const eanTd = tds[2];
+            const ean = eanTd.textContent.trim();
+            const stock = parseInt(stockTd.textContent.trim() || "0");
+
+            // Reset oude kleuren
+            [eanTd, stockTd, sizeTd].forEach(td => td.style.backgroundColor = "");
+
+            if (!ean) return;
+            const inCSV = eanMap.has(ean);
+
+            if (!inCSV) {
+              // EAN niet gevonden in CSV
+              if (stock === 0) return; // Negeren als voorraad bij ons ook 0
+              eanTd.style.backgroundColor = "#FFD966";
+              stockTd.style.backgroundColor = "#FFD966";
+              sizeTd.style.backgroundColor = "#FFD966";
+              row.classList.remove("lisca-groen", "lisca-rood");
+              row.classList.add("lisca-onbekend");
+              return;
+            }
+
+            const supplierStock = eanMap.get(ean);
+
+if (supplierStock > 4 && stock === 0) {
+  eanTd.style.backgroundColor = "#93C47D";
+  stockTd.style.backgroundColor = "#93C47D";
+  sizeTd.style.backgroundColor = "#93C47D"; // <-- voeg toe
+  row.classList.remove("lisca-onbekend", "lisca-rood");
+  row.classList.add("lisca-groen");
+} else if (supplierStock < 5 && stock > 0) {
+  eanTd.style.backgroundColor = "#E06666";
+  stockTd.style.backgroundColor = "#E06666";
+  sizeTd.style.backgroundColor = "#E06666"; // <-- voeg toe
+  row.classList.remove("lisca-onbekend", "lisca-groen");
+  row.classList.add("lisca-rood");
+} else {
+  row.classList.remove("lisca-onbekend", "lisca-groen", "lisca-rood");
+}
+          });
+        });
+
+        btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Lisca gecheckt!`;
+        btn.style.backgroundColor = "#2ecc71";
+        btn.disabled = true;
+        document.querySelectorAll("#output table").forEach(table => {
+  zetGroenVinkjeOpTabel(table.id);
+});
+      } catch (e) {
+        alert("📋 Klembord uitlezen is mislukt of niet toegestaan door browser.");
+      }
+    });
+  }
+
+  window.addEventListener("DOMContentLoaded", addLiscaButton);
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  // Knop niet dubbel toevoegen
+  if (!document.getElementById("check-wacoal-btn")) {
+    // Zoek de header-right DIV
+    const headerRight = document.querySelector('.header-right');
+    // Maak de button
+    const btn = document.createElement("button");
+    btn.id = "check-wacoal-btn";
+    btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Wacoal`;
+    btn.style.background = "#007cba";
+    btn.style.color = "white";
+    btn.style.fontWeight = "bold";
+    btn.style.border = "none";
+    btn.style.borderRadius = "6px";
+    btn.style.cursor = "pointer";
+    btn.style.padding = "0 12px";
+    btn.style.height = "35px";
+    btn.style.transition = "background 0.3s";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.gap = "6px";
+    // Voeg de knop TOE als eerste child (dus links van kopie/refresh)
+    headerRight.insertBefore(btn, headerRight.firstChild);
+
+    btn.addEventListener("click", async () => {
+      let html;
+      try {
+        html = await navigator.clipboard.readText();
+        if (!html) throw new Error("Klembord is leeg!");
+      } catch (err) {
+        alert("🚫 Geen toegang tot klembord of niets gevonden. Geef toestemming in je browser.");
+        console.error(err);
+        return;
+      }
+
+      try {
+        const lines = html.trim().split("\n");
+        const pastedSupplierId = lines[0]?.trim().toUpperCase();
+        const restHTML = lines.slice(1).join("\n");
+
+        // Zoek juiste tabel in onze eigen HTML via supplierId (ID van table)
+        const matchingTable = document.querySelector(`table#${CSS.escape(pastedSupplierId)}`);
+        scrollTableWithOffset(matchingTable, 60);
+
+        if (!matchingTable) {
+          btn.textContent = `Geen overeenkomst!`;
+          btn.style.backgroundColor = "#e06666";
+          setTimeout(() => {
+            btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Wacoal`;
+            btn.style.backgroundColor = "#007cba";
+          }, 2000);
+          alert(`❌ Geen overeenkomst gevonden!\nKon geen tabel vinden met SupplierID: ${pastedSupplierId}`);
+          return;
+        }
+
+        // Verwerk de geplakte HTML van leverancier
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(restHTML, "text/html");
+        const table = doc.querySelector("table.scroll-table__table");
+        if (!table) throw new Error(`Geen geldige Wacoal HTML-tabel gevonden.`);
+
+        const headers = [...table.querySelectorAll("thead th")].map(th => th.textContent.trim().toUpperCase());
+        const rows = [...table.querySelectorAll("tbody tr")];
+
+        const supplierStatus = new Map();
+        const is2D = rows.length > 1 && headers.length > 1;
+
+        if (is2D) {
+          rows.forEach(row => {
+            const bandmaat = row.querySelector("th")?.textContent.trim();
+            const cells = row.querySelectorAll("td");
+            cells.forEach((td, i) => {
+              const cupmaat = headers[i + 1];
+              let maat = `${bandmaat}${cupmaat}`.replace(/\s+/g, "").toUpperCase();
+              if (maat === "1") maat = "ONE SIZE";
+              const klass = td.querySelector("div")?.classList.value || "";
+              if (klass.includes("in_stock")) supplierStatus.set(maat, "in_stock");
+              else if (klass.includes("within_stage1")) supplierStatus.set(maat, "within_stage1");
+              else if (klass.includes("within_stage2")) supplierStatus.set(maat, "within_stage2");
+              else if (klass.includes("out_of_stock")) supplierStatus.set(maat, "out_of_stock");
+            });
+          });
+        } else {
+          const cells = [...table.querySelectorAll("tbody td")];
+          cells.forEach((td, i) => {
+            let maat = headers[i] || `COL${i}`;
+            maat = maat.trim().toUpperCase();
+            if (maat === "1") maat = "ONE SIZE";
+            const klass = td.querySelector("div")?.classList.value || "";
+            if (klass.includes("in_stock")) supplierStatus.set(maat, "in_stock");
+            else if (klass.includes("within_stage1")) supplierStatus.set(maat, "within_stage1");
+            else if (klass.includes("within_stage2")) supplierStatus.set(maat, "within_stage2");
+            else if (klass.includes("out_of_stock")) supplierStatus.set(maat, "out_of_stock");
+          });
+        }
+
+        let verschilGevonden = false;
+        matchingTable.querySelectorAll("tbody tr").forEach(row => {
+          const sizeTd = row.querySelector("td:nth-child(1)");
+          const stockTd = row.querySelector("td:nth-child(2)");
+          const eanTd = row.querySelector("td:nth-child(3)");
+          const maat = (sizeTd?.textContent || '').trim().toUpperCase();
+          const voorraad = parseInt((stockTd?.textContent || '').trim()) || 0;
+          const status = supplierStatus.get(maat);
+
+          // Reset kleuren
+          sizeTd.style.background = "";
+          stockTd.style.background = "";
+          eanTd.style.background = "";
+
+          if (maat) {
+            if (voorraad > 0 && status !== "in_stock") {
+              sizeTd.style.background = "#E06666";
+              stockTd.style.background = "#E06666";
+              eanTd.style.background = "#E06666";
+              verschilGevonden = true;
+            } else if (voorraad === 0 && status === "in_stock") {
+              sizeTd.style.background = "#93C47D";
+              stockTd.style.background = "#93C47D";
+              eanTd.style.background = "#93C47D";
+              verschilGevonden = true;
+            }
+          }
+        });
+
+        if (verschilGevonden) {
+          btn.textContent = `📊 Stock wijkt af!`;
+          btn.style.backgroundColor = "#f39c12";
+        } else {
+          btn.textContent = `📊 Stock gecheckt!`;
+          btn.style.backgroundColor = "#2ecc71";
+          zetGroenVinkjeOpTabel(matchingTable.id);
+        }
+        // Reset knopkleur en tekst na 2 seconden
+        setTimeout(() => {
+          btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Wacoal`;
+          btn.style.backgroundColor = "#007cba";
+        }, 2000);
+
+      } catch (e) {
+        console.error(`❌ Fout tijdens verwerken Wacoal:`, e);
+        btn.textContent = `Fout bij check!`;
+        btn.style.backgroundColor = "#e06666";
+        setTimeout(() => {
+          btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Check Wacoal`;
+          btn.style.backgroundColor = "#007cba";
+        }, 2000);
+        alert(`Er ging iets mis bij het verwerken van de geplakte HTML voor Wacoal.\n\n${e}`);
+      }
+    });
+  }
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  if (!document.getElementById("check-anita-btn")) {
+    const headerRight = document.querySelector('.header-right');
+    const btn = document.createElement("button");
+    btn.id = "check-anita-btn";
+    btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Anita Check`;
+    btn.style.background = "#e91e63";
+    btn.style.color = "white";
+    btn.style.fontWeight = "bold";
+    btn.style.border = "none";
+    btn.style.borderRadius = "6px";
+    btn.style.cursor = "pointer";
+    btn.style.padding = "0 12px";
+    btn.style.height = "35px";
+    btn.style.transition = "background 0.3s";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.gap = "6px";
+    headerRight.insertBefore(btn, headerRight.firstChild);
+
+    btn.addEventListener("click", async () => {
+      let html;
+      try {
+        const clipboardItems = await navigator.clipboard.read();
+        const htmlItem = clipboardItems.find(item => item.types.includes("text/html"));
+        if (!htmlItem) throw new Error("Geen HTML gevonden in klembord!");
+        html = await htmlItem.getType("text/html").then(blob => blob.text());
+        if (!html) throw new Error("HTML-klembord is leeg!");
+      } catch (err) {
+        alert("🚫 Geen toegang tot HTML-klembord of niets gevonden. Geef toestemming in je browser.");
+        return;
+      }
+
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+        const supplierTables = [...doc.querySelectorAll("table[data-supplier-id], table[id]")];
+        console.log(`[ANITA] Aantal tabellen in leverancier-html (data-supplier-id of id):`, supplierTables.length);
+
+        let verschillen = 0;
+        let vergeleken = 0;
+
+        for (const supplierTable of supplierTables) {
+          const supplierId = supplierTable.getAttribute("data-supplier-id") || supplierTable.id || "";
+          if (!supplierId) {
+            console.log(`[ANITA] ⚠️ Geen supplierId gevonden voor een tabel, sla over.`);
+            continue;
+          }
+          const ownTable = document.querySelector(`table#${CSS.escape(supplierId)}`);
+          if (!ownTable) {
+            console.log(`[ANITA] ⏭️ Geen eigen tabel voor supplierId ${supplierId}, sla over.`);
+            continue;
+          }
+          vergeleken++;
+          console.log(`[ANITA] ✅ Vergelijken met eigen tabel: #${supplierId}`);
+
+          const supplierRows = [...supplierTable.querySelectorAll("tbody tr")];
+          const leverancierStockMap = new Map();
+          supplierRows.forEach(row => {
+            const tds = row.querySelectorAll("td");
+            if (tds.length < 2) return;
+            const size = (tds[0].textContent || "").trim().toUpperCase();
+            const voorraad = parseInt((tds[1].textContent || "").trim()) || 0;
+            if (size) leverancierStockMap.set(size, voorraad);
+          });
+          console.log(`[ANITA] Leverancier-maten voor ${supplierId}:`, [...leverancierStockMap.entries()]);
+
+          ownTable.querySelectorAll("tbody tr").forEach(row => {
+            const sizeTd = row.querySelector("td:nth-child(1)");
+            const stockTd = row.querySelector("td:nth-child(2)");
+            const eanTd = row.querySelector("td:nth-child(3)");
+            const size = (sizeTd?.textContent || "").trim().toUpperCase();
+            const ownStock = parseInt((stockTd?.textContent || "").trim()) || 0;
+            const leverancierStock = leverancierStockMap.get(size);
+
+            [sizeTd, stockTd, eanTd].forEach(td => { if (td) td.style.background = ""; });
+
+            if (leverancierStock === undefined) {
+              console.log(`[ANITA] Maat ${size} komt niet voor in leverancier, sla over`);
+              return;
+            }
+
+            if (ownStock > 0 && leverancierStock === 0) {
+              [sizeTd, stockTd, eanTd].forEach(td => { if (td) td.style.background = "#E06666"; });
+              verschillen++;
+              console.log(`[ANITA] 🔴 Bij ons voorraad (${ownStock}) maar leverancier 0 [${size}]`);
+            } else if (ownStock === 0 && leverancierStock > 0) {
+              [sizeTd, stockTd, eanTd].forEach(td => { if (td) td.style.background = "#93C47D"; });
+              verschillen++;
+              console.log(`[ANITA] 🟢 Leverancier voorraad (${leverancierStock}) maar bij ons 0 [${size}]`);
+            } else {
+              console.log(`[ANITA] ✅ Gelijk (${ownStock} vs ${leverancierStock}) [${size}]`);
+            }
+          });
+        }
+
+        console.log(`[ANITA] ${vergeleken} van de ${supplierTables.length} tabellen worden vergeleken.`);
+
+        if (verschillen > 0) {
+          btn.textContent = `📊 Afwijkingen!`;
+          btn.style.backgroundColor = "#f39c12";
+        } else {
+          btn.textContent = `📊 Anita OK!`;
+          btn.style.backgroundColor = "#2ecc71";
+        }
+        setTimeout(() => {
+          btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Anita Check`;
+          btn.style.backgroundColor = "#e91e63";
+        }, 2000);
+
+      } catch (e) {
+        console.error("❌ Anita-check error:", e);
+        btn.textContent = `Fout!`;
+        btn.style.backgroundColor = "#e06666";
+        setTimeout(() => {
+          btn.innerHTML = `<i class="fas fa-clipboard-check"></i> Anita Check`;
+          btn.style.backgroundColor = "#e91e63";
+        }, 2000);
+        alert("Er ging iets mis tijdens de Anita-check:\n" + e);
+      }
+    });
+  }
+})();
+</script>
+
+
+
+
+
+
+
+<script>
+// Zet een groen vinkje in de table-header (h3-stijl: <th colspan="3">...</th>) RECHTS
+function zetGroenVinkjeOpTabel(supplierId) {
+  const table = document.getElementById(supplierId);
+  if (!table) return;
+  // Zoek de eerste th (header van de tabel, colspan=3)
+  const th = table.querySelector("thead tr:first-child th");
+  if (!th) return;
+  // Voeg het vinkje toe als het nog niet bestaat
+  if (!th.querySelector('.header-vinkje')) {
+    const vinkje = document.createElement('span');
+    vinkje.className = 'header-vinkje';
+    vinkje.innerHTML = `<i class="fas fa-check" style="color:#2ecc71; font-size: 18px; float: right; margin-left: 12px; margin-right: 0;"></i>`;
+    th.appendChild(vinkje);
+  }
+}
+</script>
+
+<script>
+function scrollTableWithOffset(tableElem, offset = 60) {
+  const rect = tableElem.getBoundingClientRect();
+  const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  const top = rect.top + scrollTop - offset;
+  window.scrollTo({ top, behavior: "smooth" });
+}
+</script>
+
+</body>
+</html>
