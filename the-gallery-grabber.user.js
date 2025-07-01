@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         🧙‍♂️ The Gallery Grabber
+// @name         🧙‍♂️ The Gallery Grabber - Wacoal
 // @version      2.1
 // @description  Download alle 1200px productfoto's van Wacoal los en netjes, met statusknop rechtsboven.
 // @match        https://b2b.wacoal-europe.com/*
