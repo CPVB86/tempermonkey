@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧙‍♂️ The Gallery Grabber – Anita
-// @version      2.1
+// @version      2.2
 // @description  wnload RGB Medium images from filtered gallery view, triggered by button or redirect if filters not active
 // @match        https://b2b.anita.com/nl/zoeken*
 // @grant        none
