@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧙‍♂️ The Gallery Grabber – Anita
-// @version      2.3
+// @version      2.4
 // @description  wnload RGB Medium images from filtered gallery view, triggered by button or redirect if filters not active
 // @match        https://b2b.anita.com/nl/zoeken*
 // @grant        none
@@ -21,7 +21,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'galleryFilterRedirect';
-    btn.innerText = '🧙‍♂️ Voeg filters toe';
+    btn.innerText = '➡️ Voeg filters toe';
     Object.assign(btn.style, {
       position: 'fixed',
       top: '20px',
@@ -48,7 +48,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'galleryGrabberButton';
-    btn.innerText = '🧙‍♂️ Download afbeeldingen';
+    btn.innerText = '📥 Download afbeeldingen';
     Object.assign(btn.style, {
       position: 'fixed',
       top: '20px',
@@ -108,10 +108,7 @@
     console.log('[Gallery Grabber] 🚀 Downloads gestart.');
   }
 
-  function waitForResultsAndInjectButton() {
-    const target = document.querySelector('.results-list');
-    if (!target) return;
-
+  function observeResultsAndInjectButton() {
     const observer = new MutationObserver(() => {
       const entries = document.querySelectorAll('.results-entry');
       if (entries.length > 0) {
@@ -120,19 +117,20 @@
       }
     });
 
-    observer.observe(target, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true });
 
     // fallback
     setTimeout(() => {
-      if (!document.getElementById('galleryGrabberButton')) {
+      const entries = document.querySelectorAll('.results-entry');
+      if (entries.length > 0 && !document.getElementById('galleryGrabberButton')) {
         createDownloadButton();
       }
-    }, 3000);
+    }, 5000);
   }
 
   window.addEventListener('load', () => {
     if (hasFilters) {
-      waitForResultsAndInjectButton();
+      observeResultsAndInjectButton();
     } else {
       createRedirectButton();
     }
