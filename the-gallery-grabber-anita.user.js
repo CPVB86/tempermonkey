@@ -2,7 +2,7 @@
 // @name         🧙‍♂️ The Gallery Grabber – Anita
 // @version      2.1
 // @description  wnload RGB Medium images from filtered gallery view, triggered by button or redirect if filters not active
-// @match        https://b2b-eu.lisca.com/*
+// @match        https://b2b.anita.com/nl/zoeken*
 // @grant        none
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-anita.user.js
