@@ -21,7 +21,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'galleryFilterRedirect';
-    btn.innerText = '🧙‍ Voeg filters toe';
+    btn.innerText = '🧙‍♂️ Voeg filters toe';
     Object.assign(btn.style, {
       position: 'fixed',
       top: '20px',
@@ -48,7 +48,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'galleryGrabberButton';
-    btn.innerText = '🧙‍ Download afbeeldingen';
+    btn.innerText = '🧙‍♂️ Download afbeeldingen';
     Object.assign(btn.style, {
       position: 'fixed',
       top: '20px',
@@ -108,9 +108,31 @@
     console.log('[Gallery Grabber] 🚀 Downloads gestart.');
   }
 
+  function waitForResultsAndInjectButton() {
+    const target = document.querySelector('.results-list');
+    if (!target) return;
+
+    const observer = new MutationObserver(() => {
+      const entries = document.querySelectorAll('.results-entry');
+      if (entries.length > 0) {
+        observer.disconnect();
+        createDownloadButton();
+      }
+    });
+
+    observer.observe(target, { childList: true, subtree: true });
+
+    // fallback
+    setTimeout(() => {
+      if (!document.getElementById('galleryGrabberButton')) {
+        createDownloadButton();
+      }
+    }, 3000);
+  }
+
   window.addEventListener('load', () => {
     if (hasFilters) {
-      createDownloadButton();
+      waitForResultsAndInjectButton();
     } else {
       createRedirectButton();
     }
