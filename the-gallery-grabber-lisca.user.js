@@ -12,6 +12,33 @@
 (function () {
   'use strict';
 
+  function log(...args) {
+    console.log('[Lisca Grabber]', ...args);
+  }
+
+  function findImageData() {
+    const scripts = document.querySelectorAll('script[type="text/x-magento-init"]');
+
+    for (let script of scripts) {
+      try {
+        const txt = script.textContent.trim();
+        if (!txt.includes('"mage/gallery/gallery"')) continue;
+
+        const parsed = JSON.parse(txt);
+        const gallery = parsed?.["[data-gallery-role=gallery-placeholder]"]?.["mage/gallery/gallery"];
+        if (gallery?.data?.length) {
+          log(`✅ ${gallery.data.length} afbeeldingen gevonden`);
+          return gallery.data;
+        }
+      } catch (err) {
+        log('⚠️ Fout bij JSON parse:', err);
+      }
+    }
+
+    log('❌ Geen geldige afbeeldingendata gevonden.');
+    return null;
+  }
+
   function initDownloadButton() {
     if (document.getElementById("lisca-download-btn")) return;
 
@@ -42,46 +69,35 @@
       btn.style.backgroundColor = "#ff8c00";
       btn.dataset.locked = "true";
 
-      // Zoek het juiste script element
-      const scripts = document.querySelectorAll('script[type="text/x-magento-init"]');
-      let json = null;
-
-      for (let s of scripts) {
-        try {
-          const parsed = JSON.parse(s.textContent);
-          if (parsed["[data-gallery-role=gallery-placeholder]"]?.["mage/gallery/gallery"]?.data) {
-            json = parsed["[data-gallery-role=gallery-placeholder]"]["mage/gallery/gallery"].data;
-            break;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-
-      if (!json || json.length === 0) {
-        btn.innerText = "⚠️ Geen afbeeldingen gevonden";
+      const imageData = findImageData();
+      if (!imageData || imageData.length === 0) {
+        btn.innerText = "⚠️ Geen foto's";
         btn.style.backgroundColor = "gray";
         return;
       }
 
-      // Probeer een productcode uit de caption of fallback
-      const productCode = json[0].caption?.replace(/\s+/g, "_") || "lisca_product";
-
-      const urls = json.map((img) => img.full).filter(Boolean);
+      const productCode = imageData[0].caption?.replace(/\s+/g, "_") || "lisca_product";
+      const urls = imageData.map((img) => img.full).filter(Boolean);
 
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
+        log(`📥 Download ${url}`);
         const filename = `${productCode}_${i + 1}.jpg`;
-        const blob = await fetch(url).then((res) => res.blob());
-        const objectUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = objectUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(objectUrl);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        try {
+          const blob = await fetch(url).then(res => res.blob());
+          const objectUrl = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = objectUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(objectUrl);
+          await new Promise(res => setTimeout(res, 200));
+        } catch (err) {
+          log('⚠️ Fout bij downloaden van afbeelding:', err);
+        }
       }
 
       btn.innerText = "🤘 Klaar!";
@@ -91,8 +107,16 @@
     document.body.appendChild(btn);
   }
 
-  const observer = new MutationObserver(() => initDownloadButton());
+  // Wacht tot scripts geladen zijn
+  const observer = new MutationObserver(() => {
+    if (document.querySelector('script[type="text/x-magento-init"]')) {
+      initDownloadButton();
+    }
+  });
+
   observer.observe(document.body, { childList: true, subtree: true });
 
-  window.addEventListener("load", initDownloadButton);
+  window.addEventListener("load", () => {
+    setTimeout(initDownloadButton, 1500); // extra wachttijd
+  });
 })();
