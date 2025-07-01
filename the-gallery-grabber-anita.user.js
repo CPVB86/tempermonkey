@@ -3,7 +3,8 @@
 // @version      2.4
 // @description  wnload RGB Medium images from filtered gallery view, triggered by button or redirect if filters not active
 // @match        https://b2b.anita.com/nl/zoeken*
-// @grant        none
+// @grant        GM_download
+// @run-at       document-idle
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-anita.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-anita.user.js
@@ -21,7 +22,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'galleryFilterRedirect';
-    btn.innerText = '➡️ Voeg filters toe';
+    btn.innerText = '🧙‍ Voeg filters toe';
     Object.assign(btn.style, {
       position: 'fixed',
       top: '20px',
@@ -48,7 +49,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'galleryGrabberButton';
-    btn.innerText = '📥 Download afbeeldingen';
+    btn.innerText = '🧙‍ Download afbeeldingen';
     Object.assign(btn.style, {
       position: 'fixed',
       top: '20px',
@@ -119,20 +120,18 @@
 
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // fallback
+    // fallback timer
     setTimeout(() => {
       const entries = document.querySelectorAll('.results-entry');
       if (entries.length > 0 && !document.getElementById('galleryGrabberButton')) {
         createDownloadButton();
       }
-    }, 5000);
+    }, 1000);
   }
 
-  window.addEventListener('load', () => {
-    if (hasFilters) {
-      observeResultsAndInjectButton();
-    } else {
-      createRedirectButton();
-    }
-  });
+  if (hasFilters) {
+    observeResultsAndInjectButton();
+  } else {
+    window.addEventListener('load', createRedirectButton);
+  }
 })();
