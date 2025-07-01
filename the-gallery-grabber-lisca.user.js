@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         🧙‍♂️ The Gallery Grabber – Lisca
-// @version      1.0
+// @version      1.1
 // @description  Download alle 'full' productfoto's van Lisca netjes, met knop rechtsboven.
 // @match        https://b2b-eu.lisca.com/*
 // @grant        none
