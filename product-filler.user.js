@@ -103,7 +103,7 @@
 
             const tagInput = document.querySelector('input[name="tags_csv"]');
             if (tagInput) {
-                tagInput.value = 'SYST - Promo, SYST - Extern, SYST - Webwinkelkeur, PROD.AND - Curvy';
+                tagInput.value = 'SYST - Promo, SYST - Extern, SYST - Webwinkelkeur';
                 console.log("🏷️ Tags ingevuld via inputveld");
             }
 
