@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         ScanSim
-// @version      1.0
+// @version      1.1
 // @description  Scan Simulater; leest barcodes uit klembord en activeert scannerloop
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/incoming-products
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
@@ -49,7 +49,7 @@
     const lines = text.trim().split('\n');
     for (const line of lines) {
       const [barcode, countRaw] = line.split('\t');
-      const count = parseInt(countRaw || '1', 10);
+      const count = Math.abs(parseInt(countRaw || '1', 10));
       if (!barcode || isNaN(count)) continue;
 
       for (let i = 0; i < count; i++) {
