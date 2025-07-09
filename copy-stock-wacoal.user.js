@@ -14,6 +14,7 @@
 
   function createButton() {
     const btn = document.createElement("button");
+    btn.id = "check-stock-button";
     btn.innerText = "📊 Kopieer Stock";
     btn.style.position = "fixed";
     btn.style.top = "10px";
