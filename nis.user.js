@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         NIS
-// @version      1.7
+// @version      1.8
 // @description  Never In Stock - kopieert de EAN en Stock van producten
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
