@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         CAP
-// @version      1.7
+// @version      1.8
 // @description  Copy Advice Price van tab#1 naar relevante velden op tab#3
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
