@@ -90,7 +90,7 @@
     loadFontAwesome();
     waitForElement('#tabs-3 th.product_option_small', () => {
         const allThs = document.querySelectorAll('#tabs-3 th.product_option_small');
-        if (allThs.length >= 6) {
+        if (allThs.length >= 5) {
             const targetTh = allThs[5];
             const button = createCopyButton();
             targetTh.appendChild(button);
