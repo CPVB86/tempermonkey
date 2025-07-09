@@ -43,16 +43,15 @@
         });
 
         button.addEventListener('click', () => {
-            const rows = [];
-
-            const eanFields = document.querySelectorAll('#tabs-3 input[name^="options"][name$="[barcode]"]');
-            const stockFields = document.querySelectorAll('#tabs-3 input[name^="options"][name$="[stock]"]');
+            const eanFields = document.querySelectorAll('input[name^="options"][name$="[barcode]"]');
+            const stockFields = document.querySelectorAll('input[name^="options"][name$="[stock]"]');
 
             if (eanFields.length !== stockFields.length) {
                 console.warn('Aantal EANs en stockvelden komt niet overeen!');
                 return;
             }
 
+            const rows = [];
             for (let i = 0; i < eanFields.length; i++) {
                 const ean = eanFields[i].value.trim();
                 const stock = stockFields[i].value.trim();
@@ -74,13 +73,17 @@
         return button;
     }
 
-    function waitForElement(selector, callback, timeout = 10000) {
+    function waitForEANHeader(callback, timeout = 10000) {
         const start = Date.now();
         const check = () => {
-            const el = document.querySelector(selector);
-            if (el) {
-                callback(el);
-            } else if (Date.now() - start < timeout) {
+            const ths = document.querySelectorAll('#tabs-3 th.product_option, .options th.product_option');
+            for (const th of ths) {
+                if (th.textContent.trim() === 'EAN') {
+                    callback(th);
+                    return;
+                }
+            }
+            if (Date.now() - start < timeout) {
                 setTimeout(check, 200);
             }
         };
@@ -88,12 +91,8 @@
     }
 
     loadFontAwesome();
-    waitForElement('#tabs-3 th.product_option_small', () => {
-        const allThs = document.querySelectorAll('#tabs-3 th.product_option_small');
-        if (allThs.length >= 6) {
-            const targetTh = allThs[4];
-            const button = createCopyButton();
-            targetTh.appendChild(button);
-        }
+    waitForEANHeader((eanTh) => {
+        const button = createCopyButton();
+        eanTh.appendChild(button);
     });
 })();
