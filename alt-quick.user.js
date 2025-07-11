@@ -6,6 +6,8 @@
 // @match        https://b2b.anita.com/nl/shop/*
 // @author       C. P. v. Beek
 // @grant        GM_setClipboard
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/alt-quick.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/alt-quick.user.js
 // ==/UserScript==
 
 (function () {
