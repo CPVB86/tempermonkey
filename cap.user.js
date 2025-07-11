@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CAP
-// @version      1.8
-// @description  Copy Advice Price van tab#1 naar relevante velden op tab#3
+// @version      2.0
+// @description  Copy (Advice) Price van tab#1 naar relevante velden op tab#3
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
 // @author       C. P. v. Beek
@@ -82,5 +82,47 @@
         } else {
             console.warn('Minder dan 4 kolommen gevonden in #tabs-3');
         }
+
+waitForElement('#tabs-3 th.product_option_small', () => {
+    const allThs = document.querySelectorAll('#tabs-3 th.product_option_small');
+    if (allThs.length >= 3) {
+        const targetTh = allThs[2]; // derde kolom: 'Price'
+        const button = document.createElement('button');
+        button.innerHTML = '<i class="fa fa-euro-sign"></i>';
+        button.title = 'Kopieer inkoopprijs naar alle velden';
+
+        Object.assign(button.style, {
+            backgroundColor: '#007bff',
+            color: 'white',
+            borderRadius: '5px',
+            padding: '3px 3px',
+            cursor: 'pointer',
+            fontSize: '10px',
+        });
+
+        button.addEventListener('mouseenter', () => {
+            button.style.backgroundColor = 'green';
+        });
+        button.addEventListener('mouseleave', () => {
+            button.style.backgroundColor = '#007bff';
+        });
+
+        button.addEventListener('click', () => {
+            const prijsInput = document.querySelector('input.control.price[name="price"]');
+            if (!prijsInput) {
+                alert('Geen inkoopprijs gevonden op tab #1!');
+                return;
+            }
+
+            const prijs = prijsInput.value;
+            const doelvelden = document.querySelectorAll('#tabs-3 input[name^="options"][name$="[price]"]');
+            doelvelden.forEach(input => {
+                input.value = prijs;
+            });
+        });
+
+        targetTh.appendChild(button);
+    }
+});
     });
 })();
