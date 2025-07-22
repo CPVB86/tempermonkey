@@ -4,6 +4,7 @@
 // @description  Druk op ALT+Q om de '📊 Check Stock' knop te activeren op DDO productpagina's
 // @match        https://b2b.wacoal-europe.com/b2b/*
 // @match        https://b2b.anita.com/nl/shop/*
+// @match        https://agent.muchachomalo.com/*
 // @author       C. P. v. Beek
 // @grant        GM_setClipboard
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/alt-quick.user.js
