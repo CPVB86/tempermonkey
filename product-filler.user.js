@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Sparkle
-// @version      1.7
+// @name         Sparkle New
+// @version      2.0
 // @description  Plakt HTML uit het klembord en vult automatisch de velden op de backend in
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
@@ -66,6 +66,8 @@
             const aMatch = dom.querySelector('a');
             const reference = aMatch ? ` - [ext]` : '';
 
+            const modelName = dom.querySelector('.pdp-details_model span')?.textContent.trim() || '';
+
             const set = (selector, value) => {
                 const el = document.querySelector(selector);
                 if (el) el.value = value;
@@ -97,9 +99,10 @@
                 if (match) {
                     brandSelect.value = match.value;
                     brandSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                    selectModel(name);
                 }
             }
+
+            selectModel(modelName); // ✅ model selectie gebaseerd op echte modelnaam
 
             const tagInput = document.querySelector('input[name="tags_csv"]');
             if (tagInput) {
@@ -130,6 +133,13 @@
                 [...modelSelect.options].forEach(opt => {
                     const optionText = opt.textContent.toLowerCase();
                     if (!optionText) return;
+
+                    if (optionText === nameLower) {
+                        // Perfecte match, altijd nemen
+                        bestMatch = opt;
+                        bestScore = 999;
+                        return;
+                    }
 
                     const words = optionText.split(/[^a-z0-9]+/);
                     let score = words.reduce((acc, word) => acc + (nameLower.includes(word) ? 1 : 0), 0);
