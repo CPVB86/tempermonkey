@@ -19,8 +19,8 @@
   // ---------- Config ----------
   const CONFIG = {
     LOG: {
-      status:   'both',    // 'console' | 'logboek' | 'both' | 'off'  (status per tabel)
-      perMaat:  'console', // maten-overzicht
+      status:   'both',    // 'console' | 'logboek' | 'both' | 'off'  (samenvatting per tabel)
+      perMaat:  'console', // maten-overzicht in console
       debug:    false,
     }
   };
@@ -94,12 +94,9 @@
   };
   function setTableBadge(table, status){
     injectBadgeCSS();
-    // plek: kop met colspan, anders eerste thead th
     const head = table.querySelector('thead th[colspan]') || table.querySelector('thead th');
     if (!head) return;
-    // verwijder oude badge
-    const old = head.querySelector('.anita-badge');
-    if (old) old.remove();
+    const old = head.querySelector('.anita-badge'); if (old) old.remove();
     const span = document.createElement('span');
     span.className = 'anita-badge ' + (status==='ok'?'anita-ok':status==='afwijking'?'anita-warn':'anita-miss');
     const label = status==='ok' ? 'OK' : status==='afwijking' ? 'Afwijking' : 'Niet gevonden';
@@ -175,7 +172,6 @@
     if (koll) qp.set('koll', koll);
     if (arnr) qp.set('arnr', arnr);
     if (fbnr) qp.set('fbnr', fbnr);
-    qp.set('zicht',''); // sommige installs negeren onbekende keys; laat leeg
     qp.set('sicht', zicht || 'A');
     return `${BASE}${PATH_441}?${qp.toString()}`;
   }
@@ -249,6 +245,49 @@
     return out;
   }
 
+  // ---------- Samengestelde maten afhandelen ----------
+  // Map '36 A/B' -> max(remote['36A'], remote['36B'])
+  // Werkt ook voor 'S/M' of '38/40' (1D-groepen), en 'AA/AB' etc.
+  function resolveRemoteQty(remoteMap, label) {
+    const raw = String(label || '').trim();
+
+    // 1) Exacte hit (voor 1D zoals '38', 'S', '36A' etc.)
+    if (Object.prototype.hasOwnProperty.call(remoteMap, raw)) return remoteMap[raw];
+    const nospace = raw.replace(/\s+/g, '');
+    if (Object.prototype.hasOwnProperty.call(remoteMap, nospace)) return remoteMap[nospace];
+
+    // 2) Band + cups: "36 A/B" (spatie optioneel), cups 1-2 letters
+    //    ook "36 AA/AB", etc.
+    const m = raw.match(/^(\d+)\s*([A-Za-z]{1,2}(?:\/[A-Za-z]{1,2})+)$/);
+    if (m) {
+      const band = m[1];
+      const cups = m[2].split('/');
+      let best = -1;
+      for (const cup of cups) {
+        const key = `${band}${cup}`;
+        if (Object.prototype.hasOwnProperty.call(remoteMap, key)) {
+          const v = remoteMap[key];
+          if (v > best) best = v;
+        }
+      }
+      if (best >= 0) return best;
+    }
+
+    // 3) 1D groep zonder band: "S/M" of "38/40"
+    if (raw.includes('/')) {
+      let best = -1;
+      for (const part of raw.split('/').map(s => s.trim())) {
+        const k1 = part;
+        const k2 = part.replace(/\s+/g, '');
+        if (Object.prototype.hasOwnProperty.call(remoteMap, k1)) best = Math.max(best, remoteMap[k1]);
+        else if (Object.prototype.hasOwnProperty.call(remoteMap, k2)) best = Math.max(best, remoteMap[k2]);
+      }
+      if (best >= 0) return best;
+    }
+
+    return undefined; // niets gevonden
+  }
+
   // ---------- Kleurselectie ----------
   function chooseColor(remote, table, fbnrHint){
     if (fbnrHint && remote.colors[fbnrHint]) return remote.colors[fbnrHint].sizes;
@@ -273,8 +312,10 @@
       const localCell=row.children[1];
       const maat=(row.dataset.size || sizeCell?.textContent || '').trim();
       const local=parseInt((localCell?.textContent || '').trim(),10) || 0;
-      const sup=remoteMap[maat];
-      const hasSup=typeof sup === 'number';
+
+      // << gebruik samengestelde-maten-resolve >>
+      const sup = resolveRemoteQty(remoteMap, maat);
+      const hasSup = typeof sup === 'number';
 
       // reset
       row.style.background=''; row.style.transition='background-color .25s';
