@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Voorraadchecker Proxy - Wacoal Group
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.0
-// @description  Vergelijk local stock met remote stock
+// @version      2.1
+// @description  Vergelijk local stock met remote stock (Wacoal Group) — knop/progress via StockKit, geen inline-overschrijvingen.
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @connect      b2b.wacoal-europe.com
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
 // ==/UserScript==
@@ -24,7 +24,6 @@
     'elomi', 'elomi swim'
   ];
 
-  // Helpers for brand matching / labeling
   const norm = s => String(s || '')
     .toLowerCase()
     .trim()
@@ -32,31 +31,28 @@
     .replace(/\s+/g, ' ');
 
   function getSelectEl() { return document.querySelector('#leverancier-keuze'); }
-
   function getSelectedBrandValue() {
     const sel = getSelectEl();
     return sel ? norm(sel.value) : '';
   }
+function getSelectedBrandLabel() {
+  const sel = document.querySelector('#leverancier-keuze');
+  if (!sel) return 'Wacoal';
 
-  function getSelectedBrandLabel() {
-    const sel = getSelectEl();
-    if (!sel) return '';
-    const opt = sel.options[sel.selectedIndex];
-    const label = (opt?.text || sel.value || '').trim();
-    return label || 'Wacoal';
+  const opt = sel.options[sel.selectedIndex];
+  let label = (opt?.text || '').trim();
+
+  // Als het een placeholder is, val terug op de value
+  if (!label || /kies\s+leverancier/i.test(label) || /^-+\s*kies/i.test(label)) {
+    label = (sel.value || '').trim();
   }
-
+  return label || 'Wacoal';
+}
   function isSupportedSelected() {
+    const sel = getSelectEl();
+    if (!sel) return true; // dropdown ontbreekt → niet blokkeren
     const v = getSelectedBrandValue();
     return SUPPORTED_BRANDS.includes(v);
-  }
-
-  function buttonLabel() {
-    return `🔍 Controleer stock ${getSelectedBrandLabel()}`;
-  }
-
-  function logPrefix() {
-    return `[${getSelectedBrandLabel()}]`;
   }
 
   // ---------------- GM fetch JSON ----------------
@@ -88,13 +84,9 @@
   }
   function logResultaat(tableOrId, status) {
     const lb = getLogboek();
-    if (lb?.resultaat) {
-      lb.resultaat(tableOrId, status);
-    } else if (typeof unsafeWindow !== 'undefined' && unsafeWindow.voegLogregelToe) {
-      unsafeWindow.voegLogregelToe(String(tableOrId), status);
-    } else {
-      console.info(`${logPrefix()} (fallback log)`, tableOrId, status);
-    }
+    if (lb?.resultaat) lb.resultaat(tableOrId, status);
+    else if (typeof unsafeWindow !== 'undefined' && unsafeWindow.voegLogregelToe) unsafeWindow.voegLogregelToe(String(tableOrId), status);
+    else console.info('[Wacoal] (fallback log)', tableOrId, status);
   }
 
   // ---------------- Vinkje in header ----------------
@@ -130,7 +122,6 @@
     const map = new Map();
 
     if (!json?.is2DSizing) {
-      // 1D: gebruik EU size
       for (const cell of (json?.sizeData || [])) {
         const sizeEU = (cell?.countrySizeMap?.EU || cell?.globalSize || '').toString().trim().toUpperCase();
         if (!sizeEU) continue;
@@ -142,7 +133,6 @@
       return map;
     }
 
-    // 2D: band × cup, EU maps
     for (const row of (json?.sizeData || [])) {
       for (const cell of (row?.sizeFitData || [])) {
         const bandEU = (cell?.countrySizeMap?.EU || '').toString().trim();
@@ -198,7 +188,7 @@
     });
 
     if (entries.length) {
-      console.groupCollapsed(`${logPrefix()} Overzicht voor #${table.id}`);
+      console.groupCollapsed(`[Wacoal] Overzicht voor #${table.id}`);
       console.table(entries);
       console.groupEnd();
     }
@@ -208,19 +198,20 @@
 
   // ---------------- Main loop ----------------
   async function runAll(btn) {
-    // Progress via StockKit (fallback als kit niet laad)
-    const progress = window.StockKit ? StockKit.makeProgress(btn) : {
-      start(){ btn.disabled=true; btn.textContent='⏳ Bezig'; btn.classList.add('is-busy'); },
-      setTotal(){}, setDone(){}, tick(){},
-      success(msg){ btn.disabled=false; btn.classList.remove('is-busy'); btn.textContent=msg; setTimeout(()=>btn.textContent=buttonLabel(),1200); },
-      fail(msg){ btn.disabled=false; btn.classList.remove('is-busy'); btn.textContent=msg; setTimeout(()=>btn.textContent=buttonLabel(),1200); }
-    };
+    // Alleen StockKit — geen fallback/timeout/reset
+    if (typeof StockKit === 'undefined' || !StockKit.makeProgress) {
+      console.error('[Wacoal] StockKit niet geladen — afgebroken.');
+      alert('StockKit niet geladen. Vernieuw de pagina of controleer de @require-URL.');
+      return;
+    }
+    const progress = StockKit.makeProgress(btn);
 
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) { alert('Geen tabellen in #output gevonden.'); return; }
 
     progress.start(tables.length);
 
+    let totalMutations = 0;
     let ok = 0, afwijking = 0, fouten = 0, idx = 0;
 
     for (const table of tables) {
@@ -235,75 +226,109 @@
 
       try {
         const url = `https://b2b.wacoal-europe.com/b2b/en/EUR/json/pdpOrderForm?productCode=${encodeURIComponent(pid)}`;
-        console.log(`${logPrefix()} JSON URL:`, url);
-
         const jsonText = await gmFetch(url);
         const json = JSON.parse(jsonText);
 
         const map = buildMapFromPdpJson(json);
         const { diffs } = compareAndMark(table, map);
+        totalMutations += diffs;
 
-        if (diffs > 0) {
-          afwijking++; logResultaat(pid, '⚠️ Stock wijkt af!');
-        } else {
-          ok++;        logResultaat(pid, '✅ Stock Ok!');
-        }
+        if (diffs > 0) { afwijking++; logResultaat(pid, '⚠️ Stock wijkt af!'); }
+        else { ok++; logResultaat(pid, '✅ Stock Ok!'); }
+
         zetGroenVinkjeOpTabel(pid);
       } catch (e) {
-        console.error(`${logPrefix()} Fout bij`, pid, e);
+        console.error('[Wacoal] Fout bij', pid, e);
         fouten++; logResultaat(pid, 'afwijking');
       }
 
       progress.setDone(idx);
+      // kleine ademruimte (optioneel)
+      // await new Promise(r => setTimeout(r, 60));
     }
 
-    console.info(`${logPrefix()} Klaar. Verwerkt=${tables.length} | Ok=${ok} | Afwijking=${afwijking} | Fouten=${fouten}`);
-    progress.success(`✅ Klaar (${tables.length} tabellen)`);
+    console.info(`[Wacoal] Klaar. Verwerkt=${tables.length} | Ok=${ok} | Afwijking=${afwijking} | Fouten=${fouten} | Mutaties=${totalMutations}`);
+
+    // Alleen StockKit bepaalt eindtekst; geef het getal mee
+    progress.success(totalMutations); // → "Klaar: {totalMutations} mutaties"
   }
 
-  // ---------------- UI knop (met StockKit-styling) ----------------
+  // ---------------- UI knop ----------------
   function addButton() {
-    if (document.getElementById('stockcheck-btn')) return;
+  if (document.getElementById('stockcheck-btn')) return;
 
-    // (Optioneel) centrale CSS — alleen nodig als je nog geen globale .sk-btn styles hebt ingeladen
-    if (!document.getElementById('stockkit-css')) {
-      const link = document.createElement('link');
-      link.id = 'stockkit-css';
-      link.rel = 'stylesheet';
-      link.href = 'https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
-      document.head.appendChild(link);
-    }
-
-    const btn = document.createElement('button');
-    btn.id = 'stockcheck-btn';
-    btn.className = 'sk-btn';
-    btn.textContent = buttonLabel();
-
-    Object.assign(btn.style, {
-      position: 'fixed',
-      zIndex: '9999',
-      display: 'none'
-    });
-
-    btn.addEventListener('click', () => runAll(btn));
-    document.body.appendChild(btn);
-
-    const $ = (sel) => document.querySelector(sel);
-    function outputHasTables() { return !!$('#output') && $('#output').querySelector('table') !== null; }
-    function toggleButtonVisibility() {
-      btn.textContent = buttonLabel(); // update label op elk moment
-      btn.style.display = (isSupportedSelected() && outputHasTables()) ? 'block' : 'none';
-    }
-
-    const out = $('#output');
-    if (out) new MutationObserver(toggleButtonVisibility).observe(out, { childList: true, subtree: true });
-    const select = $('#leverancier-keuze');
-    if (select) select.addEventListener('change', toggleButtonVisibility);
-    const upload = $('#upload-container');
-    if (upload) new MutationObserver(toggleButtonVisibility).observe(upload, { attributes: true, attributeFilter: ['style', 'class'] });
-
-    toggleButtonVisibility();
+  // StockKit CSS (globale stijl)
+  if (!document.getElementById('stockkit-css')) {
+    const link = document.createElement('link');
+    link.id = 'stockkit-css';
+    link.rel = 'stylesheet';
+    link.href = 'https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
+    document.head.appendChild(link);
   }
+
+  // Positionering via stylesheet (geen inline overschrijven)
+  if (!document.getElementById('wacoal-btn-style')) {
+    const style = document.createElement('style');
+    style.id = 'wacoal-btn-style';
+    style.textContent = `
+      #stockcheck-btn {
+        position: fixed;
+        z-index: 9999;
+        display: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const btn = document.createElement('button');
+  btn.id = 'stockcheck-btn';
+  btn.className = 'sk-btn';
+  btn.textContent = `🔍 Controleer stock ${getSelectedBrandLabel()}`;
+  document.body.appendChild(btn);
+
+  // Start run
+  btn.addEventListener('click', () => runAll(btn));
+
+  // Helpers
+  const $ = (sel) => document.querySelector(sel);
+  function outputHasTables() { return !!$('#output') && $('#output').querySelector('table') !== null; }
+  function isSupportedSelected() {
+    const sel = $('#leverancier-keuze');
+    if (!sel) return true;
+    const v = (sel.value || '').toLowerCase().replace(/[-_]+/g,' ').replace(/\s+/g,' ').trim();
+    return ['wacoal','freya','freya swim','fantasie','fantasie swim','elomi','elomi swim'].includes(v);
+  }
+  function isStockKitBusy() { return btn.classList.contains('is-busy'); }
+  function isStockKitTerminal() {
+    const t = (btn.textContent || '').trim();
+    return /^(\p{Emoji_Presentation}?\s*)?Klaar:/u.test(t) || t.includes('❌ Fout');
+  }
+  function maybeUpdateLabel() {
+    if (isStockKitBusy() || isStockKitTerminal()) return; // laat StockKit met rust
+    btn.textContent = `🔍 Controleer stock ${getSelectedBrandLabel()}`;
+  }
+
+  function toggleButtonVisibility() {
+    btn.style.display = (isSupportedSelected() && outputHasTables()) ? 'block' : 'none';
+    if (btn.style.display === 'block') maybeUpdateLabel();
+  }
+
+  // Observers/listeners
+  const out = $('#output');
+  if (out) new MutationObserver(toggleButtonVisibility).observe(out, { childList: true, subtree: true });
+
+  const select = $('#leverancier-keuze');
+  if (select) select.addEventListener('change', () => {
+    maybeUpdateLabel();
+    toggleButtonVisibility();
+  });
+
+  const upload = $('#upload-container');
+  if (upload) new MutationObserver(toggleButtonVisibility).observe(upload, { attributes: true, attributeFilter: ['style','class'] });
+
+  // Initial
+  toggleButtonVisibility();
+}
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', addButton);
