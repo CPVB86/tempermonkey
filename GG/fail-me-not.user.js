@@ -5,8 +5,8 @@
 // @author       C. P. v. Beek
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/incoming-products
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/fail-me-not.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/fail-me-not.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/fail-me-not.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/fail-me-not.user.js
 // @grant        none
 // ==/UserScript==
 
