@@ -6,8 +6,8 @@
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scansim.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scansim.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/scansim.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/scansim.user.js
 // ==/UserScript==
 
 (function () {
