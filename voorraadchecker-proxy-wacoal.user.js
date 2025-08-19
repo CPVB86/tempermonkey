@@ -13,326 +13,297 @@
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
 // ==/UserScript==
 
-(function () {
+
+(() => {
   'use strict';
 
-  // ---------------- Config ----------------
+  // ---------- Config ----------
+  const CONFIG = {
+    LOG: {
+      status:   'both',    // 'console' | 'logboek' | 'both' | 'off'
+      perMaat:  'console', // maten-overzicht in console
+      debug:    false,
+    }
+  };
+
   const TIMEOUT = 15000;
-  const SUPPORTED_BRANDS = [
-    'wacoal', 'freya', 'freya swim',
-    'fantasie', 'fantasie swim',
-    'elomi', 'elomi swim'
-  ];
 
-  const norm = s => String(s || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[-_]+/g, ' ')
-    .replace(/\s+/g, ' ');
+  const SUPPORTED_BRANDS = new Set([
+    'wacoal','freya','freya swim','fantasie','fantasie swim','elomi','elomi swim'
+  ]);
 
-  function getSelectEl() { return document.querySelector('#leverancier-keuze'); }
-  function getSelectedBrandValue() {
-    const sel = getSelectEl();
-    return sel ? norm(sel.value) : '';
-  }
-function getSelectedBrandLabel() {
-  const sel = document.querySelector('#leverancier-keuze');
-  if (!sel) return 'Wacoal';
+  const delay=(ms)=>new Promise(r=>setTimeout(r,ms));
+  const $=(s,r=document)=>r.querySelector(s);
+  const norm=(s='')=>String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
 
-  const opt = sel.options[sel.selectedIndex];
-  let label = (opt?.text || '').trim();
+  // ---------- Logger (als Anita) ----------
+  const Logger={
+    lb(){ return (typeof unsafeWindow!=='undefined' && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek; },
+    _on(mode,kind){ const m=(CONFIG.LOG[kind]||'off').toLowerCase(); return m===mode || m==='both'; },
+    status(id,txt){
+      const sid=String(id);
+      if(this._on('console','status')) console.info(`[Wacoal][${sid}] status: ${txt}`);
+      if(this._on('logboek','status')){
+        const lb=this.lb();
+        if (lb?.resultaat) lb.resultaat(sid, txt);
+        else if (typeof unsafeWindow!=='undefined' && unsafeWindow.voegLogregelToe) unsafeWindow.voegLogregelToe(sid, txt);
+      }
+    },
+    perMaat(id,report){
+      if(!this._on('console','perMaat')) return;
+      console.groupCollapsed(`[Wacoal][${id}] maatvergelijking`);
+      try{
+        const rows = report.map(r => ({ maat:r.maat, local:r.local, remote:Number.isFinite(r.sup)?r.sup:'—', status:r.actie }));
+        console.table(rows);
+      } finally { console.groupEnd(); }
+    },
+    debug(...a){ if(CONFIG.LOG.debug) console.info('[Wacoal][debug]', ...a); }
+  };
 
-  // Als het een placeholder is, val terug op de value
-  if (!label || /kies\s+leverancier/i.test(label) || /^-+\s*kies/i.test(label)) {
-    label = (sel.value || '').trim();
-  }
-  return label || 'Wacoal';
-}
-  function isSupportedSelected() {
-    const sel = getSelectEl();
-    if (!sel) return true; // dropdown ontbreekt → niet blokkeren
-    const v = getSelectedBrandValue();
-    return SUPPORTED_BRANDS.includes(v);
-  }
-
-  // ---------------- GM fetch JSON ----------------
-  function gmFetch(url) {
-    return new Promise((resolve, reject) => {
+  // ---------- GM fetch ----------
+  function gmFetch(url){
+    return new Promise((resolve,reject)=>{
       GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-        withCredentials: true,
-        timeout: TIMEOUT,
-        headers: {
-          'Accept': 'application/json,text/html;q=0.8,*/*;q=0.5',
-          'User-Agent': navigator.userAgent
-        },
-        onload: (r) => {
-          if (r.status >= 200 && r.status < 400) return resolve(r.responseText || '');
-          reject(new Error(`HTTP ${r.status}`));
-        },
-        onerror: reject,
-        ontimeout: () => reject(new Error('Timeout')),
+        method:'GET', url, withCredentials:true, timeout:TIMEOUT,
+        headers:{ 'Accept':'application/json,text/html;q=0.8,*/*;q=0.5', 'User-Agent': navigator.userAgent },
+        onload:(r)=> (r.status>=200 && r.status<400) ? resolve(r.responseText||'') : reject(new Error(`HTTP ${r.status} @ ${url}`)),
+        onerror:reject, ontimeout:()=>reject(new Error(`timeout @ ${url}`))
       });
     });
   }
 
-  // ---------------- Logboek helpers ----------------
-  function getLogboek() {
-    if (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek) return unsafeWindow.logboek;
-    return window.logboek;
-  }
-  function logResultaat(tableOrId, status) {
-    const lb = getLogboek();
-    if (lb?.resultaat) lb.resultaat(tableOrId, status);
-    else if (typeof unsafeWindow !== 'undefined' && unsafeWindow.voegLogregelToe) unsafeWindow.voegLogregelToe(String(tableOrId), status);
-    else console.info('[Wacoal] (fallback log)', tableOrId, status);
+  // ---------- JSON → status-map ----------
+  function statusFromWacoal(wacoalStatus, stockLevel){
+    const s=String(wacoalStatus||'').toUpperCase();
+    if (s==='IN_STOCK') return 'IN_STOCK';
+    if (s==='WITHIN_STAGE1' || s==='WITHIN_STAGE2') return 'LOW';
+    if (s==='OUT_OF_STOCK') return 'OUT_OF_STOCK';
+    return (stockLevel>0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
   }
 
-  // ---------------- Vinkje in header ----------------
-  function zetGroenVinkjeOpTabel(tableId) {
-    try {
-      if (typeof unsafeWindow !== 'undefined' && typeof unsafeWindow.zetGroenVinkjeOpTabel === 'function') {
-        unsafeWindow.zetGroenVinkjeOpTabel(tableId);
-        return;
-      }
-      const table = document.getElementById(tableId);
-      if (!table) return;
-      const th = table.querySelector('thead tr:first-child th');
-      if (!th) return;
-      if (!th.querySelector('.header-vinkje')) {
-        const span = document.createElement('span');
-        span.className = 'header-vinkje';
-        span.innerHTML = `<i class="fas fa-check" style="color:#2ecc71; font-size: 18px; float: right; margin-left: 12px; margin-right: 0;"></i>`;
-        th.appendChild(span);
-      }
-    } catch {}
-  }
-
-  // ---------------- JSON → Map(maat→{status, stock}) ----------------
-  function statusFromWacoal(wacoalStatus, stockLevel) {
-    const s = String(wacoalStatus || '').toUpperCase();
-    if (s === 'IN_STOCK') return 'IN_STOCK';
-    if (s === 'WITHIN_STAGE1' || s === 'WITHIN_STAGE2') return 'LOW';
-    if (s === 'OUT_OF_STOCK') return 'OUT_OF_STOCK';
-    return (stockLevel > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
-  }
-
-  function buildMapFromPdpJson(json) {
-    const map = new Map();
-
-    if (!json?.is2DSizing) {
-      for (const cell of (json?.sizeData || [])) {
-        const sizeEU = (cell?.countrySizeMap?.EU || cell?.globalSize || '').toString().trim().toUpperCase();
-        if (!sizeEU) continue;
+  function buildStatusMap(json){
+    const map={};
+    if(!json?.is2DSizing){
+      for(const cell of (json?.sizeData||[])){
+        const sizeEU=(cell?.countrySizeMap?.EU || cell?.globalSize || '').toString().trim().toUpperCase();
+        if(!sizeEU) continue;
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
-        const wacoal = cell?.stock?.wacoalstockStatus || (stockLevel > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
+        const wacoal = cell?.stock?.wacoalstockStatus || (stockLevel>0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
         const status = statusFromWacoal(wacoal, stockLevel);
-        map.set(sizeEU, { status, stock: stockLevel });
+        map[sizeEU]={ status, stock: stockLevel };
       }
       return map;
     }
-
-    for (const row of (json?.sizeData || [])) {
-      for (const cell of (row?.sizeFitData || [])) {
-        const bandEU = (cell?.countrySizeMap?.EU || '').toString().trim();
-        const cupEU  = (cell?.countryFitMap?.EU  || '').toString().trim();
-        if (!bandEU || !cupEU) continue;
-        const key = `${bandEU}${cupEU}`.toUpperCase();
+    for(const row of (json?.sizeData||[])){
+      for(const cell of (row?.sizeFitData||[])){
+        const bandEU=(cell?.countrySizeMap?.EU||'').toString().trim();
+        const cupEU =(cell?.countryFitMap?.EU ||'').toString().trim();
+        if(!bandEU || !cupEU) continue;
+        const key=`${bandEU}${cupEU}`.toUpperCase();
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
-        const wacoal = cell?.stock?.wacoalstockStatus || (stockLevel > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
+        const wacoal = cell?.stock?.wacoalstockStatus || (stockLevel>0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
         const status = statusFromWacoal(wacoal, stockLevel);
-        map.set(key, { status, stock: stockLevel });
+        map[key]={ status, stock: stockLevel };
       }
     }
     return map;
   }
 
-  // ---------------- Vergelijk & markeer ----------------
-  function compareAndMark(table, map) {
-    if (!table || !map) return { diffs: 0 };
-
-    let diffs = 0;
-    const rows = table.querySelectorAll('tbody tr');
-    const entries = [];
-
-    rows.forEach(row => {
-      const sizeTd  = row.querySelector('td:nth-child(1)');
-      const stockTd = row.querySelector('td:nth-child(2)');
-      const eanTd   = row.querySelector('td:nth-child(3)');
-
-      const localSizeRaw = (sizeTd?.textContent || '').trim().toUpperCase();
-      const localStock   = parseInt((stockTd?.textContent || '0').trim(), 10) || 0;
-
-      const keyEU = localSizeRaw;
-      const remote = map.get(keyEU);
-      const remoteStatus = remote?.status || '-';
-      const remoteStock  = remote?.stock ?? 0;
-
-      // Reset
-      [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = ''));
-      delete row.dataset.status;
-
-      // Regels
-      if (localStock === 0 && remoteStatus === 'IN_STOCK') {
-        [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#93C47D')); // groen
-        row.dataset.status = 'add';
-        diffs++;
-      } else if (localStock > 0 && (remoteStatus === 'OUT_OF_STOCK' || remoteStatus === 'LOW')) {
-        [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#E06666')); // rood
-        row.dataset.status = 'remove';
-        diffs++;
-      }
-
-      entries.push({ maat: localSizeRaw, local: localStock, remote: remoteStatus, remoteStock });
-    });
-
-    if (entries.length) {
-      console.groupCollapsed(`[Wacoal] Overzicht voor #${table.id}`);
-      console.table(entries);
-      console.groupEnd();
+  function resolveRemote(map,label){
+    const raw=String(label||'').trim().toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(map,raw)) return map[raw];
+    const nospace=raw.replace(/\s+/g,'');
+    if (Object.prototype.hasOwnProperty.call(map,nospace)) return map[nospace];
+    const m=raw.match(/^(\d+)\s*([A-Z]{1,2}(?:\/[A-Z]{1,2})+)$/);
+    if(m){
+      const band=m[1]; const cups=m[2].split('/');
+      let best=null; const rank=x=>x==='IN_STOCK'?2:x==='LOW'?1:x==='OUT_OF_STOCK'?0:-1;
+      for(const cup of cups){ const k=`${band}${cup}`; if(map[k] && (!best || rank(map[k].status)>rank(best.status))) best=map[k]; }
+      if(best) return best;
     }
-
-    return { diffs };
+    if(raw.includes('/')){
+      const rank=x=>x==='IN_STOCK'?2:x==='LOW'?1:x==='OUT_OF_STOCK'?0:-1; let best=null;
+      for(const part of raw.split('/').map(s=>s.trim())){
+        const k1=part, k2=part.replace(/\s+/g,'');
+        const cand = map[k1]||map[k2];
+        if(cand && (!best || rank(cand.status)>rank(best.status))) best=cand;
+      }
+      if(best) return best;
+    }
+    return undefined;
   }
 
-  // ---------------- Main loop ----------------
-  async function runAll(btn) {
-    // Alleen StockKit — geen fallback/timeout/reset
-    if (typeof StockKit === 'undefined' || !StockKit.makeProgress) {
-      console.error('[Wacoal] StockKit niet geladen — afgebroken.');
+  function applyRulesAndMark(localTable, statusMap){
+    const rows=localTable.querySelectorAll('tbody tr'); const report=[];
+    rows.forEach(row=>{
+      const sizeCell=row.children[0];
+      const localCell=row.children[1];
+      const maat=(row.dataset.size || sizeCell?.textContent || '').trim().toUpperCase();
+      const local=parseInt((localCell?.textContent || '').trim(),10) || 0;
+
+      const remote = resolveRemote(statusMap, maat);
+      const st = remote?.status; const stockNum = Number(remote?.stock ?? 0) || 0;
+      const supVal = (st==='IN_STOCK') ? (stockNum||1) : (st ? 0 : -1);
+      const effAvail = supVal>0;
+
+      row.style.background=''; row.style.transition='background-color .25s';
+      row.title=''; row.classList.remove('status-green','status-red'); delete row.dataset.status;
+
+      let actie='none';
+      if (local > 0 && (st==='OUT_OF_STOCK' || st==='LOW')){
+        row.style.background='#f8d7da'; row.title = (st==='LOW') ? 'Uitboeken (Wacoal laag)' : 'Uitboeken (Wacoal uitverkocht)';
+        row.dataset.status='remove'; row.classList.add('status-red'); actie='uitboeken';
+      } else if (local === 0 && effAvail){
+        row.style.background='#d4edda'; row.title='Bijboeken 2 (Wacoal op voorraad)';
+        row.dataset.status='add'; row.classList.add('status-green'); actie='bijboeken_2';
+      } else if (local === 0 && !effAvail){
+        row.title = (st ? 'Negeren (Wacoal niet op voorraad)' : 'Negeren (maat onbekend bij Wacoal → 0)'); actie='negeren';
+      }
+      report.push({ maat, local, sup: supVal, actie });
+    });
+    return report;
+  }
+
+  function bepaalLogStatus(report, statusMap){
+    const n=report.length;
+    const counts=report.reduce((a,r)=> (a[r.actie]=(a[r.actie]||0)+1, a), {});
+    const nUit=counts.uitboeken||0, nBij=counts.bijboeken_2||0;
+    const remoteLeeg=!statusMap || Object.keys(statusMap).length===0;
+    if (remoteLeeg) return 'niet-gevonden';
+    if (n>0 && nUit===0 && nBij===0) return 'ok';
+    return 'afwijking';
+  }
+
+  // ---------- Error helpers ----------
+  function isNotFoundError(err){
+    const msg = String(err && err.message || '').toUpperCase();
+    if (/HTTP\s(404|410)/.test(msg)) return true;       // niet-bestaand product
+    if (/HTTP\s5\d{2}/.test(msg)) return true;         // server error → behandel als niet-gevonden (legacy/retired)
+    if (/SYNTAXERROR/.test(msg)) return true;            // lege/ongeldige JSON
+    return false;
+  }
+
+  // ---------- Main ----------
+  async function run(btn){
+    if (typeof StockKit==='undefined' || !StockKit.makeProgress){
       alert('StockKit niet geladen. Vernieuw de pagina of controleer de @require-URL.');
       return;
     }
-    const progress = StockKit.makeProgress(btn);
 
-    const tables = Array.from(document.querySelectorAll('#output table'));
-    if (!tables.length) { alert('Geen tabellen in #output gevonden.'); return; }
+    const progress=StockKit.makeProgress(btn);
+    const tables=Array.from(document.querySelectorAll('#output table'));
+    if (!tables.length){ alert('Geen tabellen gevonden in #output.'); return; }
 
     progress.start(tables.length);
+    let totalMutations=0, ok=0, fail=0, idx=0;
 
-    let totalMutations = 0;
-    let ok = 0, afwijking = 0, fouten = 0, idx = 0;
-
-    for (const table of tables) {
+    for (const table of tables){
       idx++;
 
-      const pid = (table.id || '').trim();
-      if (!pid) {
-        logResultaat('onbekend', 'niet-gevonden');
-        progress.setDone(idx);
-        continue;
-      }
+      const pid=(table.id||'').trim();
+      const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || pid || 'onbekend';
+      const anchorId = pid || label;
 
       try {
-        const url = `https://b2b.wacoal-europe.com/b2b/en/EUR/json/pdpOrderForm?productCode=${encodeURIComponent(pid)}`;
-        const jsonText = await gmFetch(url);
-        const json = JSON.parse(jsonText);
+        if(!pid){
+          Logger.status(anchorId, 'niet-gevonden');
+          Logger.perMaat(anchorId, []);
+          progress.setDone(idx);
+          continue;
+        }
 
-        const map = buildMapFromPdpJson(json);
-        const { diffs } = compareAndMark(table, map);
+        const url=`https://b2b.wacoal-europe.com/b2b/en/EUR/json/pdpOrderForm?productCode=${encodeURIComponent(pid)}`;
+        const jsonText=await gmFetch(url);
+        const json=JSON.parse(jsonText);
+
+        const statusMap = buildStatusMap(json);
+        if (!statusMap || Object.keys(statusMap).length===0){
+          Logger.status(anchorId, 'niet-gevonden');
+          Logger.perMaat(anchorId, []);
+          progress.setDone(idx);
+          continue;
+        }
+
+        const report = applyRulesAndMark(table, statusMap);
+        const diffs  = report.filter(r => r.actie==='uitboeken' || r.actie==='bijboeken_2').length;
         totalMutations += diffs;
 
-        if (diffs > 0) { afwijking++; logResultaat(pid, '⚠️ Stock wijkt af!'); }
-        else { ok++; logResultaat(pid, '✅ Stock Ok!'); }
+        const status = bepaalLogStatus(report, statusMap);
+        Logger.status(anchorId, status);
+        Logger.perMaat(anchorId, report);
 
-        zetGroenVinkjeOpTabel(pid);
-      } catch (e) {
-        console.error('[Wacoal] Fout bij', pid, e);
-        fouten++; logResultaat(pid, 'afwijking');
+        ok++;
+      } catch(e){
+        console.error('[Wacoal] fout:', e);
+        if (isNotFoundError(e)) {
+          Logger.status(anchorId, 'niet-gevonden');
+          Logger.perMaat(anchorId, []);
+        } else {
+          Logger.status(anchorId, 'afwijking');
+        }
+        fail++;
       }
 
       progress.setDone(idx);
-      // kleine ademruimte (optioneel)
-      // await new Promise(r => setTimeout(r, 60));
+      await delay(80);
     }
 
-    console.info(`[Wacoal] Klaar. Verwerkt=${tables.length} | Ok=${ok} | Afwijking=${afwijking} | Fouten=${fouten} | Mutaties=${totalMutations}`);
-
-    // Alleen StockKit bepaalt eindtekst; geef het getal mee
-    progress.success(totalMutations); // → "Klaar: {totalMutations} mutaties"
+    progress.success(totalMutations);
+    if (CONFIG.LOG.debug) console.info(`[Wacoal] verwerkt: ${ok+fail} | geslaagd: ${ok} | fouten: ${fail} | mutaties: ${totalMutations}`);
   }
 
-  // ---------------- UI knop ----------------
-  function addButton() {
-  if (document.getElementById('stockcheck-btn')) return;
-
-  // StockKit CSS (globale stijl)
-  if (!document.getElementById('stockkit-css')) {
-    const link = document.createElement('link');
-    link.id = 'stockkit-css';
-    link.rel = 'stylesheet';
-    link.href = 'https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
-    document.head.appendChild(link);
+  // ---------- UI ----------
+  function getSelectedBrandLabel(){
+    const sel=$('#leverancier-keuze');
+    if(!sel) return 'Wacoal';
+    const opt=sel.options[sel.selectedIndex];
+    let label=(opt?.text||'').trim();
+    if(!label || /kies\s+leverancier/i.test(label) || /^-+\s*kies/i.test(label)) label=(sel.value||'').trim();
+    return label || 'Wacoal';
   }
 
-  // Positionering via stylesheet (geen inline overschrijven)
-  if (!document.getElementById('wacoal-btn-style')) {
-    const style = document.createElement('style');
-    style.id = 'wacoal-btn-style';
-    style.textContent = `
-      #stockcheck-btn {
-        position: fixed;
-        z-index: 9999;
-        display: none;
-      }
-    `;
-    document.head.appendChild(style);
+  function isSupportedSelected(){
+    const dd=$('#leverancier-keuze');
+    if(!dd) return true;
+    const byValue=norm(dd.value||'');
+    const byText =norm((dd.options[dd.selectedIndex]?.text||''));
+    return SUPPORTED_BRANDS.has(byValue) || SUPPORTED_BRANDS.has(byText);
   }
 
-  const btn = document.createElement('button');
-  btn.id = 'stockcheck-btn';
-  btn.className = 'sk-btn';
-  btn.textContent = `🔍 Controleer stock ${getSelectedBrandLabel()}`;
-  document.body.appendChild(btn);
+  function addButton(){
+    if (document.getElementById('check-wacoal-btn')) return;
 
-  // Start run
-  btn.addEventListener('click', () => runAll(btn));
+    if (!document.getElementById('stockkit-css')) {
+      const link=document.createElement('link');
+      link.id='stockkit-css'; link.rel='stylesheet';
+      link.href='https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
+      document.head.appendChild(link);
+    }
 
-  // Helpers
-  const $ = (sel) => document.querySelector(sel);
-  function outputHasTables() { return !!$('#output') && $('#output').querySelector('table') !== null; }
-  function isSupportedSelected() {
-    const sel = $('#leverancier-keuze');
-    if (!sel) return true;
-    const v = (sel.value || '').toLowerCase().replace(/[-_]+/g,' ').replace(/\s+/g,' ').trim();
-    return ['wacoal','freya','freya swim','fantasie','fantasie swim','elomi','elomi swim'].includes(v);
+    const btn=document.createElement('button');
+    btn.id='check-wacoal-btn';
+    btn.className='sk-btn';
+    btn.textContent=`🔍 Check stock ${getSelectedBrandLabel()}`;
+    Object.assign(btn.style,{ position:'fixed', top:'8px', right:'250px', zIndex:9999, display:'none' });
+    btn.addEventListener('click', ()=>run(btn));
+    document.body.appendChild(btn);
+
+    const outputHasTables=()=> !!document.querySelector('#output table');
+    function isBusy(){ return btn.classList.contains('is-busy'); }
+    function isTerminal(){ const t=(btn.textContent||'').trim(); return /^(?:.*)?Klaar:/u.test(t) || t.includes('❌ Fout'); }
+    function maybeUpdateLabel(){ if(!isBusy() && !isTerminal()) btn.textContent=`🔍 Check stock ${getSelectedBrandLabel()}`; }
+
+    function toggle(){
+      btn.style.display = (outputHasTables() && isSupportedSelected()) ? 'block' : 'none';
+      if(btn.style.display==='block') maybeUpdateLabel();
+    }
+
+    const out=$('#output'); if(out) new MutationObserver(toggle).observe(out,{ childList:true, subtree:true });
+    const select=$('#leverancier-keuze'); if(select) select.addEventListener('change', ()=>{ maybeUpdateLabel(); toggle(); });
+    const upload=$('#upload-container'); if(upload) new MutationObserver(toggle).observe(upload,{ attributes:true, attributeFilter:['style','class'] });
+
+    toggle();
   }
-  function isStockKitBusy() { return btn.classList.contains('is-busy'); }
-  function isStockKitTerminal() {
-    const t = (btn.textContent || '').trim();
-    return /^(\p{Emoji_Presentation}?\s*)?Klaar:/u.test(t) || t.includes('❌ Fout');
-  }
-  function maybeUpdateLabel() {
-    if (isStockKitBusy() || isStockKitTerminal()) return; // laat StockKit met rust
-    btn.textContent = `🔍 Controleer stock ${getSelectedBrandLabel()}`;
-  }
 
-  function toggleButtonVisibility() {
-    btn.style.display = (isSupportedSelected() && outputHasTables()) ? 'block' : 'none';
-    if (btn.style.display === 'block') maybeUpdateLabel();
-  }
-
-  // Observers/listeners
-  const out = $('#output');
-  if (out) new MutationObserver(toggleButtonVisibility).observe(out, { childList: true, subtree: true });
-
-  const select = $('#leverancier-keuze');
-  if (select) select.addEventListener('change', () => {
-    maybeUpdateLabel();
-    toggleButtonVisibility();
-  });
-
-  const upload = $('#upload-container');
-  if (upload) new MutationObserver(toggleButtonVisibility).observe(upload, { attributes: true, attributeFilter: ['style','class'] });
-
-  // Initial
-  toggleButtonVisibility();
-}
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', addButton);
-  } else {
-    addButton();
-  }
+  (document.readyState==='loading') ? document.addEventListener('DOMContentLoaded', addButton) : addButton();
 })();
