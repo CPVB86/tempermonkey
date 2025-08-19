@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Anita
+// @name         Voorraadchecker Proxy - Anita 3.0
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
 // @description  Vergelijk local stock met remote stock
@@ -39,6 +39,9 @@
   const $=(s,r=document)=>r.querySelector(s);
   const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
   const norm=(s='')=>String(s).trim().toLowerCase().replace(/\s+/g,'-').replace(/_/g,'-');
+  const isForbidden = (err) =>
+  /\bHTTP\s*403\b/.test(String(err?.message || '')) || err?.status === 403;
+
 
   // ---------- Logging ----------
   const Logger={
@@ -358,11 +361,21 @@ function applyRulesAndMark(localTable, remoteMap){
         Logger.perMaat(anchorId, report);
 
         ok++;
-      } catch (e){
-        console.error('[Anita] fout:', e);
-        Logger.status(anchorId, 'afwijking');
-        fail++;
-      }
+} catch (e){
+  console.error('[Anita] fout:', e);
+
+  // NIEUW: 403 behandelen als 'niet-gevonden' (geen fail++, geen markeringen)
+  if (isForbidden(e)) {
+    Logger.status(anchorId, 'niet-gevonden');
+    Logger.perMaat(anchorId, []);        // leeg rapport
+    progress.setDone(idx);
+    continue;                            // ga door met de volgende tabel
+  }
+
+  // Default: echte fout -> 'afwijking'
+  Logger.status(anchorId, 'afwijking');
+  fail++;
+}
 
       progress.setDone(idx);
       await delay(80);
