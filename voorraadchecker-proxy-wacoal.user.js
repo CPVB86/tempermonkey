@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Voorraadchecker Proxy - Wacoal Group
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.1
+// @version      3.0
 // @description  Vergelijk local stock met remote stock (Wacoal Group) — knop/progress via StockKit, geen inline-overschrijvingen.
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
