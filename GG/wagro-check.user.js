@@ -5,8 +5,8 @@
 // @author       C. P. v. Beek
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products*
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/wagro-check.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/wagro-check.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/wagro-check.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/wagro-check.user.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
