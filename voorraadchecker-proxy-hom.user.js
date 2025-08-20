@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - HOM (Huber Holding) — Lean Advanced (clean mount + badge)
+// @name         Voorraadchecker Proxy - HOM
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
 // @description  Vergelijk local stock met remote stock
