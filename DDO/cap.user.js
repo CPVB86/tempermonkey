@@ -5,7 +5,7 @@
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/cap.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/cap.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/cap.user.js
 // ==/UserScript==
 
