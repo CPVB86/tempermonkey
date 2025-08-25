@@ -11,9 +11,7 @@
 // @grant        GM_removeValueChangeListener
 // @grant        unsafeWindow
 // @run-at       document-start
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-hom.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-hom.user.js
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
 // ==/UserScript==
 
 (() => {
