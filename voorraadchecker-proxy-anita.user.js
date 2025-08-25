@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Anita 3.0
+// @name         Voorraadchecker Proxy - Anita
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
 // @description  Vergelijk local stock met remote stock
