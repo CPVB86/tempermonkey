@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Fail me Not
+// @name         GG / Fail me Not
 // @version      1.0
 // @description  Verwijderd alle succesvolle en dubbele-failed ean codes zodat een nice-and-clean overzicht overblijft
 // @author       C. P. v. Beek
