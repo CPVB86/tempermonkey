@@ -3,7 +3,7 @@
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
 // @version      1.0
 // @description  Kopieert data van aangevinkte orders op klembord voor op het logboek.
-// @author       You
+// @author       C. P. v. Beek
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders/*
 // @grant        GM_addStyle
 // @run-at       document-idle
