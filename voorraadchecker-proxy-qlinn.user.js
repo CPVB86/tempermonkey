@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Q-LINN (FAST)
+// @name         Voorraadchecker Proxy - Q-LINN
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
 // @description  Vergelijk local stock met remote stock
@@ -8,6 +8,7 @@
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @connect      q-linn.com
+// @connect      www.q-linn.com
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-qlinn.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-qlinn.user.js
@@ -128,31 +129,75 @@
   }
 
   /* ------------- Parsers ------------- */
-  function parseIvpaSet(html){
-    const doc = new DOMParser().parseFromString(html,'text/html');
-    const blocks = $$('.ivpa-opt.ivpa_attribute[data-attribute*="bh"] .ivpa-terms .ivpa_term', doc);
-    if (!blocks.length) return null;
-    const set = new Set();
-    for (const el of blocks){
-      const term = (el.getAttribute('data-term') || el.textContent || '').trim().toUpperCase();
-      const m = term.match(/^(\d{2,3})\s*([A-Z]{1,2})$/) || term.match(/^(\d{2,3})([A-Z]{1,2})$/);
-      if (!m) continue;
-      const key = `${m[1]}${m[2]}`.toLowerCase(); // bv. '70e'
-      const cls = el.className || '';
+function parseIvpaSet(html){
+  const doc = new DOMParser().parseFromString(html,'text/html');
+  // Pak ALLE ivpa size-achtige attributen (bh-maat, maat, size)
+  const blocks = Array.from(doc.querySelectorAll('.ivpa-opt.ivpa_attribute'))
+    .filter(b => {
+      const a = (b.getAttribute('data-attribute')||'').toLowerCase();
+      return /bh.?maat|bh-?maat|^pa_maat$|size/.test(a);
+    });
+  if (!blocks.length) return null;
+
+  const set = new Set();
+  for (const blk of blocks){
+    const terms = blk.querySelectorAll('.ivpa-terms .ivpa_term');
+    terms.forEach(t => {
+      const raw = (t.getAttribute('data-term') || t.textContent || '').trim();
+      if (!raw) return;
+      // Normaliseer: BH (70E → 70e), anders XS/S/M/.. → lower
+      let key;
+      const up = raw.toUpperCase();
+      const m = up.match(/^(\d{2,3})\s*([A-Z]{1,2})$/) || up.match(/^(\d{2,3})([A-Z]{1,2})$/);
+      if (m) key = `${m[1]}${m[2]}`.toLowerCase(); else key = raw.replace(/\s+/g,'').toLowerCase();
+
+      const cls = t.className || '';
       if (/\bivpa_instock\b/i.test(cls)) set.add(key);
       if (/\bivpa_outofstock\b/i.test(cls)) set.delete(key);
+    });
+  }
+  return set.size ? set : null;
+}
+
+
+function scrapeInlineVariations(html){
+  const doc = new DOMParser().parseFromString(html,'text/html');
+
+  // 1) Standaard Woo: data-product_variations op het formulier
+  const form = doc.querySelector('form.variations_form');
+  if (form){
+    const dpv = form.getAttribute('data-product_variations');
+    if (dpv && dpv !== 'false'){
+      try{
+        const arr = JSON.parse(dpv);
+        if (Array.isArray(arr) && arr.length) return arr;
+      }catch{}
     }
-    return set.size ? set : null;
   }
 
-  function scrapeInlineVariations(html){
-    const doc = new DOMParser().parseFromString(html,'text/html');
-    const form = $('form.variations_form', doc);
-    if (!form) return null;
-    const dpv = form.getAttribute('data-product_variations');
-    if (!dpv || dpv === 'false') return null;
-    try{ const arr = JSON.parse(dpv); return Array.isArray(arr) && arr.length ? arr : null; }catch{ return null; }
+  // 2) IVPA plugin: data-variations op .ivpa-register (HTML-escaped JSON)
+  const ivpaReg = doc.querySelector('.ivpa-register[data-variations]');
+  if (ivpaReg){
+    try{
+      let s = ivpaReg.getAttribute('data-variations') || '';
+      // decode HTML entities minimaal
+      s = s.replace(/&quot;/g,'"').replace(/&amp;/g,'&');
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr) && arr.length){
+        // Vorm ze gelijk aan Woo-variaties
+        return arr.map(v => ({
+          variation_id: v.variation_id,
+          attributes: v.attributes || {},
+          is_in_stock: typeof v.is_in_stock === 'boolean' ? v.is_in_stock : null,
+          availability_html: v.availability_html || '',
+          max_qty: (typeof v.stock === 'number') ? v.stock : null
+        }));
+      }
+    }catch{}
   }
+  return null;
+}
+
 
   function parseAvailabilityObj(v){
     const html = String((v && v.availability_html) || '');
