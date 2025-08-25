@@ -8,7 +8,7 @@
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @connect      b2b.cakelingerie.eu
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-12-2
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-sugar-candy.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-sugar-candy.user.js
 // ==/UserScript==
