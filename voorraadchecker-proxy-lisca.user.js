@@ -1,24 +1,28 @@
 // ==UserScript==
 // @name         Voorraadchecker Proxy - Lisca
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.0
+// @version      3.0
 // @description  Vergelijk local stock met remote stock
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @connect      *
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-lisca.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-lisca.user.js
 // ==/UserScript==
 
-(function () {
+(() => {
   'use strict';
 
-  /** =========================
-   *  Config
-   *  ========================= */
+  // ---------- Config ----------
+  const TIMEOUT = 15000;
+  const CACHE_KEY = 'lisca_csv_cache_v1';
+  const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
+
   const SHEET_ID = '1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww';
   const GID = '933070542';
   const CSV_URL = (authuser=null, uPath=null) => {
@@ -27,33 +31,73 @@
     return authuser == null ? base : `${base}&authuser=${authuser}`;
   };
 
-  /** =========================
-   *  Net: CSV ophalen
-   *  ========================= */
+  const $ = (s, r=document) => r.querySelector(s);
+
+  // ---------- Logger (zoals Wacoal) ----------
+  const Logger = {
+    lb(){ return (typeof unsafeWindow!=='undefined' && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek; },
+    status(id, txt, extra){
+      // status naar console en logboek (zelfde gedrag als Wacoal)
+      console.info(`[Lisca][${id}] status: ${txt}`, extra||'');
+      const lb=this.lb();
+      if (lb?.resultaat) lb.resultaat(String(id), txt, extra);
+      else if (typeof unsafeWindow!=='undefined' && unsafeWindow.voegLogregelToe) unsafeWindow.voegLogregelToe(String(id), txt);
+    },
+    perMaat(id, report){
+      // zelfde per-maat tabel in console als in Wacoal
+      console.groupCollapsed(`[Lisca][${id}] maatvergelijking`);
+      try{
+        const rows = report.map(r => ({ maat:r.maat, local:r.local, remote:Number.isFinite(r.effRemote)?r.effRemote:'—', status:r.actie }));
+        console.table(rows);
+      } finally { console.groupEnd(); }
+    }
+  };
+
+  // ---------- Net: CSV ophalen (mini-cache) ----------
   function gmFetch(url, responseType='text') {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
-        method: 'GET', url, responseType, withCredentials: true,
+        method: 'GET',
+        url,
+        responseType,
+        withCredentials: true,
+        timeout: TIMEOUT,
         headers: { 'Accept':'text/csv,text/plain,*/*;q=0.8', 'User-Agent': navigator.userAgent },
-        onload: r => resolve(r), onerror: e => reject(e), ontimeout: () => reject(new Error('Timeout')),
+        onload: r => resolve(r),
+        onerror: e => reject(e),
+        ontimeout: () => reject(new Error('Timeout')),
       });
     });
   }
+  function loadCache() {
+    const raw = GM_getValue(CACHE_KEY, null);
+    if (!raw) return null;
+    const { t, data } = JSON.parse(raw);
+    return (Date.now() - t <= CACHE_TTL_MS) ? data : null;
+  }
+  function saveCache(csv) {
+    GM_setValue(CACHE_KEY, JSON.stringify({ t: Date.now(), data: csv }));
+  }
   async function fetchLiscaCSV() {
+    const cached = loadCache();
+    if (cached) return cached;
+
     for (let au=0; au<=4; au++){
       const url = CSV_URL(au, null);
-      const r = await gmFetch(url,'text').catch(e=>e);
-      if (r?.status===200 && typeof r.responseText==='string' && r.responseText.trim() && !r.responseText.trim().startsWith('<')) return r.responseText;
+      const r = await gmFetch(url,'text');
+      if (r?.status===200 && typeof r.responseText==='string' && r.responseText.trim() && !r.responseText.trim().startsWith('<')) {
+        saveCache(r.responseText); return r.responseText;
+      }
       const uUrl = CSV_URL(null, au);
-      const r2 = await gmFetch(uUrl,'text').catch(e=>e);
-      if (r2?.status===200 && typeof r2.responseText==='string' && r2.responseText.trim() && !r2.responseText.trim().startsWith('<')) return r2.responseText;
+      const r2 = await gmFetch(uUrl,'text');
+      if (r2?.status===200 && typeof r2.responseText==='string' && r2.responseText.trim() && !r2.responseText.trim().startsWith('<')) {
+        saveCache(r2.responseText); return r2.responseText;
+      }
     }
-    throw new Error('Kon CSV niet ophalen (controleer Google-accounttoegang).');
+    throw new Error('CSV niet beschikbaar');
   }
 
-  /** =========================
-   *  CSV → Map(EAN -> stock) (F=EAN, G=stock)
-   *  ========================= */
+  // ---------- CSV → Map(EAN -> stock) (F=EAN, G=stock) ----------
   function parseCSVtoMap(csvText) {
     const lines = csvText.split(/\r?\n/).filter(Boolean);
     const map = new Map();
@@ -68,11 +112,10 @@
     return map;
   }
 
-  /** =========================
-   *  Kleuren & statusregels
-   *  ========================= */
+  // ---------- Regels & markering ----------
   function applyLiscaRulesOnTable(table, remoteMap) {
     let changes = 0;
+    const counts = { add:0, remove:0, missing_ean_remove:0, ignore_missing_ean_local0:0 };
     const rows = table.querySelectorAll('tbody tr');
     const report = [];
 
@@ -96,206 +139,129 @@
       if (effRemote === undefined) {
         if (local === 0) {
           actie = 'ignore_missing_ean_local0';
+          counts.ignore_missing_ean_local0++;
           report.push({ maat: (sizeTd.textContent||'').trim(), ean, local, remote, effRemote, actie });
           return;
         }
         [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#FFD966')); // geel
         row.dataset.status = 'remove';
         actie = 'missing_ean_remove';
-        changes++;
+        counts.missing_ean_remove++; changes++;
       } else if (local > 0 && effRemote === 0) {
         [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#F8D7DA')); // rood
         row.dataset.status = 'remove';
         actie = 'remove';
-        changes++;
+        counts.remove++; changes++;
       } else if (local === 0 && effRemote > 0) {
         [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#D4EDDA')); // groen
         row.dataset.status = 'add';
         actie = 'add';
-        changes++; // << tel 'add' mee als mutatie
+        counts.add++; changes++;
       }
 
-      report.push({
-        maat: (sizeTd.textContent||'').trim(),
-        ean,
-        local,
-        remote,
-        effRemote,
-        actie
-      });
+      report.push({ maat:(sizeTd.textContent||'').trim(), ean, local, remote, effRemote, actie });
     });
 
-    return { changes, report };
+    return { changes, counts, report };
   }
 
-  /** =========================
-   *  Groen vinkje (met fallback + retry)
-   *  ========================= */
-  function addHeaderTickFallback(table){
-    try {
-      let th =
-        table.querySelector('thead th[colspan]') ||
-        table.querySelector('thead tr:first-child th:last-child') ||
-        table.querySelector('thead th');
-
-      if (!th) return false;
-      if (th.querySelector('.header-vinkje')) return true;
-
-      const span = document.createElement('span');
-      span.className = 'header-vinkje';
-      if (document.querySelector('.fa, .fas, .fa-solid')) {
-        span.innerHTML = `<i class="fas fa-check" style="color:#2ecc71; font-size:18px; float:right; margin-left:12px;"></i>`;
-      } else {
-        span.textContent = '✓';
-        span.style.cssText = 'color:#2ecc71; font-weight:700; float:right; margin-left:12px; font-size:18px;';
-      }
-      th.appendChild(span);
-      return true;
-    } catch { return false; }
-  }
-  function markTick(table) {
-    let tries = 0;
-    (function attempt(){
-      try {
-        if (typeof window.zetGroenVinkjeOpTabel === 'function') {
-          const ok = window.zetGroenVinkjeOpTabel(table);
-          if (ok) return;
-        } else if (window.groenVinkje?.mark) {
-          const ok = window.groenVinkje.mark(table);
-          if (ok) return;
-        }
-        const placed = addHeaderTickFallback(table);
-        if (placed) return;
-      } catch {}
-      if (tries++ < 15) setTimeout(attempt, 120); // retry alleen voor vinkje (niet voor de knop)
-    })();
-  }
-
-  /** =========================
-   *  Logboek-koppeling
-   *  ========================= */
-  function logResult(id, status) {
-    const lb = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.logboek : window.logboek);
-    if (lb?.resultaat) lb.resultaat(id, status);
-    else if (typeof unsafeWindow !== 'undefined' && unsafeWindow.voegLogregelToe) {
-      unsafeWindow.voegLogregelToe(id, status);
-    } else {
-      console.info('[logboek]', id, status);
-    }
-  }
-
-  /** =========================
-   *  Main
-   *  ========================= */
+  // ---------- Main ----------
   async function runLisca(btn) {
-    // Alleen StockKit — geen fallback/timeout/reset
-    if (typeof StockKit === 'undefined' || !StockKit.makeProgress) {
-      console.error('[Lisca] StockKit niet geladen — afgebroken.');
-      alert('StockKit niet geladen. Vernieuw de pagina of controleer de @require-URL.');
-      return;
+    const progress = window.StockKit.makeProgress(btn);
+    const tables = Array.from(document.querySelectorAll('#output table'));
+    if (!tables.length){ alert('Geen tabellen gevonden in #output.'); return; }
+
+    progress.start(tables.length);
+
+    const csv = await fetchLiscaCSV();
+    const remoteMap = parseCSVtoMap(csv);
+
+    let totalChanges = 0, idx = 0;
+    let firstDiffTable = null;
+
+    for (const table of tables) {
+      idx++;
+
+      // Wacoal-style anchor: product-ID = table.id
+      const pid = (table.id || '').trim();
+      const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || pid || 'onbekend';
+      const anchorId = pid || label; // exact zoals Wacoal
+
+      const { changes, counts, report } = applyLiscaRulesOnTable(table, remoteMap);
+      totalChanges += changes;
+
+      const status = changes > 0 ? 'afwijking' : 'ok';
+
+      Logger.status(anchorId, status, counts);
+      Logger.perMaat(anchorId, report);
+
+      if (!firstDiffTable && changes > 0) firstDiffTable = table;
+
+      progress.setDone(idx);
     }
-    const progress = StockKit.makeProgress(btn);
 
-    try {
-      const tables = Array.from(document.querySelectorAll('#output table'));
-      if (!tables.length) { alert('Geen tabellen gevonden in #output.'); return; }
+    progress.success(totalChanges);
 
-      progress.start(tables.length);
-
-      const csv = await fetchLiscaCSV();
-      const remoteMap = parseCSVtoMap(csv);
-
-      let totalChanges = 0, idx = 0;
-      for (const table of tables) {
-        idx++;
-        const label = table.querySelector('thead th[colspan="3"]')?.textContent?.trim() || table.id || `table#${idx}`;
-
-        const { changes } = applyLiscaRulesOnTable(table, remoteMap);
-        totalChanges += changes;
-
-        const status = changes > 0 ? 'afwijking' : 'ok';
-        logResult(label, status);
-        markTick(table);
-
-        progress.setDone(idx);
-      }
-
-      // Laat uitsluitend StockKit de eindtekst zetten; geef het getal mee
-      progress.success(totalChanges); // toont "Klaar: {totalChanges} mutaties"
-    } catch (e) {
-      console.error('[Lisca] Fout:', e);
-      progress.fail(); // StockKit bepaalt fout-tekst/staat
-      alert('Lisca check: er ging iets mis. Zie console.');
+    // Auto-scroll naar eerste afwijking + jumpFlash hook (optioneel)
+    if (firstDiffTable) {
+      firstDiffTable.scrollIntoView({ behavior:'smooth', block:'center' });
+      if (typeof window.jumpFlash === 'function') window.jumpFlash(firstDiffTable);
     }
   }
 
-  /** =========================
-   *  UI
-   *  ========================= */
- function addButton() {
-  if (document.getElementById('lisca-btn')) return;
+  // ---------- UI ----------
+  function addButton(){
+    if (document.getElementById('lisca-btn')) return;
 
-  // Optioneel: centrale StockKit CSS voor uniforme styling
-  if (!document.getElementById('stockkit-css')) {
-    const link = document.createElement('link');
-    link.id = 'stockkit-css';
-    link.rel = 'stylesheet';
-    link.href = 'https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
-    document.head.appendChild(link);
+    if (!document.getElementById('stockkit-css')) {
+      const link=document.createElement('link');
+      link.id='stockkit-css';
+      link.rel='stylesheet';
+      link.href='https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
+      document.head.appendChild(link);
+    }
+
+    const btn=document.createElement('button');
+    btn.id='lisca-btn';
+    btn.className='sk-btn';
+    btn.textContent='🔍 Check Stock Lisca';
+    Object.assign(btn.style,{ position:'fixed', top:'8px', right:'250px', zIndex:9999, display:'none' });
+    btn.addEventListener('click', ()=>runLisca(btn));
+    document.body.appendChild(btn);
+
+    const outputHasTables = ()=> !!document.querySelector('#output')?.querySelector('table');
+
+    function isLiscaSelected(){
+      const el = document.querySelector('#leverancier-keuze');
+      if (!el) return true;
+      const v = (el.value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/_/g, '-');
+      return v === 'lisca';
+    }
+
+    function isBusy(){ return btn.classList.contains('is-busy'); }
+    function isTerminal(){
+      const t=(btn.textContent||'').trim();
+      return /^(?:.*)?Klaar:/u.test(t) || t.includes('❌ Fout');
+    }
+    function maybeUpdateLabel(){
+      if (!isBusy() && !isTerminal()) btn.textContent='🔍 Check Stock Lisca';
+    }
+
+    function toggle(){
+      btn.style.display = (outputHasTables() && isLiscaSelected()) ? 'block' : 'none';
+      if (btn.style.display==='block') maybeUpdateLabel();
+    }
+
+    const out=document.querySelector('#output'); if(out) new MutationObserver(toggle).observe(out,{ childList:true, subtree:true });
+    const select=document.querySelector('#leverancier-keuze'); if(select) select.addEventListener('change', toggle);
+    const upload=document.querySelector('#upload-container'); if(upload) new MutationObserver(toggle).observe(upload,{ attributes:true, attributeFilter:['style','class'] });
+
+    toggle();
   }
 
-  const btn = document.createElement('button');
-  btn.id = 'lisca-btn';
-  btn.className = 'sk-btn';
-  btn.textContent = '🔍 Check Stock Lisca';
-  Object.assign(btn.style, {
-    position: 'fixed',
-    top: '8px',
-    right: '250px',
-    zIndex: '9999',
-    display: 'none'
-  });
-  btn.addEventListener('click', () => runLisca(btn));
-  document.body.appendChild(btn);
-
-  const $ = s => document.querySelector(s);
-
-  function outputHasTables() {
-    const out = $('#output');
-    return !!out && !!out.querySelector('table');
-  }
-
-  function isLiscaSelected() {
-    const el = $('#leverancier-keuze');
-    if (!el) return true; // als er geen dropdown is, knop niet blokkeren
-    const v = (el.value || '')
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/_/g, '-');
-    return v === 'lisca';
-  }
-
-  function toggle() {
-    btn.style.display = (isLiscaSelected() && outputHasTables()) ? 'block' : 'none';
-  }
-
-  // Reageer op wijzigingen in #output (tabellen komen/gaan)
-  const out = $('#output');
-  if (out) new MutationObserver(toggle).observe(out, { childList: true, subtree: true });
-
-  // Reageer op selectie-wijziging
-  const select = $('#leverancier-keuze');
-  if (select) select.addEventListener('change', toggle);
-
-  // Als upload-sectie de weergave beïnvloedt, luister daar ook naar
-  const upload = $('#upload-container');
-  if (upload) new MutationObserver(toggle).observe(upload, { attributes: true, attributeFilter: ['style', 'class'] });
-
-  // Initial toggle
-  toggle();
-}
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
-  else addButton();
+  (document.readyState==='loading') ? document.addEventListener('DOMContentLoaded', addButton) : addButton();
 })();
