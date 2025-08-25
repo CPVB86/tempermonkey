@@ -8,11 +8,10 @@
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @connect      b2b.wacoal-europe.com
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
 // ==/UserScript==
-
 
 (() => {
   'use strict';
@@ -177,7 +176,7 @@
   // ---------- Error helpers ----------
   function isNotFoundError(err){
     const msg = String(err && err.message || '').toUpperCase();
-    if (/HTTP\s(404|410)/.test(msg)) return true;       // niet-bestaand product
+    if (/HTTP\s(403|404|410)/.test(msg)) return true;       // niet-bestaand product
     if (/HTTP\s5\d{2}/.test(msg)) return true;         // server error → behandel als niet-gevonden (legacy/retired)
     if (/SYNTAXERROR/.test(msg)) return true;            // lege/ongeldige JSON
     return false;
