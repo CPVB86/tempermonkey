@@ -2,7 +2,7 @@
 // @name         Voorraadchecker Proxy - Charlie Choe
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
-// @description  Vergelijk local stock met remote stock (Charlie Choe, ItsPerfect v5) — StockKit + logboek. Badges via StockKit/logboek.
+// @description  Vergelijk local stock met remote stock
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
