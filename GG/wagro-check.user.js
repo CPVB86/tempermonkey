@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         WaGro Check
+// @name         GG / WaGro Check
 // @version      1.0
 // @description  Markeert alle regels met een WaGro productlocatie
 // @author       C. P. v. Beek
