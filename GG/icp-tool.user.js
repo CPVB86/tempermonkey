@@ -1,6 +1,5 @@
 // ==UserScript==
 // @name         ICP Tool
-// @namespace    ddo.tools
 // @version      1.3
 // @description  Knop op Incoming Products de selectvelden voorbereid.
 // @author       C. P. v. Beek
@@ -170,7 +169,7 @@
     const btn = document.createElement('button');
     btn.id = 'stock-check-logger-btn';
     btn.type = 'button';
-    btn.textContent = 'Stock Check Logger';
+    btn.textContent = 'ICP Tool';
     btn.title = 'Vul Reden, Other reason en Inkomende locatie ("00. Extern") automatisch in';
     Object.assign(btn.style, {
       cursor: 'pointer',
