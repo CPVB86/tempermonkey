@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Voorraadchecker Proxy - DDO Ex>Import
-// @version      2.0
+// @version      1.7
 // @description  Start vanuit de checker direct een Attributes-export en biedt link naar B2B per merk
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @run-at       document-idle
@@ -79,6 +79,8 @@
     wacoal: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=184', payload: basePayload() },
     muchachomalo: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=203', payload: basePayload() },
     hom: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=205', payload: basePayload() },
+    'hom-swimwear': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=190', payload: basePayload() },
+    'hom-nachtmode': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=207', payload: basePayload() },
     lisca: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=193', payload: basePayload() },
     'q-linn': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=111', payload: basePayload() },
     'sugar-candy': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=178', payload: basePayload() },
