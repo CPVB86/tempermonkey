@@ -300,7 +300,7 @@
     const val=norm(sel.value||''); const txt=norm(sel.options[sel.selectedIndex]?.text||'');
     const blob = `${val} ${txt}`;
     // ruim: "hom" of "huber" ergens in value/label
-    return /\bhom\b/.test(blob) || /huber/.test(blob);
+    return /\bhom\b(?:\s+\w+)?/i.test(blob);
   }
 
   function ensureButton(){
