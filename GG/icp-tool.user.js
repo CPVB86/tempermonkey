@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         ICP Tool
+// @name         GG / ICP Tool
 // @version      1.3
 // @description  Knop op Incoming Products de selectvelden voorbereid.
 // @author       C. P. v. Beek
