@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - HOM
+// @name         Voorraadchecker Proxy HOM
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
+// @version      4.0
 // @description  Vergelijk local stock met remote stock
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://b2b.huberholding.com/*
@@ -20,9 +20,27 @@
   // ============ Shared ============
   const MODELVIEW_URL   = 'https://b2b.huberholding.com/huberholdingb2b/ModellView';
   const ARTICLEVIEW_URL = 'https://b2b.huberholding.com/huberholdingb2b/ArticleView';
-  const TIMEOUT_MS  = 20000, KEEPALIVE_MS = 120000;
+
+  const TIMEOUT_MS   = 20000;
+  const KEEPALIVE_MS = 300000; // 5 min i.p.v. 2 min
+
   const HEARTBEAT_KEY = 'hom_bridge_heartbeat';
   const HB_INTERVAL   = 2500;
+
+  // Bridge tuning
+  const BRIDGE_CONCURRENCY = 4; // 3–4 is prima
+
+  // Client tuning
+  const CONFIG = {
+    NAV: {
+      throttleMin: 300,
+      throttleMax: 800,
+      backoffStart: 600,
+      backoffMax: 5000,
+      keepAlive: true,
+      clientConcurrency: 3, // 3 parallelle modellen
+    }
+  };
 
   const CHANNELS = [
     { req:'hom_bridge_adv_req',  resp:'hom_bridge_adv_resp',  ping:'hom_bridge_adv_ping',  pong:'hom_bridge_adv_pong'  },
@@ -37,51 +55,60 @@
   const uid = ()=>Math.random().toString(36).slice(2)+Date.now().toString(36);
   const forEachChannel=(fn)=>CHANNELS.forEach(fn);
   const norm=(s='')=>String(s).toLowerCase().trim().replace(/\s+/g,' ');
+  const jitter=()=>delay(CONFIG.NAV.throttleMin + Math.random()*(CONFIG.NAV.throttleMax - CONFIG.NAV.throttleMin));
 
   // ============ Bridge (HOM) ============
   if (ON_HOM){
+    // heartbeat badge
     setInterval(()=>{ GM_setValue(HEARTBEAT_KEY, Date.now()); }, HB_INTERVAL);
 
+    // ping/pong voor detectie
     forEachChannel(ch=>{
       GM_addValueChangeListener(ch.ping, (_n,_o,msg)=>{
         if (msg==='ping') GM_setValue(ch.pong, 'pong:'+Date.now());
       });
     });
 
-    let busy=false; const q=[];
+    // --- Pool i.p.v. single queue ---
+    const q = [];
+    let active = 0;
+
+    async function handleOne(req){
+      try{
+        const ctrl=new AbortController();
+        const to=setTimeout(()=>ctrl.abort(), Math.max(10000, req.timeout||TIMEOUT_MS));
+        const res=await fetch(req.url, {
+          method:req.method||'GET',
+          headers:req.headers||{},
+          credentials:'include',
+          body:req.body||null,
+          signal:ctrl.signal
+        });
+        const text=await res.text();
+        clearTimeout(to);
+        GM_setValue(req._resp, { id:req.id, ok:true, status:res.status, text });
+      }catch(e){
+        GM_setValue(req._resp, { id:req.id, ok:false, error:String(e) });
+      }
+    }
+
+    function pump(){
+      while (active < BRIDGE_CONCURRENCY && q.length){
+        const req = q.shift();
+        active++;
+        handleOne(req).finally(()=>{ active--; pump(); });
+      }
+    }
+
     forEachChannel(ch=>{
       GM_addValueChangeListener(ch.req, (_n,_o,req)=>{
         if(!req || !req.id || !req.url) return;
         q.push({ ...req, _resp: ch.resp });
-        if(!busy) processQueue();
+        pump();
       });
     });
 
-    async function processQueue(){
-      busy=true;
-      while(q.length){
-        const req=q.shift();
-        try{
-          const ctrl=new AbortController();
-          const to=setTimeout(()=>ctrl.abort(), Math.max(10000, req.timeout||TIMEOUT_MS));
-          const res=await fetch(req.url, {
-            method:req.method||'GET',
-            headers:req.headers||{},
-            credentials:'include',
-            body:req.body||null,
-            signal:ctrl.signal
-          });
-          const text=await res.text();
-          clearTimeout(to);
-          GM_setValue(req._resp, { id:req.id, ok:true, status:res.status, text });
-        }catch(e){
-          GM_setValue(req._resp, { id:req.id, ok:false, error:String(e) });
-        }
-        await delay(160+Math.random()*220);
-      }
-      busy=false;
-    }
-
+    // info
     if (document.readyState!=='loading') console.info('[HOM Bridge] actief op', location.href);
     else document.addEventListener('DOMContentLoaded', ()=>console.info('[HOM Bridge] actief op', location.href));
     return;
@@ -97,8 +124,6 @@
     perMaat(id,report){ console.groupCollapsed(`[HOM][${id}] maatvergelijking`); try{ console.table(report.map(r=>({ maat:r.maat, local:r.local, remote:Number.isFinite(r.sup)?r.sup:'—', status:r.actie }))); } finally{ console.groupEnd(); } }
   };
 
-  const CONFIG={ NAV:{ throttleMin:300, throttleMax:800, backoffStart:600, backoffMax:5000, keepAlive:true } };
-  const jitter=()=>delay(CONFIG.NAV.throttleMin + Math.random()*(CONFIG.NAV.throttleMax - CONFIG.NAV.throttleMin));
   const bridgeIsOnlineByHeartbeat=(maxAge=5000)=>{ try{ const t=GM_getValue(HEARTBEAT_KEY,0); return t && (Date.now()-t)<maxAge; }catch{ return false; } };
 
   // ---- Bridge client ----
@@ -229,77 +254,160 @@
     const leeg=!statusMap || Object.keys(statusMap).length===0; if(leeg) return 'niet-gevonden'; if(report.length>0 && nUit===0 && nBij===0) return 'ok'; return 'afwijking';
   };
 
-  // ---- Advanced flow ----
-  async function openArticleViewViaPostback(pidColor){
-    const mv=await httpGET(MODELVIEW_URL);
-    if (isLoginPage(mv)) throw new Error('LOGIN_REQUIRED');
-    const doc=parseHTML(mv); const vs=pickViewState(doc); const item=findModelItem(doc,pidColor);
-    if(!vs || !vs.__VIEWSTATE || !item?.eventTarget) throw new Error('TARGET_NOT_FOUND');
-    const payload={ __EVENTTARGET:item.eventTarget, __EVENTARGUMENT:'', __VIEWSTATE:vs.__VIEWSTATE, __VIEWSTATEGENERATOR:vs.__VIEWSTATEGENERATOR||'', __EVENTVALIDATION:vs.__EVENTVALIDATION||'' };
-    const resp=await httpPOST(MODELVIEW_URL, payload);
+  // ---- p-limit (client concurrency) ----
+  function pLimit(n){
+    const queue = [];
+    let active = 0;
+    const next = ()=>{
+      if (active>=n || queue.length===0) return;
+      active++;
+      const {fn, resolve, reject} = queue.shift();
+      fn().then(resolve, reject).finally(()=>{ active--; next(); });
+    };
+    return (fn)=> new Promise((resolve, reject)=>{
+      queue.push({fn, resolve, reject});
+      next();
+    });
+  }
+
+  // ---- Advanced flow met ModelView caching ----
+  async function openArticleViewViaPostback_cached(pidColor, state){
+    const ensureFreshMV = async ()=>{
+      const mv = await httpGET(MODELVIEW_URL);
+      if (isLoginPage(mv)) throw new Error('LOGIN_REQUIRED');
+      const doc = parseHTML(mv);
+      const vs  = pickViewState(doc);
+      if(!vs || !vs.__VIEWSTATE) throw new Error('TARGET_NOT_FOUND');
+      state.doc = doc; state.vs = vs;
+    };
+
+    if (!state.doc || !state.vs) await ensureFreshMV();
+
+    // probeer met bestaande tokens
+    let item = findModelItem(state.doc, pidColor);
+    if (!item) {
+      // refresh 1× en opnieuw
+      await ensureFreshMV();
+      item = findModelItem(state.doc, pidColor);
+      if (!item) throw new Error('TARGET_NOT_FOUND');
+    }
+
+    const payload = {
+      __EVENTTARGET: item.eventTarget,
+      __EVENTARGUMENT: '',
+      __VIEWSTATE: state.vs.__VIEWSTATE,
+      __VIEWSTATEGENERATOR: state.vs.__VIEWSTATEGENERATOR||'',
+      __EVENTVALIDATION: state.vs.__EVENTVALIDATION||''
+    };
+
+    let resp = await httpPOST(MODELVIEW_URL, payload);
     if (isLoginPage(resp)) throw new Error('LOGIN_REQUIRED');
-    if (!/gridSize|gridAvailTxt|color-size-grid/i.test(resp)) return await httpGET(ARTICLEVIEW_URL);
+
+    if (!/gridSize|gridAvailTxt|color-size-grid/i.test(resp)) {
+      // tokens kunnen stale zijn → één harde refresh + nog eens posten
+      await ensureFreshMV();
+      const item2 = findModelItem(state.doc, pidColor);
+      if (!item2) throw new Error('TARGET_NOT_FOUND');
+      const payload2 = {
+        __EVENTTARGET: item2.eventTarget,
+        __EVENTARGUMENT: '',
+        __VIEWSTATE: state.vs.__VIEWSTATE,
+        __VIEWSTATEGENERATOR: state.vs.__VIEWSTATEGENERATOR||'',
+        __EVENTVALIDATION: state.vs.__EVENTVALIDATION||''
+      };
+      resp = await httpPOST(MODELVIEW_URL, payload2);
+    }
+
     return resp;
   }
+
   async function runAdvanced(btn){
-    if(!bridgeIsOnlineByHeartbeat()){ alert('Bridge offline. Log in bij de leverancier, houdt dat tabblad open en refresh deze pagina.'); return; }
-    const quick=await httpGET(ARTICLEVIEW_URL);
-    if (isLoginPage(quick)){ alert('Niet ingelogd op HOM. Log in op HOM-tab.'); return; }
+    if(!bridgeIsOnlineByHeartbeat()){
+      alert('Bridge offline. Log in bij de leverancier, houd dat tabblad open en refresh deze pagina.');
+      return;
+    }
 
     const tables=Array.from(document.querySelectorAll('#output table'));
-    if (!tables.length){ alert('Geen tabellen in #output.'); return; }
+    if (!tables.length){
+      alert('Geen tabellen in #output.');
+      return;
+    }
+
+    // Logincheck + init state via ModelView (scheelt extra ArticleView-ping)
+    const mvHtml = await httpGET(MODELVIEW_URL);
+    if (isLoginPage(mvHtml)){
+      alert('Niet ingelogd op HOM. Log in op HOM-tab.');
+      return;
+    }
+    const mvDoc = parseHTML(mvHtml);
+    const state = { doc: mvDoc, vs: pickViewState(mvDoc) };
 
     const progress=StockKit.makeProgress(btn); progress.start(tables.length);
-    let total=0, idx=0, backoff=CONFIG.NAV.backoffStart;
 
-    for(const table of tables){
-      idx++;
+    const limit = pLimit(CONFIG.NAV.clientConcurrency);
+
+    let idx=0, total=0;
+    let backoff=CONFIG.NAV.backoffStart;
+
+    await Promise.all(tables.map(table => limit(async ()=>{
       const pidColor=(table.id||'').trim();
       const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || pidColor || 'onbekend';
       const anchorId = pidColor || label;
 
+      // lichte jitter zodat requests niet perfect tegelijk schieten
+      await jitter();
+
       try{
-        const html = await openArticleViewViaPostback(pidColor);
-        console.info('[HOM][adv] Geopend voor', pidColor, '→', articleSummary(html));
+        const html = await openArticleViewViaPostback_cached(pidColor, state);
+        // console.info('[HOM][adv] Geopend voor', pidColor, '→', articleSummary(html));
         const statusMap=buildStatusMapFromArticleView(html);
+
         if (!statusMap || Object.keys(statusMap).length===0){
-          Logger.status(anchorId,'niet-gevonden'); Logger.perMaat(anchorId,[]); progress.setDone(idx);
-          await delay(backoff); backoff=Math.min(CONFIG.NAV.backoffMax, backoff*1.5);
-          continue;
+          Logger.status(anchorId,'niet-gevonden'); Logger.perMaat(anchorId,[]); return;
         }
+
         const report=applyRulesAndMark(table,statusMap);
         total += report.filter(r=>r.actie==='uitboeken'||r.actie==='bijboeken_2').length;
         Logger.status(anchorId, bepaalLogStatus(report,statusMap));
         Logger.perMaat(anchorId, report);
+
+        // succes → backoff reset
         backoff=CONFIG.NAV.backoffStart;
+
       }catch(e){
         console.error('[HOM][adv]', e);
-        if (String(e.message||e)==='LOGIN_REQUIRED'){ alert('HOM wil opnieuw inloggen. Stop advanced. Log in en probeer opnieuw.'); break; }
-        if (String(e.message||e)==='TARGET_NOT_FOUND'){ Logger.status(anchorId,'niet-gevonden'); Logger.perMaat(anchorId,[]); }
-        else { Logger.status(anchorId,'afwijking'); Logger.perMaat(anchorId,[]); }
+        const emsg = String(e.message||e);
+        if (emsg==='LOGIN_REQUIRED'){
+          alert('HOM wil opnieuw inloggen. Stop advanced. Log in en probeer opnieuw.');
+          throw e; // abort alle parallelle taken
+        }
+        if (emsg==='TARGET_NOT_FOUND'){
+          Logger.status(anchorId,'niet-gevonden'); Logger.perMaat(anchorId,[]);
+        } else {
+          Logger.status(anchorId,'afwijking'); Logger.perMaat(anchorId,[]);
+        }
+      } finally {
+        progress.setDone(++idx);
+        // milde globale backoff om anti-bot te pleasen
+        await delay(backoff);
+        if (backoff<CONFIG.NAV.backoffMax) backoff=Math.min(CONFIG.NAV.backoffMax, backoff*1.2);
       }
-      progress.setDone(idx);
-      await delay(CONFIG.NAV.throttleMin + Math.random()*(CONFIG.NAV.throttleMax - CONFIG.NAV.throttleMin));
-      if (backoff>CONFIG.NAV.backoffStart) await delay(backoff);
-    }
+    })));
+
     progress.success(total);
   }
 
-  // ============ UI mounting (HOM-only) ============
+  // ============ UI mounting (tool) ============
   function cleanupLegacyButton(){
     const legacy = document.querySelectorAll('#adv-hom-btn');
-    legacy.forEach(el => {
-      // Verwijder ALLES met dit id (oude varianten met inline .dot etc.)
-      try{ el.remove(); }catch{}
-    });
+    legacy.forEach(el => { try{ el.remove(); }catch{} });
   }
 
   function isHomSelected(){
     const sel=document.querySelector('#leverancier-keuze');
-    if(!sel) return false; // knop pas mogelijk als er een select is en user HOM kiest
+    if(!sel) return false;
     const val=norm(sel.value||''); const txt=norm(sel.options[sel.selectedIndex]?.text||'');
     const blob = `${val} ${txt}`;
-    // ruim: "hom" of "huber" ergens in value/label
     return /\bhom\b(?:\s+\w+)?/i.test(blob);
   }
 
@@ -313,7 +421,6 @@
     btn.type='button';
     btn.textContent='Check HOM Stock';
 
-    // jouw inline stijl + ruimte voor badge
     Object.assign(btn.style, {
       position: 'fixed',
       top: '8px',
@@ -342,16 +449,13 @@
       pointerEvents: 'none',
       background: 'red'
     });
-    badge.textContent=''; // alleen kleur
+    badge.textContent='';
 
-    // belangrijk: positioneringscontext voor absolute badge
-    btn.style.position = 'fixed'; // fixed is ok (gepositioneerd element)
     btn.appendChild(badge);
 
     btn.addEventListener('click', ()=>runAdvanced(btn));
     document.body.appendChild(btn);
 
-    // heartbeat → badge-kleur
     const setBadge=(ok)=>{ badge.style.background = ok ? '#24b300' : 'red'; };
     setBadge(bridgeIsOnlineByHeartbeat());
     GM_addValueChangeListener(HEARTBEAT_KEY, (_n,_o,_t)=> setBadge(true));
@@ -362,7 +466,6 @@
   function maybeMountOrRemove(){
     const hasTables = !!document.querySelector('#output table');
     const need = isHomSelected();
-
     const existing = document.getElementById('adv-hom-btn');
 
     if (need){
@@ -374,17 +477,14 @@
   }
 
   function bootUI(){
-    // 1) Verwijder legacy knoppen van oudere scripts
     cleanupLegacyButton();
 
-    // 2) Observeer select & output
     const sel=document.querySelector('#leverancier-keuze');
     if (sel) sel.addEventListener('change', maybeMountOrRemove);
 
     const out=document.querySelector('#output');
     if (out) new MutationObserver(maybeMountOrRemove).observe(out,{ childList:true, subtree:true });
 
-    // 3) Eerste evaluatie
     maybeMountOrRemove();
   }
 
