@@ -28,6 +28,9 @@
   const $=(s,r=document)=>r.querySelector(s);
   const norm=(s='')=>String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
 
+  // Alleen deze helper is toegevoegd: 'Age:' prefix weghalen
+  const stripAgePrefix = (s) => String(s || '').replace(/^\s*Age:\s*/i, '');
+
   // PID: laatste numerieke segment uit table.id of data-vg-pid
   function extractPidFromTable(table){
     if (table?.dataset?.vgPid && /^\d+$/.test(table.dataset.vgPid)) return table.dataset.vgPid.trim();
@@ -100,7 +103,9 @@
       const headerMaten = Array
         .from(matrix.querySelectorAll('thead .product-matrix__header.product-matrix__size, thead th.product-matrix__size'))
         .map(th => th.textContent.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        // HIER de enige functionele wijziging: 'Age: ' strippen
+        .map(stripAgePrefix);
 
       const rows = Array.from(matrix.querySelectorAll('tbody tr'));
       const totals = Object.fromEntries(headerMaten.map(m => [m.toUpperCase(), 0]));
@@ -131,7 +136,9 @@
     const legacy = doc.querySelector('table.tableShoppingBag');
     if (legacy){
       const headerMaten = Array.from(legacy.querySelectorAll('thead tr:nth-child(1) th.size'))
-        .map(th=>th.textContent.trim()).filter(Boolean);
+        .map(th=>th.textContent.trim()).filter(Boolean)
+        // Ook hier: 'Age: ' strippen
+        .map(stripAgePrefix);
       const firstBodyRow = legacy.querySelector('tbody tr');
       const qtyCells = firstBodyRow ? firstBodyRow.querySelectorAll('td.quantity') : [];
       const map = {};
