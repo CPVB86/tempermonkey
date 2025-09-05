@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Voorraadchecker Proxy - Anita
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
+// @version      4.0
 // @description  Vergelijk local stock met remote stock
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      b2b.anita.com
 // @run-at       document-idle
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-anita.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-anita.user.js
 // ==/UserScript==
@@ -39,9 +39,7 @@
   const $=(s,r=document)=>r.querySelector(s);
   const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
   const norm=(s='')=>String(s).trim().toLowerCase().replace(/\s+/g,'-').replace(/_/g,'-');
-  const isForbidden = (err) =>
-  /\bHTTP\s*403\b/.test(String(err?.message || '')) || err?.status === 403;
-
+  const isForbidden = (err) => /\bHTTP\s*403\b/.test(String(err?.message || '')) || err?.status === 403;
 
   // ---------- Logging ----------
   const Logger={
@@ -132,7 +130,8 @@
     const qp=new URLSearchParams();
     if (koll) qp.set('koll', koll);
     if (arnr) qp.set('arnr', arnr);
-    if (fbnr) qp.set('fbnr', fbnr);
+    // fbnr ALLEEN meesturen als gevuld
+    if (fbnr != null && String(fbnr).trim() !== '') qp.set('fbnr', String(fbnr).trim());
     qp.set('sicht', zicht || 'A');
     return `${BASE}${PATH_441}?${qp.toString()}`;
   }
@@ -142,16 +141,49 @@
     catch(e){
       try{
         const h=await getSessionHidden();
-        const body=new URLSearchParams({ such: params.arnr || '', zicht: 'S', ...h }).toString();
+        // 410: voeg koll/fbnr toe als we ze hebben (doet 3.0 niks kwaad, maar is correcter)
+        const bodyParams = {
+          such: params.arnr || '',
+          koll: params.koll || '',
+          zicht: 'S',
+          ...h
+        };
+        if (params.fbnr != null && String(params.fbnr).trim() !== '') {
+          bodyParams.fbnr = String(params.fbnr).trim();
+        }
+        const body=new URLSearchParams(bodyParams).toString();
         return await fetchViaGM({ method:'POST', url: BASE + PATH_410, data: body });
       } catch {
-        const qs=new URLSearchParams({ such: params.arnr || '', zicht: 'S' }).toString();
+        const qsParams = {
+          such: params.arnr || '',
+          koll: params.koll || '',
+          zicht: 'S'
+        };
+        if (params.fbnr != null && String(params.fbnr).trim() !== '') {
+          qsParams.fbnr = String(params.fbnr).trim();
+        }
+        const qs=new URLSearchParams(qsParams).toString();
         return await fetchViaGM({ url: BASE + PATH_410 + '?' + qs });
       }
     }
   }
 
   // ---------- Parse HTML ----------
+  // kleurcode normaliseren: '001' => '1' (voor veilige vergelijkingen)
+  const normColor = (s='') => {
+    const t = String(s).trim();
+    const stripped = t.replace(/^0+/, '');
+    return stripped === '' ? '0' : stripped;
+  };
+
+  // haal kleurcode eventueel uit img src "/color/001.jpg"
+  function colorFromImg(table){
+    const img = table.querySelector('img[src*="/color/"]');
+    if (!img) return '';
+    const m = String(img.getAttribute('src')||'').match(/\/color\/(\d+)\.jpg/i);
+    return m ? m[1] : '';
+  }
+
   function parseAnitaStock(html){
     const doc=new DOMParser().parseFromString(html,'text/html');
     const tables=$$('.shop-article-tables table[data-article-number]',doc);
@@ -159,7 +191,12 @@
     const out={ article: tables[0]?.dataset.articleNumber || null, colors:{} };
 
     for(const t of tables){
-      const colorNo  =(t.dataset.colorNumber||'').trim();
+      // kleurcode uit data-attr of img fallback
+      let colorNo  = (t.dataset.colorNumber||'').trim();
+      if (!colorNo) {
+        const fromImg = colorFromImg(t);
+        if (fromImg) colorNo = fromImg;
+      }
       const colorName=(t.dataset.colorName||'').trim();
 
       const bandHeaders=$$('thead th',t)
@@ -242,13 +279,30 @@
 
   // ---------- Kleurselectie ----------
   function chooseColor(remote, table, fbnrHint){
-    if (fbnrHint && remote.colors[fbnrHint]) return remote.colors[fbnrHint].sizes;
+    const colors = remote?.colors || {};
+
+    // --- NIEUW: als fbnr is opgegeven, dan alleen die kleur accepteren ---
+    const asked = String(fbnrHint||'').trim();
+    if (asked) {
+      // 1) directe key
+      if (colors[asked]) return colors[asked].sizes;
+
+      // 2) tolerant op leidende nullen (001 == 1)
+      const askedN = normColor(asked);
+      const key = Object.keys(colors).find(k => normColor(k) === askedN);
+      if (key) return colors[key].sizes;
+
+      // 3) geen match -> leeg (caller logt "niet-gevonden")
+      return {};
+    }
+
+    // --- GEEN fbnr opgegeven: behoud exact 3.0-gedrag ---
     const hintName=(table.dataset.anitaColorName||'').toLowerCase();
     if (hintName){
-      const hit=Object.values(remote.colors).find(c => (c.name||'').toLowerCase().includes(hintName));
+      const hit=Object.values(colors).find(c => (c.name||'').toLowerCase().includes(hintName));
       if (hit) return hit.sizes;
     }
-    const entries=Object.values(remote.colors);
+    const entries=Object.values(colors);
     if (entries.length===1) return entries[0].sizes;
     const merged={};
     for(const c of entries) for(const [k,v] of Object.entries(c.sizes)) merged[k]=Math.max(merged[k]||0,v);
@@ -256,47 +310,43 @@
   }
 
   // ---------- Markeren + rapport ----------
-function applyRulesAndMark(localTable, remoteMap){
-  const rows=localTable.querySelectorAll('tbody tr'); const report=[];
-  rows.forEach(row=>{
-    const sizeCell=row.children[0];
-    const localCell=row.children[1];
-    const maat=(row.dataset.size || sizeCell?.textContent || '').trim();
-    const local=parseInt((localCell?.textContent || '').trim(),10) || 0;
+  function applyRulesAndMark(localTable, remoteMap){
+    const rows=localTable.querySelectorAll('tbody tr'); const report=[];
+    rows.forEach(row=>{
+      const sizeCell=row.children[0];
+      const localCell=row.children[1];
+      const maat=(row.dataset.size || sizeCell?.textContent || '').trim();
+      const local=parseInt((localCell?.textContent || '').trim(),10) || 0;
 
-    const supRaw = resolveRemoteQty(remoteMap, maat);
-    // Behandel onbekend/negatief als 0 voor de beslisregels
-    const supVal = (typeof supRaw === 'number') ? supRaw : -1;    // voor logging
-    const effSup = (supVal < 0) ? 0 : supVal;                      // voor regels
+      const supRaw = resolveRemoteQty(remoteMap, maat);
+      const supVal = (typeof supRaw === 'number') ? supRaw : -1;    // voor logging
+      const effSup = (supVal < 0) ? 0 : supVal;                      // voor regels
 
-    // reset
-    row.style.background=''; row.style.transition='background-color .25s';
-    row.title=''; row.classList.remove('status-green','status-red'); delete row.dataset.status;
+      // reset
+      row.style.background=''; row.style.transition='background-color .25s';
+      row.title=''; row.classList.remove('status-green','status-red'); delete row.dataset.status;
 
-    let actie='none';
+      let actie='none';
 
-    // Regels (effSup gebruikt):
-    if (local > 0 && effSup < 5){
-      row.style.background='#f8d7da';
-      row.title = (supVal < 0) ? 'Uitboeken (maat onbekend bij Anita → 0)' : 'Uitboeken (Anita<5)';
-      row.dataset.status='remove'; row.classList.add('status-red');
-      actie='uitboeken';
-    } else if (local === 0 && effSup > 4){
-      row.style.background='#d4edda';
-      row.title='Bijboeken 2 (Anita>4)';
-      row.dataset.status='add'; row.classList.add('status-green');
-      actie='bijboeken_2';
-    } else if (local === 0 && effSup < 5){
-      row.title = (supVal < 0) ? 'Negeren (maat onbekend bij Anita → 0)' : 'Negeren (Anita<5 en lokaal 0)';
-      actie='negeren';
-    }
+      if (local > 0 && effSup < 5){
+        row.style.background='#f8d7da';
+        row.title = (supVal < 0) ? 'Uitboeken (maat onbekend bij Anita → 0)' : 'Uitboeken (Anita<5)';
+        row.dataset.status='remove'; row.classList.add('status-red');
+        actie='uitboeken';
+      } else if (local === 0 && effSup > 4){
+        row.style.background='#d4edda';
+        row.title='Bijboeken 2 (Anita>4)';
+        row.dataset.status='add'; row.classList.add('status-green');
+        actie='bijboeken_2';
+      } else if (local === 0 && effSup < 5){
+        row.title = (supVal < 0) ? 'Negeren (maat onbekend bij Anita → 0)' : 'Negeren (Anita<5 en lokaal 0)';
+        actie='negeren';
+      }
 
-    // Log met supRaw zodat je -1 terugziet in console, maar status nu correct is
-    report.push({ maat, local, sup: supVal, actie });
-  });
-  return report;
-}
-
+      report.push({ maat, local, sup: supVal, actie });
+    });
+    return report;
+  }
 
   function bepaalLogStatus(report, remoteMap){
     const n=report.length;
@@ -331,7 +381,6 @@ function applyRulesAndMark(localTable, remoteMap){
       const anchorId = table.id || arnr || label;
 
       try {
-        // --- Case 1: geen arnr ⇒ badge 'niet-gevonden', NIET markeren in de tabel
         if (!arnr){
           Logger.status(anchorId, 'niet-gevonden');
           Logger.perMaat(anchorId, []); // leeg rapport
@@ -343,7 +392,6 @@ function applyRulesAndMark(localTable, remoteMap){
         const remote    = parseAnitaStock(html);
         const remoteMap = chooseColor(remote, table, fbnr);
 
-        // --- Case 2: remote map leeg/onbekend ⇒ badge 'niet-gevonden', NIET markeren
         if (!remoteMap || Object.keys(remoteMap).length === 0){
           Logger.status(anchorId, 'niet-gevonden');
           Logger.perMaat(anchorId, []);
@@ -351,7 +399,6 @@ function applyRulesAndMark(localTable, remoteMap){
           continue;
         }
 
-        // --- Alleen hier pas rows markeren en diff tellen
         const report = applyRulesAndMark(table, remoteMap);
         const diffs  = report.filter(r => r.actie==='uitboeken' || r.actie==='bijboeken_2').length;
         totalMutations += diffs;
@@ -361,21 +408,19 @@ function applyRulesAndMark(localTable, remoteMap){
         Logger.perMaat(anchorId, report);
 
         ok++;
-} catch (e){
-  console.error('[Anita] fout:', e);
+      } catch (e){
+        console.error('[Anita] fout:', e);
 
-  // NIEUW: 403 behandelen als 'niet-gevonden' (geen fail++, geen markeringen)
-  if (isForbidden(e)) {
-    Logger.status(anchorId, 'niet-gevonden');
-    Logger.perMaat(anchorId, []);        // leeg rapport
-    progress.setDone(idx);
-    continue;                            // ga door met de volgende tabel
-  }
+        if (isForbidden(e)) {
+          Logger.status(anchorId, 'niet-gevonden');
+          Logger.perMaat(anchorId, []);        // leeg rapport
+          progress.setDone(idx);
+          continue;                            // ga door met de volgende tabel
+        }
 
-  // Default: echte fout -> 'afwijking'
-  Logger.status(anchorId, 'afwijking');
-  fail++;
-}
+        Logger.status(anchorId, 'afwijking');
+        fail++;
+      }
 
       progress.setDone(idx);
       await delay(80);
@@ -410,7 +455,6 @@ function applyRulesAndMark(localTable, remoteMap){
     const btn = document.createElement('button');
     btn.id = 'check-anita-btn';
     btn.className = 'sk-btn';
-    // Idle label 1x; StockKit beheert “bezig x/y” en “klaar”
     btn.textContent = '🔍 Check stock';
     Object.assign(btn.style, { position:'fixed', top:'8px', right:'250px', zIndex:9999, display:'none' });
     btn.addEventListener('click', () => run(btn));
@@ -419,7 +463,6 @@ function applyRulesAndMark(localTable, remoteMap){
     const outputHasTables = () => !!document.querySelector('#output table');
 
     function toggle(){
-      // Alleen zichtbaarheid bepalen; GEEN tekst/label meer aanpassen hier
       btn.style.display = (outputHasTables() && isAllowedSupplierSelected()) ? 'block' : 'none';
     }
 
