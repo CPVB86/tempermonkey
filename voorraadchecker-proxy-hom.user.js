@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy HOM
+// @name         Voorraadchecker Proxy - HOM
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      4.0
-// @description  Vergelijk local stock met remote stock
+// @description  Vergelijk local stock met remote stock (sneller en stabieler)
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://b2b.huberholding.com/*
 // @grant        GM_setValue
@@ -11,9 +11,7 @@
 // @grant        GM_removeValueChangeListener
 // @grant        unsafeWindow
 // @run-at       document-start
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-hom.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-hom.user.js
+// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
 // ==/UserScript==
 
 (() => {
