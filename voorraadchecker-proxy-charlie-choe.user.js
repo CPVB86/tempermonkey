@@ -29,7 +29,7 @@
   const norm=(s='')=>String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
 
   // Alleen deze helper is toegevoegd: 'Age:' prefix weghalen
-  const stripAgePrefix = (s) => String(s || '').replace(/^\s*Age:\s*/i, '');
+ const stripPrefixAfterColon = (s) => String(s || '').replace(/^\s*[^:]*:\s*/, '');
 
   // PID: laatste numerieke segment uit table.id of data-vg-pid
   function extractPidFromTable(table){
@@ -100,12 +100,11 @@
     // v5 matrix
     let matrix = doc.querySelector('.product-matrix');
     if (matrix){
-      const headerMaten = Array
-        .from(matrix.querySelectorAll('thead .product-matrix__header.product-matrix__size, thead th.product-matrix__size'))
-        .map(th => th.textContent.trim())
-        .filter(Boolean)
-        // HIER de enige functionele wijziging: 'Age: ' strippen
-        .map(stripAgePrefix);
+const headerMaten = Array
+  .from(matrix.querySelectorAll('thead .product-matrix__header.product-matrix__size, thead th.product-matrix__size'))
+  .map(th => th.textContent.trim())
+  .filter(Boolean)
+  .map(stripPrefixAfterColon);
 
       const rows = Array.from(matrix.querySelectorAll('tbody tr'));
       const totals = Object.fromEntries(headerMaten.map(m => [m.toUpperCase(), 0]));
@@ -135,10 +134,10 @@
     // legacy quick_insert layout (soms nog aanwezig in PDP-DOM)
     const legacy = doc.querySelector('table.tableShoppingBag');
     if (legacy){
-      const headerMaten = Array.from(legacy.querySelectorAll('thead tr:nth-child(1) th.size'))
-        .map(th=>th.textContent.trim()).filter(Boolean)
-        // Ook hier: 'Age: ' strippen
-        .map(stripAgePrefix);
+const headerMaten = Array.from(legacy.querySelectorAll('thead tr:nth-child(1) th.size'))
+  .map(th => th.textContent.trim())
+  .filter(Boolean)
+  .map(stripPrefixAfterColon);
       const firstBodyRow = legacy.querySelector('tbody tr');
       const qtyCells = firstBodyRow ? firstBodyRow.querySelectorAll('td.quantity') : [];
       const map = {};
