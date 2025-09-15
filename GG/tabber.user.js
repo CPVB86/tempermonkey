@@ -2,7 +2,7 @@
 // @name         GG / Tabber
 // @version      1.1
 // @description  Opent producten in eigen tabbladen - view, edit of stock
-// @match        https://fm-e-warehousing.goedgepickt.nl/*
+// @match        https://fm-e-warehousing.goedgepickt.nl/picklocations/view*
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/tabber.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/tabber.user.js
 // @grant        none
@@ -24,7 +24,7 @@
       const stockId = cb.value;             // bijv. 5264605
       let path = null;
 
-      if (mode === 'edit') {
+      if (mode === 'settings') {
         path = `/products/edit/${uuid}`;
       } else if (uuid) {
         path = (mode === 'edit')
