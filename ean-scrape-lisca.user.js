@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         EAN Scrape - Lisca
-// @version      1.3
+// @version      1.4
 // @description  Scrape de EAN code direct in het juiste inputfield
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @author       C. P. v. Beek
@@ -70,13 +70,22 @@
     const parts = String(pid||'').split(/\s*-\s*/);
     return { A:(parts[0]||'').trim(), C:(parts[1]||'').trim() };
   }
-  function parseBraSize(s) {
-    const t = String(s||'').toUpperCase().replace(/\s+/g,'').replace(/\(.*?\)/g,'');
-    const m = t.match(/^(\d{2,3})([A-Z\/+]{0,4})?$/);
-    if (!m) return { band:'', cup:'' };
-    return { band:m[1], cup:(m[2]||'').replace(/[^A-Z]/g,'') };
-  }
-  function cupToIndex(c){ return c ? (c.charCodeAt(0)-64) : 0; } // A→1, B→2, ... ; ''→0
+function parseBraSize(s) {
+  const t = String(s||'').toUpperCase().replace(/\s+/g,'').replace(/\(.*?\)/g,'');
+  // check voor 'AA' → ongeldig in Lisca
+  if (/AA$/.test(t)) return { band:'', cup:'' };
+
+  const m = t.match(/^(\d{2,3})([A-Z\/+]{0,4})?$/);
+  if (!m) return { band:'', cup:'' };
+  return { band:m[1], cup:(m[2]||'').replace(/[^A-Z]/g,'') };
+}
+
+function cupToIndex(c){
+  if (!c) return 0;
+  if (c.length > 1) return 0; // dubbele letters (AA, BB, DD) → ongeldig voor Lisca
+  return c.charCodeAt(0) - 64; // A=1, B=2, etc.
+}
+
 
   // ---------- Net: Google Sheet ----------
   const CSV_URL = (authuser=null, uPath=null) => {
