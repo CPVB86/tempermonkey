@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         EAN Scrape Lisca
-// @version      1.2
-// @description  Haal EAN's uit Google Sheet en plak ze per maat in #tabs-3. Filter op A (Supplier-id-1) → C (Supplier-id-2) → E/D (maat/cup-index). EAN = F.
+// @name         EAN Scrape - Lisca
+// @version      1.3
+// @description  Scrape de EAN code direct in het juiste inputfield
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-scrape-lisca.user.js
@@ -42,10 +42,16 @@
   function setBtn(b, ok, msg, ms=2400){
     b.textContent = msg;
     b.style.background = ok ? '#2ecc71' : '#e06666';
-    if (ms) setTimeout(()=>{ b.style.background='#333'; b.textContent='Sheet EAN (Lisca)'; }, ms);
+    if (ms) setTimeout(()=>{ b.style.background='#333'; b.textContent='Scrape EAN'; }, ms);
   }
 
   // ---------- Brand check: Lisca & Lisca Swimwear ----------
+    function normLiscaColor(c){
+  const t = String(c || '').trim().toUpperCase();
+  // Als volledig numeriek: strip leading zeros → "02"→"2", "002"→"2"
+  return /^\d+$/.test(t) ? String(parseInt(t, 10)) : t;
+}
+
   function isLiscaBrand() {
     const tab1 = document.querySelector('#tabs-1');
     if (!tab1) return false;
@@ -216,7 +222,7 @@
     const levelA = rows.filter(r => r.A === A);
     if (!levelA.length) { log('× geen A-match', A); return ''; }
 
-    const levelC = levelA.filter(r => r.C.toUpperCase() === C.toUpperCase());
+    const levelC = levelA.filter(r => normLiscaColor(r.C) === normLiscaColor(C));
     if (!levelC.length) { log('× geen C-match', C); return ''; }
 
     const { band, cup } = parseBraSize(sizeRaw);
