@@ -14,6 +14,11 @@
   'use strict';
 
   /*** Helpers ***/
+    function cleanThema(t) {
+  // verwijdert alleen een leidende O- / O – / O — (hoofd/kleine letter, met/zonder spatie)
+  return (t || '').replace(/^\s*o\s*[-–—]\s*/i, '').trim();
+}
+
   const $ = (sel, root = document) => root.querySelector(sel);
   const $all = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -113,7 +118,7 @@
     sparkle.title = 'Kopieer DDO HTML';
 
     sparkle.addEventListener('click', () => {
-      const thema         = getSpecValueById('thema');
+      const thema         = cleanThema(getSpecValueById('thema'));
       const merk          = getSpecValueById('brand');
       const artikelgroep  = getSpecValueById('item_group');
       const artikelnummer = getSpecValueById('item_number') || getSpecValueById('itemNumber');
