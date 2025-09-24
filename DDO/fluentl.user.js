@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         DDO | FluentL
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.5.0
-// @description  Vertaal NL naar EN/DE/FR
+// @version      2.7.0
+// @description  Vertaal NL naar EN/DE/FR voor categories / brands / products / publisher
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=categories&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=brands&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=publisher&action=edit*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
@@ -16,16 +17,140 @@
   // ---------- CONFIG ----------
   const CONFIG = {
     MODEL: 'gpt-4o-mini',
-    TAB_NL: '#tabs-1',
-    TAB_ML: '#tabs-2',
-    TAB_SEO: '#tabs-3',
     UI_ID: 'ddo-i18n-pro',
     OPENER_ID: 'ddo-opener',
     LS_KEY: 'ddo-openai-key',
     LS_LANGS: 'ddo-fluentl-langs',
     MAX_CHARS: 120000,
-    MAXI_VIEW_DEFAULT: true // true = paneel zichtbaar; false = geminimaliseerd starten
+    MAXI_VIEW_DEFAULT: false,       // true = paneel zichtbaar; false = geminimaliseerd starten
+    STAY_ON_TAB_DEFAULT: true      // true = niet wisselen van tabbladen (standaard aangevinkt)
   };
+
+  // Huidige sectie uit URL
+  function getSection() {
+    const params = new URLSearchParams(location.search);
+    return (params.get('section') || '').toLowerCase();
+  }
+
+  // Schema per sectie: tabs + veldmapping
+  // hideSeo: bepaal welke SEO-checks NIET getoond worden
+  const SCHEMAS = {
+    categories: {
+      tabs: { NL: '#tabs-1', ML: '#tabs-2', SEO: '#tabs-3' },
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="content"], textarea.htmleditor, [name="content"]',
+        promo:  'textarea[name="promo_content"], [name="promo_content"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][content]"]`,
+        promo:   `[name="lang[${lang}][promo_content]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,
+        header_title:     `[name="meta[${lang}][header_title]"]`,
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]`
+      }),
+      defaults: { seoPage:true, seoHeader:true, seoDesc:true, seoFooter:true,
+                  labels:{content:'Content', promo:'Promo'},
+                  orderFields:['content','promo'] },
+      hideSeo: []
+    },
+
+    brands: {
+      tabs: { NL: '#tabs-1', ML: '#tabs-2', SEO: '#tabs-3' },
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="content"], textarea.htmleditor, [name="content"]',
+        promo:  'textarea[name="promo_content"], [name="promo_content"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][content]"]`,
+        promo:   `[name="lang[${lang}][promo_content]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,
+        header_title:     `[name="meta[${lang}][header_title]"]`,
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]`
+      }),
+      defaults: { seoPage:true, seoHeader:true, seoDesc:true, seoFooter:true,
+                  labels:{content:'Content', promo:'Promo'},
+                  orderFields:['content','promo'] },
+      hideSeo: []
+    },
+
+    products: {
+      // dump: ML = #tabs-9, SEO = #tabs-10
+      tabs: { NL: '#tabs-1', ML: '#tabs-9', SEO: '#tabs-10' },
+      // Map: content → description, promo → summary
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="description"], [name="description"]',
+        promo:  'textarea[name="summary"], [name="summary"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][description]"]`,
+        promo:   `[name="lang[${lang}][summary]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,      // meestal niet aanwezig
+        header_title:     `[name="meta[${lang}][header_title]"]`,    // meestal niet aanwezig
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]`   // niet aanwezig
+      }),
+      // Verzoek: meta description standaard UIT; Page/Header NIET tonen
+      defaults: { seoPage:false, seoHeader:false, seoDesc:false, seoFooter:false,
+                  labels:{content:'Description', promo:'Summary'},
+                  orderFields:['content','promo'] },
+      hideSeo: ['page','header','footer']
+    },
+
+    publisher: {
+      // dump: ML = #tabs-3, SEO = #tabs-4
+      tabs: { NL: '#tabs-1', ML: '#tabs-3', SEO: '#tabs-4' },
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="content"], [name="content"]',
+        promo:  'textarea[name="summary"], [name="summary"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][content]"]`,
+        promo:   `[name="lang[${lang}][summary]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,
+        header_title:     `[name="meta[${lang}][header_title]"]`,
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]` // optioneel
+      }),
+      // Verzoek: “Footer content” checkbox niet tonen
+      defaults: { seoPage:true, seoHeader:true, seoDesc:true, seoFooter:false,
+                  labels:{content:'Content', promo:'Summary'},
+                  orderFields:['content','promo'] },
+      hideSeo: ['footer']
+    }
+  };
+
+  const CURRENT_SECTION = SCHEMAS[getSection()] || SCHEMAS.categories;
+  const TABS = CURRENT_SECTION.tabs;
 
   // assets
   const FLAG_URL = {
@@ -46,34 +171,16 @@
   const activeLangs = () => allLangs.filter(l => LANG_STATE[l]);
   const saveLangState = () => localStorage.setItem(CONFIG.LS_LANGS, JSON.stringify(LANG_STATE));
 
-  // runtime setting (niet bewaren)
+  // runtime settings (niet bewaren)
   let keywordsEnabled = false;
+  let stayOnTab = !!CONFIG.STAY_ON_TAB_DEFAULT;
 
-  // NL-bronvelden (#tabs-1)
-  const NL_FIELDS = {
-    name:    '[name="name"]',
-    title:   '[name="title"]',
-    content: 'textarea[name="content"], textarea.htmleditor, [name="content"]',
-    promo:   'textarea[name="promo_content"], [name="promo_content"]'
-  };
-  // Doelvelden (#tabs-2)
-  const ML_FIELDS = (lang) => ({
-    name:    `[name="lang[${lang}][name]"]`,
-    title:   `[name="lang[${lang}][title]"]`,
-    content: `[name="lang[${lang}][content]"]`,
-    promo:   `[name="lang[${lang}][promo_content]"]`,
-  });
-  // SEO-velden (#tabs-3)
-  const SEO_FIELDS = (lang) => ({
-    page_title:       `[name="meta[${lang}][page_title]"]`,
-    header_title:     `[name="meta[${lang}][header_title]"]`,
-    meta_description: `[name="meta[${lang}][description]"]`,
-    meta_keywords:    `[name="meta[${lang}][keywords]"]`,
-    footer_content:   `[name="meta[${lang}][footer_content]"]`,
-  });
+  // Dynamische velden helpers
+  const NL_FIELDS = () => CURRENT_SECTION.nlFields;
+  const ML_FIELDS = (lang) => CURRENT_SECTION.mlFields(lang);
+  const SEO_FIELDS = (lang) => CURRENT_SECTION.seoFields(lang);
 
   // ---------- STYLES + ASSETS ----------
-  // FA + Orbitron
   const linkFA = document.createElement('link');
   linkFA.rel = 'stylesheet';
   linkFA.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css';
@@ -102,7 +209,7 @@
   #${CONFIG.UI_ID} label{font-size:12px;display:flex;align-items:center;gap:6px}
 
   #${CONFIG.UI_ID} .tools{display:flex;gap:6px}
-  #${CONFIG.UI_ID} .settings{position:absolute;right:10px;top:50px;background:#0b1220;border:1px solid #334155;border-radius:12px;box-shadow:0 8px 18px rgba(0,0,0,.3);padding:12px;min-width:280px;display:none}
+  #${CONFIG.UI_ID} .settings{position:absolute;right:10px;top:50px;background:#0b1220;border:1px solid #334155;border-radius:12px;box-shadow:0 8px 18px rgba(0,0,0,.3);padding:12px;min-width:300px;display:none}
   #${CONFIG.UI_ID} .settings h4{margin:0 0 8px 0;font-size:13px;color:#9ca3af}
   #${CONFIG.UI_ID} .settings .formrow{display:flex;align-items:center;gap:6px;margin:8px 0}
   #${CONFIG.UI_ID} .settings input[type="password"],
@@ -124,6 +231,7 @@
   function sanitizeKey(s){ return (s||'').trim().replace(/[^\x20-\x7E]/g,'').replace(/\s+/g,''); }
 
   async function ensureTabVisible(tabSel){
+    if (stayOnTab) return; // respecteer instelling
     const tab = $(tabSel);
     if (tab && tab.offsetParent !== null) return;
     const href = `a[href="${tabSel}"], [data-target="${tabSel}"], [data-bs-target="${tabSel}"]`;
@@ -139,16 +247,17 @@
   }
 
   function getNLValues(){
-    const root = $(CONFIG.TAB_NL) || document;
+    const root = $(TABS.NL) || document;
+    const S = NL_FIELDS();
     return {
-      name:    readField($(NL_FIELDS.name, root)),
-      title:   readField($(NL_FIELDS.title, root)),
-      content: readField($(NL_FIELDS.content, root)),
-      promo:   readField($(NL_FIELDS.promo, root)),
+      name:    readField($(S.name, root)),
+      title:   readField($(S.title, root)),
+      content: readField($(S.content, root)),
+      promo:   readField($(S.promo, root)),
     };
   }
   function getNLSeoValues(){
-    const root = $(CONFIG.TAB_SEO) || document;
+    const root = $(TABS.SEO) || document;
     const S = SEO_FIELDS('nl');
     return {
       page_title:       readField($(S.page_title, root)),
@@ -160,119 +269,105 @@
   }
 
   function pickTarget(lang, key){
-    const root = $(CONFIG.TAB_ML) || document;
+    const root = $(TABS.ML) || document;
     return $(ML_FIELDS(lang)[key], root);
   }
   function pickSeoTarget(lang, key){
-    const root = $(CONFIG.TAB_SEO) || document;
+    const root = $(TABS.SEO) || document;
     return $(SEO_FIELDS(lang)[key], root);
   }
 
-// --- REPLACE: getTextareaIframe + setIntoEditor ---
-
-function getTextareaIframe(textarea) {
-  if (!textarea) return null;
-
-  // Alleen rich editors (TinyMCE) mogen een iframe krijgen
-  const isRich =
-    textarea.classList?.contains('htmleditor') ||
-    (!!textarea.id && /mce|tinymce/i.test(textarea.id));
-
-  // Directe koppeling: <textarea id="mce_9"> ↔ <iframe id="mce_9_ifr">
-  if (textarea.id) {
-    const direct = document.getElementById(textarea.id + '_ifr');
-    if (direct) return direct;
-  }
-
-  // Geen rich? Dan nooit naar een nabij iframe zoeken.
-  if (!isRich) return null;
-
-  // Voor rich editors: beperkt zoeken binnen dichtsbijzijnde editor wrapper
-  let c = textarea.parentElement;
-  for (let i = 0; i < 4 && c; i++) {
-    const iframe = c.querySelector('.mceIframeContainer iframe, iframe[id$="_ifr"]');
-    if (iframe) return iframe;
-    c = c.parentElement;
-  }
-  return null;
-}
-
-function setIframeHtml(iframe, html) {
-  try {
-    if (!iframe) return false;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return false;
-    const body = doc.body;
-    if (!body) return false;
-
-    if (body.innerHTML !== html) {
-      body.innerHTML = html;
-      // Laat events bubbelen zodat eventuele listeners/tracking meedoen
-      body.dispatchEvent(new Event('input',  { bubbles: true }));
-      body.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    return true;
-  } catch (e) {
-    console.warn('setIframeHtml() failed:', e);
-    return false;
-  }
-}
-
-function setIntoEditor(el, html) {
-  if (!el) return false;
-  let changed = false;
-
-  if (el.tagName === 'TEXTAREA') {
-    // Alleen iframe-pad als dit écht een rich editor is
+  // --- TinyMCE helpers ---
+  function getTextareaIframe(textarea) {
+    if (!textarea) return null;
     const isRich =
-      el.classList?.contains('htmleditor') ||
-      (!!el.id && /mce|tinymce/i.test(el.id)) ||
-      !!document.getElementById((el.id || '') + '_ifr');
+      textarea.classList?.contains('htmleditor') ||
+      (!!textarea.id && /mce|tinymce/i.test(textarea.id));
+    if (textarea.id) {
+      const direct = document.getElementById(textarea.id + '_ifr');
+      if (direct) return direct;
+    }
+    if (!isRich) return null;
+    let c = textarea.parentElement;
+    for (let i = 0; i < 4 && c; i++) {
+      const iframe = c.querySelector('.mceIframeContainer iframe, iframe[id$="_ifr"]');
+      if (iframe) return iframe;
+      c = c.parentElement;
+    }
+    return null;
+  }
 
-    if (isRich) {
-      const iframe = getTextareaIframe(el);
-      if (iframe) {
-        const ok = setIframeHtml(iframe, html);
-        if (ok) {
-          changed = true;
-          if (el.value !== html) {
-            el.value = html;
-            try {
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch {}
+  function setIframeHtml(iframe, html) {
+    try {
+      if (!iframe) return false;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return false;
+      const body = doc.body;
+      if (!body) return false;
+      if (body.innerHTML !== html) {
+        body.innerHTML = html;
+        body.dispatchEvent(new Event('input',  { bubbles: true }));
+        body.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return true;
+    } catch (e) {
+      console.warn('setIframeHtml() failed:', e);
+      return false;
+    }
+  }
+
+  function setIntoEditor(el, html) {
+    if (!el) return false;
+    let changed = false;
+
+    if (el.tagName === 'TEXTAREA') {
+      const isRich =
+        el.classList?.contains('htmleditor') ||
+        (!!el.id && /mce|tinymce/i.test(el.id)) ||
+        !!document.getElementById((el.id || '') + '_ifr');
+
+      if (isRich) {
+        const iframe = getTextareaIframe(el);
+        if (iframe) {
+          const ok = setIframeHtml(iframe, html);
+          if (ok) {
+            changed = true;
+            if (el.value !== html) {
+              el.value = html;
+              try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              } catch {}
+            }
+            if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
+            return changed;
           }
-          if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
-          return changed;
         }
       }
+      if (el.value !== html) { el.value = html; changed = true; }
+      try {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch {}
+      return changed;
     }
 
-    // Plain textarea: direct value zetten, géén iframe
-    if (el.value !== html) { el.value = html; changed = true; }
+    if (el.tagName === 'INPUT') {
+      if (el.value !== html) { el.value = html; changed = true; }
+    } else if (el.getAttribute && el.getAttribute('contenteditable') === 'true') {
+      if (el.innerHTML !== html) { el.innerHTML = html; changed = true; }
+    } else {
+      const inner = el.querySelector && el.querySelector('textarea, [contenteditable="true"], input');
+      if (inner) return setIntoEditor(inner, html);
+      if (el.textContent !== html) { el.textContent = html; changed = true; }
+    }
+
     try {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     } catch {}
     return changed;
   }
-
-  if (el.tagName === 'INPUT') {
-    if (el.value !== html) { el.value = html; changed = true; }
-  } else if (el.getAttribute && el.getAttribute('contenteditable') === 'true') {
-    if (el.innerHTML !== html) { el.innerHTML = html; changed = true; }
-  } else {
-    const inner = el.querySelector && el.querySelector('textarea, [contenteditable="true"], input');
-    if (inner) return setIntoEditor(inner, html);
-    if (el.textContent !== html) { el.textContent = html; changed = true; }
-  }
-
-  try {
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  } catch {}
-  return changed;
-}
 
   async function waitForSeoEditors(langArr, timeoutMs = 4000) {
     const start = Date.now();
@@ -416,7 +511,6 @@ function setIntoEditor(el, html) {
     const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```$/,'').trim();
     let obj = JSON.parse(clean);
 
-    // normaliseer sleutels (en,de,fr)
     const norm = {};
     for (const k of Object.keys(obj||{})) {
       const nk = normalizeLangKey(k);
@@ -462,6 +556,9 @@ function setIntoEditor(el, html) {
         <div class="formrow">
           <label><input type="checkbox" id="opt-keys"> Meta keywords meenemen</label>
         </div>
+        <div class="formrow">
+          <label><input type="checkbox" id="opt-stay"> Niet wisselen van tabbladen</label>
+        </div>
         <div class="btns">
           <button id="btn-nlcheck">NL Check</button>
           <button id="btn-close-settings">Sluiten</button>
@@ -469,32 +566,66 @@ function setIntoEditor(el, html) {
       </div>
 
       <div id="ddo-body">
-        <div class="row checks">
+        <div class="row checks" id="row-basic">
           <label><input type="checkbox" id="chk-name" checked> Name</label>
           <label><input type="checkbox" id="chk-title" checked> Title</label>
-          <label><input type="checkbox" id="chk-content" checked> Content</label>
-          <label><input type="checkbox" id="chk-promo" checked> Promo</label>
+          <span id="content-promoslot"></span>
         </div>
 
-        <div class="row checks">
-          <label><input type="checkbox" id="chk-seo-page" checked> Page title</label>
-          <label><input type="checkbox" id="chk-seo-header" checked> Header title</label>
-          <label><input type="checkbox" id="chk-seo-desc" checked> Meta description</label>
-          <!-- meta keywords weggehaald uit hoofd-UI -->
-          <label><input type="checkbox" id="chk-seo-footer" checked> Footer content</label>
-        </div>
+        <div class="row checks" id="seo-checks"></div>
 
         <div class="row">
-          <button id="ddo-translate">Vertaal & Vul</button>
+          <button id="ddo-translate">Vertaal!</button>
         </div>
 
-        <div class="row" id="ddo-stats"><span class="chip">Ready</span></div>
+        <div class="row" id="ddo-stats"><span class="chip">Online</span></div>
       </div>
     </div>
   `;
   document.body.appendChild(wrap);
 
   const setStat = (msg)=> ($('#ddo-stats').innerHTML = `<span class="chip">${msg}</span>`);
+
+  // Content/Summary in gewenste volgorde renderen (Description eerst, dan Summary)
+  (function renderContentPromo(){
+    const slot = $('#content-promoslot');
+    const labels = CURRENT_SECTION.defaults.labels;
+    const order = CURRENT_SECTION.defaults.orderFields || ['content','promo'];
+    const frag = document.createDocumentFragment();
+    order.forEach(key=>{
+      if (key === 'content') {
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="checkbox" id="chk-content" checked> <span id="lbl-content">${labels.content}</span>`;
+        frag.appendChild(lbl);
+      } else if (key === 'promo') {
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="checkbox" id="chk-promo" checked> <span id="lbl-promo">${labels.promo}</span>`;
+        frag.appendChild(lbl);
+      }
+    });
+    slot.replaceWith(frag);
+  })();
+
+  // SEO-checks dynamisch tonen + defaults
+  (function renderSeoChecks(){
+    const host = $('#seo-checks');
+    const hide = new Set(CURRENT_SECTION.hideSeo || []);
+    const defs = CURRENT_SECTION.defaults;
+
+    const items = [
+      { id:'chk-seo-page',   key:'page',   text:'Page title',     def:!!defs.seoPage },
+      { id:'chk-seo-header', key:'header', text:'Header title',   def:!!defs.seoHeader },
+      { id:'chk-seo-desc',   key:'desc',   text:'Meta description', def:!!defs.seoDesc },
+      { id:'chk-seo-footer', key:'footer', text:'Footer content', def:!!defs.seoFooter },
+    ];
+
+    items.forEach(it=>{
+      if (hide.has(it.key)) return; // niet tonen
+      const label = document.createElement('label');
+      label.innerHTML = `<input type="checkbox" id="${it.id}" ${it.def?'checked':''}> ${it.text}`;
+      host.appendChild(label);
+    });
+  })();
 
   // Flags render
   function renderFlags(){
@@ -551,15 +682,21 @@ function setIntoEditor(el, html) {
       setStat('Lege key — niets opgeslagen');
     }
   });
+  // defaults in UI zetten
+  $('#opt-stay').checked = !!CONFIG.STAY_ON_TAB_DEFAULT;
+  $('#opt-keys').checked = false;
+
   $('#opt-keys').addEventListener('change', (e)=> { keywordsEnabled = !!e.target.checked; });
+  $('#opt-stay').addEventListener('change', (e)=> { stayOnTab = !!e.target.checked; });
+
   $('#btn-nlcheck').addEventListener('click', ()=>{
     const v = getNLValues();
     const s = getNLSeoValues();
     const act = activeLangs().map(x=>x.toUpperCase()).join('/');
     const report = [
       `Actief: ${act || '—'}`,
-      `#tabs-1 → Name:${(v.name||'').length} | Title:${(v.title||'').length} | Content:${(v.content||'').length} | Promo:${(v.promo||'').length}`,
-      `#tabs-3 → Page:${(s.page_title||'').length} | Header:${(s.header_title||'').length} | Desc:${(s.meta_description||'').length} | Keys:${(s.meta_keywords||'').length} | Footer:${(s.footer_content||'').length}`
+      `${TABS.NL} → Name:${(v.name||'').length} | Title:${(v.title||'').length} | ${CURRENT_SECTION.defaults.labels.content}:${(v.content||'').length} | ${CURRENT_SECTION.defaults.labels.promo}:${(v.promo||'').length}`,
+      `${TABS.SEO} → Page:${(s.page_title||'').length} | Header:${(s.header_title||'').length} | Desc:${(s.meta_description||'').length} | Keys:${(s.meta_keywords||'').length} | Footer:${(s.footer_content||'').length}`
     ];
     setStat(report.join(' — '));
   });
@@ -572,13 +709,13 @@ function setIntoEditor(el, html) {
 
       const doName    = $('#chk-name').checked;
       const doTitle   = $('#chk-title').checked;
-      const doContent = $('#chk-content').checked;
-      const doPromo   = $('#chk-promo').checked;
+      const doContent = $('#chk-content')?.checked;
+      const doPromo   = $('#chk-promo')?.checked;
 
-      const doSeoPage   = $('#chk-seo-page').checked;
-      const doSeoHeader = $('#chk-seo-header').checked;
-      const doSeoDesc   = $('#chk-seo-desc').checked;
-      const doSeoFooter = $('#chk-seo-footer').checked;
+      const doSeoPage   = $('#chk-seo-page')?.checked;
+      const doSeoHeader = $('#chk-seo-header')?.checked;
+      const doSeoDesc   = $('#chk-seo-desc')?.checked;
+      const doSeoFooter = $('#chk-seo-footer')?.checked;
 
       const base = getNLValues();
       const seo  = getNLSeoValues();
@@ -602,8 +739,8 @@ function setIntoEditor(el, html) {
         doSeoPage, doSeoHeader, doSeoDesc, doSeoFooter
       });
 
-      // Vul #tabs-2
-      await ensureTabVisible(CONFIG.TAB_ML);
+      // Vul ML
+      await ensureTabVisible(TABS.ML);
       let filled = 0;
       const touched = [];
 
@@ -628,8 +765,8 @@ function setIntoEditor(el, html) {
         }
       }
 
-      // Vul #tabs-3 (SEO)
-      await ensureTabVisible(CONFIG.TAB_SEO);
+      // Vul SEO
+      await ensureTabVisible(TABS.SEO);
       await waitForSeoEditors(langs);
 
       for (const lang of langs) {
@@ -660,7 +797,7 @@ function setIntoEditor(el, html) {
       if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
 
       if (console && console.table) console.table(touched.map(x=>({changed:x})));
-      setStat(`Klaar: ${filled} veld(en) gevuld • Actief: ${langs.map(x=>x.toUpperCase()).join('/')}`);
+      setStat(`Klaar: ${filled} veld(en) gevuld • Actief: ${langs.map(x=>x.toUpperCase()).join('/')} • Sectie: ${getSection()||'categories'}`);
     } catch(e){
       console.error(e);
       setStat('Fout: '+(e.message||e));
