@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO | FluentL
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.8.0
+// @version      2.8.1
 // @description  DDO haar eigen Vertaalmachine
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=categories&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=brands&action=edit*
@@ -26,7 +26,7 @@
     LS_LANGS: 'ddo-fluentl-langs',
     MAX_CHARS: 120000,
     MAXI_VIEW_DEFAULT: false,       // true = paneel zichtbaar; false = geminimaliseerd starten
-    STAY_ON_TAB_DEFAULT: true      // true = niet wisselen van tabbladen (standaard aangevinkt)
+    STAY_ON_TAB_DEFAULT: true       // true = niet wisselen van tabbladen (standaard aangevinkt)
   };
 
   // Huidige sectie uit URL
@@ -36,7 +36,6 @@
   }
 
   // Schema per sectie: tabs + veldmapping
-  // hideSeo: bepaal welke SEO-checks NIET getoond worden
   const SCHEMAS = {
     categories: {
       tabs: { NL: '#tabs-1', ML: '#tabs-2', SEO: '#tabs-3' },
@@ -208,9 +207,12 @@
   #${CONFIG.UI_ID} button:hover{background:#374151}
   #${CONFIG.UI_ID} .iconbtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px}
   #${CONFIG.UI_ID} .chip{background:#1f2937;border:1px solid #374151;border-radius:999px;padding:4px 8px;font-size:11px}
+  #${CONFIG.UI_ID} .chip.status{display:inline-flex;align-items:center;gap:6px}
+  #${CONFIG.UI_ID} .chip.status .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+  #${CONFIG.UI_ID} .chip.status.ok .dot{background:#10b981}
+  #${CONFIG.UI_ID} .chip.status.err .dot{background:#ef4444}
   #${CONFIG.UI_ID} .checks{display:flex;gap:12px;align-items:center}
   #${CONFIG.UI_ID} label{font-size:12px;display:flex;align-items:center;gap:6px}
-
   #${CONFIG.UI_ID} .tools{display:flex;gap:6px}
   #${CONFIG.UI_ID} .settings{position:absolute;right:10px;top:50px;background:#0b1220;border:1px solid #334155;border-radius:12px;box-shadow:0 8px 18px rgba(0,0,0,.3);padding:12px;min-width:300px;display:none}
   #${CONFIG.UI_ID} .settings h4{margin:0 0 8px 0;font-size:13px;color:#9ca3af}
@@ -551,14 +553,14 @@
 
       <div class="settings" id="ddo-settings">
         <h4>Instellingen</h4>
-<div class="formrow">
-  <label style="min-width:64px">API key</label>
-  <input type="password" id="inp-apikey" placeholder="OpenAI API key">
-  <button id="btn-showkey" class="iconbtn" title="Toon/verberg">
-    <i class="fa-solid fa-eye-slash"></i>
-  </button>
-  <button id="btn-savekey">Opslaan</button>
-</div>
+        <div class="formrow">
+          <label style="min-width:64px">API key</label>
+          <input type="password" id="inp-apikey" placeholder="OpenAI API key">
+          <button id="btn-showkey" class="iconbtn" title="Toon/verberg">
+            <i class="fa-solid fa-eye-slash"></i>
+          </button>
+          <button id="btn-savekey">Opslaan</button>
+        </div>
         <div class="formrow">
           <label><input type="checkbox" id="opt-keys"> Meta keywords meenemen</label>
         </div>
@@ -584,40 +586,80 @@
           <button id="ddo-translate">Vertaal!</button>
         </div>
 
-        <div class="row" id="ddo-stats"><span class="chip">Online</span></div>
+        <div class="row" id="ddo-stats">
+          <span id="ddo-status" class="chip status"><span class="dot"></span>Online</span>
+          <span id="ddo-msg" class="chip" style="display:none"></span>
+        </div>
       </div>
     </div>
   `;
   document.body.appendChild(wrap);
 
-const btnShow = $('#btn-showkey');
-if (btnShow) {
-  btnShow.addEventListener('click', ()=>{
-    const inp = $('#inp-apikey');
-    const isPw = inp.type === 'password';
-    inp.type = isPw ? 'text' : 'password';
-    btnShow.querySelector('i').className = 'fa-solid ' + (isPw ? 'fa-eye' : 'fa-eye-slash');
-  });
-}
-
-    // Zet bestaande key (gemaskeerd) in het inputveld
-(() => {
-  const saved = (localStorage.getItem(CONFIG.LS_KEY) || '').trim();
-  if (saved) $('#inp-apikey').value = saved; // blijft als ••••• zichtbaar
-})();
-
-function toggleSettings(show=null){
-  const willShow = (show===null)? (settings.style.display!=='block') : show;
-  settings.style.display = willShow ? 'block' : 'none';
-  if (willShow) {
-    const saved = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
-    if (saved) $('#inp-apikey').value = saved;
+  // Helper: is er een API key?
+  function hasApiKey(){
+    return !!(localStorage.getItem(CONFIG.LS_KEY)||'').trim();
   }
-}
 
-  const setStat = (msg)=> ($('#ddo-stats').innerHTML = `<span class="chip">${msg}</span>`);
+  // Render de online/offline badge
+  function renderStatus(){
+    const el = $('#ddo-status');
+    if (!el) return;
+    const online = hasApiKey();
+    el.classList.toggle('ok', online);
+    el.classList.toggle('err', !online);
+    el.innerHTML = `<span class="dot"></span>${online ? 'Online' : 'Offline'}`;
+  }
 
-  // Content/Summary in gewenste volgorde renderen (Description eerst, dan Summary)
+  // storage-listener (andere tab) → status verversen
+  window.addEventListener('storage', (e)=>{
+    if (e.key === CONFIG.LS_KEY) renderStatus();
+  });
+
+  // Eye toggle
+  const btnShow = $('#btn-showkey');
+  if (btnShow) {
+    btnShow.addEventListener('click', ()=>{
+      const inp = $('#inp-apikey');
+      const isPw = inp.type === 'password';
+      inp.type = isPw ? 'text' : 'password';
+      btnShow.querySelector('i').className = 'fa-solid ' + (isPw ? 'fa-eye' : 'fa-eye-slash');
+    });
+  }
+
+  // Prefill saved key (masked)
+  (() => {
+    const saved = (localStorage.getItem(CONFIG.LS_KEY) || '').trim();
+    if (saved) $('#inp-apikey').value = saved;
+  })();
+
+  // Eén toggleSettings (vult key bij openen)
+  const settings = $('#ddo-settings');
+  function toggleSettings(show=null){
+    const willShow = (show===null)? (settings.style.display!=='block') : show;
+    settings.style.display = willShow ? 'block' : 'none';
+    if (willShow) {
+      const saved = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+      $('#inp-apikey').value = saved || '';
+    }
+  }
+
+  // Meldingen-chip
+  function setStat(msg){
+    const msgEl = $('#ddo-msg');
+    if (!msgEl) return;
+    if (msg && String(msg).trim()) {
+      msgEl.textContent = msg;
+      msgEl.style.display = 'inline-flex';
+    } else {
+      msgEl.textContent = '';
+      msgEl.style.display = 'none';
+    }
+  }
+
+  // Init status
+  renderStatus();
+
+  // Content/Summary volgorde renderen (Description eerst, dan Summary)
   (function renderContentPromo(){
     const slot = $('#content-promoslot');
     const labels = CURRENT_SECTION.defaults.labels;
@@ -644,10 +686,10 @@ function toggleSettings(show=null){
     const defs = CURRENT_SECTION.defaults;
 
     const items = [
-      { id:'chk-seo-page',   key:'page',   text:'Page title',     def:!!defs.seoPage },
-      { id:'chk-seo-header', key:'header', text:'Header title',   def:!!defs.seoHeader },
+      { id:'chk-seo-page',   key:'page',   text:'Page title',       def:!!defs.seoPage },
+      { id:'chk-seo-header', key:'header', text:'Header title',     def:!!defs.seoHeader },
       { id:'chk-seo-desc',   key:'desc',   text:'Meta description', def:!!defs.seoDesc },
-      { id:'chk-seo-footer', key:'footer', text:'Footer content', def:!!defs.seoFooter },
+      { id:'chk-seo-footer', key:'footer', text:'Footer content',   def:!!defs.seoFooter },
     ];
 
     items.forEach(it=>{
@@ -690,14 +732,7 @@ function toggleSettings(show=null){
   }
   setMinimized(!CONFIG.MAXI_VIEW_DEFAULT);
 
-  // Settings toggle
-  const settings = $('#ddo-settings');
-  function toggleSettings(show=null){
-    const willShow = (show===null)? (settings.style.display!=='block') : show;
-    settings.style.display = willShow ? 'block' : 'none';
-  }
-
-  // Listeners topbar
+  // Topbar listeners
   $('#ddo-minimize').addEventListener('click', ()=> setMinimized(true));
   $('#ddo-gear').addEventListener('click', ()=> toggleSettings());
 
@@ -708,10 +743,11 @@ function toggleSettings(show=null){
     if (v) {
       localStorage.setItem(CONFIG.LS_KEY, v);
       setStat('API key opgeslagen');
-  } else {
-    setStat('Lege key — niets opgeslagen');
-  }
-});
+      renderStatus(); // update groen/rood + tekst
+    } else {
+      setStat('Lege key — niets opgeslagen');
+    }
+  });
 
   // defaults in UI zetten
   $('#opt-stay').checked = !!CONFIG.STAY_ON_TAB_DEFAULT;
@@ -735,6 +771,9 @@ function toggleSettings(show=null){
   // Translate button
   $('#ddo-translate').addEventListener('click', async ()=>{
     try{
+      // Refresh status up-front (als key net gewijzigd is)
+      renderStatus();
+
       const langs = activeLangs();
       if (!langs.length) { setStat('Geen talen actief (vlaggen).'); return; }
 
