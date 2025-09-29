@@ -1,14 +1,18 @@
 // ==UserScript==
 // @name         DDO | FluentL
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.7.0
-// @description  Vertaal NL naar EN/DE/FR voor categories / brands / products / publisher
+// @version      2.9.0
+// @description  DDO haar eigen Vertaalmachine
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=categories&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=brands&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=publisher&action=edit*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
+// @connect      api.openai.com
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js
 // ==/UserScript==
 
 (function () {
@@ -22,8 +26,8 @@
     LS_KEY: 'ddo-openai-key',
     LS_LANGS: 'ddo-fluentl-langs',
     MAX_CHARS: 120000,
-    MAXI_VIEW_DEFAULT: false,       // true = paneel zichtbaar; false = geminimaliseerd starten
-    STAY_ON_TAB_DEFAULT: true      // true = niet wisselen van tabbladen (standaard aangevinkt)
+    MAXI_VIEW_DEFAULT: false,  // true = paneel zichtbaar; false = geminimaliseerd starten
+    STAY_ON_TAB_DEFAULT: true  // true = niet wisselen van tabbladen (standaard aangevinkt)
   };
 
   // Huidige sectie uit URL
@@ -112,7 +116,7 @@
         meta_keywords:    `[name="meta[${lang}][keywords]"]`,
         footer_content:   `[name="meta[${lang}][footer_content]"]`   // niet aanwezig
       }),
-      // Verzoek: meta description standaard UIT; Page/Header NIET tonen
+      // Verzoek: meta description standaard UIT; Page/Header/Foot NIET tonen
       defaults: { seoPage:false, seoHeader:false, seoDesc:false, seoFooter:false,
                   labels:{content:'Description', promo:'Summary'},
                   orderFields:['content','promo'] },
@@ -205,17 +209,18 @@
   #${CONFIG.UI_ID} button:hover{background:#374151}
   #${CONFIG.UI_ID} .iconbtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px}
   #${CONFIG.UI_ID} .chip{background:#1f2937;border:1px solid #374151;border-radius:999px;padding:4px 8px;font-size:11px}
+  #${CONFIG.UI_ID} .chip.status{display:inline-flex;align-items:center;gap:6px}
+  #${CONFIG.UI_ID} .chip.status .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+  #${CONFIG.UI_ID} .chip.status.ok .dot{background:#10b981}
+  #${CONFIG.UI_ID} .chip.status.err .dot{background:#ef4444}
   #${CONFIG.UI_ID} .checks{display:flex;gap:12px;align-items:center}
   #${CONFIG.UI_ID} label{font-size:12px;display:flex;align-items:center;gap:6px}
-
   #${CONFIG.UI_ID} .tools{display:flex;gap:6px}
   #${CONFIG.UI_ID} .settings{position:absolute;right:10px;top:50px;background:#0b1220;border:1px solid #334155;border-radius:12px;box-shadow:0 8px 18px rgba(0,0,0,.3);padding:12px;min-width:300px;display:none}
   #${CONFIG.UI_ID} .settings h4{margin:0 0 8px 0;font-size:13px;color:#9ca3af}
   #${CONFIG.UI_ID} .settings .formrow{display:flex;align-items:center;gap:6px;margin:8px 0}
   #${CONFIG.UI_ID} .settings input[type="password"],
   #${CONFIG.UI_ID} .settings input[type="text"]{flex:1 1 auto;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;padding:6px 8px;font-size:12px}
-  #${CONFIG.UI_ID} .settings .btns{display:flex;gap:8px;margin-top:8px}
-
   #${CONFIG.OPENER_ID}{
     position:fixed;right:16px;bottom:16px;z-index:1000001;background:#0f172a;color:#e5e7eb;border:1px solid #334155;
     border-radius:999px;padding:10px 12px;font-size:14px;box-shadow:0 8px 18px rgba(0,0,0,.25);cursor:pointer;display:none
@@ -551,6 +556,9 @@
         <div class="formrow">
           <label style="min-width:64px">API key</label>
           <input type="password" id="inp-apikey" placeholder="OpenAI API key">
+          <button id="btn-showkey" class="iconbtn" title="Toon/verberg">
+            <i class="fa-solid fa-eye-slash"></i>
+          </button>
           <button id="btn-savekey">Opslaan</button>
         </div>
         <div class="formrow">
@@ -578,13 +586,105 @@
           <button id="ddo-translate">Vertaal!</button>
         </div>
 
-        <div class="row" id="ddo-stats"><span class="chip">Online</span></div>
+        <div class="row" id="ddo-stats">
+          <span id="ddo-status" class="chip status"><span class="dot"></span>Online</span>
+          <span id="ddo-msg" class="chip" style="display:none"></span>
+        </div>
       </div>
     </div>
   `;
   document.body.appendChild(wrap);
 
-  const setStat = (msg)=> ($('#ddo-stats').innerHTML = `<span class="chip">${msg}</span>`);
+  // ---------- STATUS (gratis ping) ----------
+  function hasApiKey(){ return !!(localStorage.getItem(CONFIG.LS_KEY)||'').trim(); }
+
+  function setStatus(isOnline){
+    const el = $('#ddo-status');
+    if (!el) return;
+    el.classList.toggle('ok', !!isOnline);
+    el.classList.toggle('err', !isOnline);
+    el.innerHTML = `<span class="dot"></span>${isOnline ? 'Online' : 'Offline'}`;
+  }
+
+  function renderStatus(){ setStatus(hasApiKey()); }
+
+  function getStatusCode(url, headers){
+    return new Promise((resolve)=>{
+      if (typeof GM_xmlhttpRequest === 'function'){
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          headers,
+          onload: (resp)=> resolve(resp.status || 0),
+          onerror: ()=> resolve(0)
+        });
+      } else {
+        fetch(url, { method:'GET', headers })
+          .then(r=> resolve(r.status || 0))
+          .catch(()=> resolve(0));
+      }
+    });
+  }
+
+  async function pingStatus({ silent = true } = {}){
+    const key = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+    if (!key){ setStatus(false); return false; }
+    const url = `https://api.openai.com/v1/models/${encodeURIComponent(CONFIG.MODEL)}`;
+    const status = await getStatusCode(url, { 'Authorization': 'Bearer ' + key });
+    const ok = status >= 200 && status < 300;
+    setStatus(ok);
+    if (!ok && !silent){
+      const msgEl = $('#ddo-msg');
+      if (msgEl){
+        msgEl.textContent = (status === 401 || status === 403)
+          ? 'API key ongeldig of geen toegang tot model.'
+          : 'Kan OpenAI niet bereiken.';
+        msgEl.style.display = 'inline-flex';
+      }
+    }
+    return ok;
+  }
+
+  // ---------- UI helpers ----------
+  function setStat(msg){
+    const msgEl = $('#ddo-msg');
+    if (!msgEl) return;
+    if (msg && String(msg).trim()) {
+      msgEl.textContent = msg;
+      msgEl.style.display = 'inline-flex';
+    } else {
+      msgEl.textContent = '';
+      msgEl.style.display = 'none';
+    }
+  }
+
+  // Show/hide key
+  const btnShow = $('#btn-showkey');
+  if (btnShow) {
+    btnShow.addEventListener('click', ()=>{
+      const inp = $('#inp-apikey');
+      const isPw = inp.type === 'password';
+      inp.type = isPw ? 'text' : 'password';
+      btnShow.querySelector('i').className = 'fa-solid ' + (isPw ? 'fa-eye' : 'fa-eye-slash');
+    });
+  }
+
+  // Vul bestaand keyveld
+  (function preloadKey(){
+    const saved = (localStorage.getItem(CONFIG.LS_KEY) || '').trim();
+    if (saved) $('#inp-apikey').value = saved;
+  })();
+
+  // Eén settings toggle
+  const settings = $('#ddo-settings');
+  function toggleSettings(show=null){
+    const willShow = (show===null)? (settings.style.display!=='block') : show;
+    settings.style.display = willShow ? 'block' : 'none';
+    if (willShow){
+      const saved = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+      if (saved) $('#inp-apikey').value = saved;
+    }
+  }
 
   // Content/Summary in gewenste volgorde renderen (Description eerst, dan Summary)
   (function renderContentPromo(){
@@ -613,10 +713,10 @@
     const defs = CURRENT_SECTION.defaults;
 
     const items = [
-      { id:'chk-seo-page',   key:'page',   text:'Page title',     def:!!defs.seoPage },
-      { id:'chk-seo-header', key:'header', text:'Header title',   def:!!defs.seoHeader },
+      { id:'chk-seo-page',   key:'page',   text:'Page title',       def:!!defs.seoPage },
+      { id:'chk-seo-header', key:'header', text:'Header title',     def:!!defs.seoHeader },
       { id:'chk-seo-desc',   key:'desc',   text:'Meta description', def:!!defs.seoDesc },
-      { id:'chk-seo-footer', key:'footer', text:'Footer content', def:!!defs.seoFooter },
+      { id:'chk-seo-footer', key:'footer', text:'Footer content',   def:!!defs.seoFooter },
     ];
 
     items.forEach(it=>{
@@ -659,29 +759,24 @@
   }
   setMinimized(!CONFIG.MAXI_VIEW_DEFAULT);
 
-  // Settings toggle
-  const settings = $('#ddo-settings');
-  function toggleSettings(show=null){
-    const willShow = (show===null)? (settings.style.display!=='block') : show;
-    settings.style.display = willShow ? 'block' : 'none';
-  }
-
   // Listeners topbar
   $('#ddo-minimize').addEventListener('click', ()=> setMinimized(true));
   $('#ddo-gear').addEventListener('click', ()=> toggleSettings());
 
   // Settings listeners
   $('#btn-close-settings').addEventListener('click', ()=> toggleSettings(false));
-  $('#btn-savekey').addEventListener('click', ()=>{
+  $('#btn-savekey').addEventListener('click', async ()=>{
     const v = sanitizeKey($('#inp-apikey').value);
     if (v) {
       localStorage.setItem(CONFIG.LS_KEY, v);
       setStat('API key opgeslagen');
-      $('#inp-apikey').value = '';
+      renderStatus();
+      await pingStatus({ silent: true });
     } else {
       setStat('Lege key — niets opgeslagen');
     }
   });
+
   // defaults in UI zetten
   $('#opt-stay').checked = !!CONFIG.STAY_ON_TAB_DEFAULT;
   $('#opt-keys').checked = false;
@@ -704,6 +799,10 @@
   // Translate button
   $('#ddo-translate').addEventListener('click', async ()=>{
     try{
+      // check status zonder kosten
+      const ok = await pingStatus({ silent: false });
+      if (!ok) return;
+
       const langs = activeLangs();
       if (!langs.length) { setStat('Geen talen actief (vlaggen).'); return; }
 
@@ -801,6 +900,16 @@
     } catch(e){
       console.error(e);
       setStat('Fout: '+(e.message||e));
+    }
+  });
+
+  // Init status + cross-tab updates
+  renderStatus();
+  pingStatus({ silent: true });
+  window.addEventListener('storage', (e)=>{
+    if (e.key === CONFIG.LS_KEY){
+      renderStatus();
+      pingStatus({ silent: true });
     }
   });
 
