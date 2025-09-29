@@ -1,267 +1,916 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Lisca
+// @name         DDO | FluentL
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
-// @description  Vergelijk local stock met remote stock
-// @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
+// @version      2.9.0
+// @description  DDO haar eigen Vertaalmachine
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=categories&action=edit*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=brands&action=edit*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=publisher&action=edit*
+// @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        unsafeWindow
-// @run-at       document-idle
-// @connect      *
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-lisca.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-lisca.user.js
+// @connect      api.openai.com
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js
 // ==/UserScript==
 
-(() => {
+(function () {
   'use strict';
 
-  // ---------- Config ----------
-  const TIMEOUT = 15000;
-  const CACHE_KEY = 'lisca_csv_cache_v1';
-  const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
-
-  const SHEET_ID = '1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww';
-  const GID = '933070542';
-  const CSV_URL = (authuser=null, uPath=null) => {
-    if (uPath != null) return `https://docs.google.com/u/${uPath}/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
-    const base = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
-    return authuser == null ? base : `${base}&authuser=${authuser}`;
+  // ---------- CONFIG ----------
+  const CONFIG = {
+    MODEL: 'gpt-4o-mini',
+    UI_ID: 'ddo-i18n-pro',
+    OPENER_ID: 'ddo-opener',
+    LS_KEY: 'ddo-openai-key',
+    LS_LANGS: 'ddo-fluentl-langs',
+    MAX_CHARS: 120000,
+    MAXI_VIEW_DEFAULT: false,  // true = paneel zichtbaar; false = geminimaliseerd starten
+    STAY_ON_TAB_DEFAULT: true  // true = niet wisselen van tabbladen (standaard aangevinkt)
   };
 
-  const $ = (s, r=document) => r.querySelector(s);
+  // Huidige sectie uit URL
+  function getSection() {
+    const params = new URLSearchParams(location.search);
+    return (params.get('section') || '').toLowerCase();
+  }
 
-  // ---------- Logger (zoals Wacoal) ----------
-  const Logger = {
-    lb(){ return (typeof unsafeWindow!=='undefined' && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek; },
-    status(id, txt, extra){
-      // status naar console en logboek (zelfde gedrag als Wacoal)
-      console.info(`[Lisca][${id}] status: ${txt}`, extra||'');
-      const lb=this.lb();
-      if (lb?.resultaat) lb.resultaat(String(id), txt, extra);
-      else if (typeof unsafeWindow!=='undefined' && unsafeWindow.voegLogregelToe) unsafeWindow.voegLogregelToe(String(id), txt);
+  // Schema per sectie: tabs + veldmapping
+  // hideSeo: bepaal welke SEO-checks NIET getoond worden
+  const SCHEMAS = {
+    categories: {
+      tabs: { NL: '#tabs-1', ML: '#tabs-2', SEO: '#tabs-3' },
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="content"], textarea.htmleditor, [name="content"]',
+        promo:  'textarea[name="promo_content"], [name="promo_content"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][content]"]`,
+        promo:   `[name="lang[${lang}][promo_content]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,
+        header_title:     `[name="meta[${lang}][header_title]"]`,
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]`
+      }),
+      defaults: { seoPage:true, seoHeader:true, seoDesc:true, seoFooter:true,
+                  labels:{content:'Content', promo:'Promo'},
+                  orderFields:['content','promo'] },
+      hideSeo: []
     },
-    perMaat(id, report){
-      // zelfde per-maat tabel in console als in Wacoal
-      console.groupCollapsed(`[Lisca][${id}] maatvergelijking`);
-      try{
-        const rows = report.map(r => ({ maat:r.maat, local:r.local, remote:Number.isFinite(r.effRemote)?r.effRemote:'—', status:r.actie }));
-        console.table(rows);
-      } finally { console.groupEnd(); }
+
+    brands: {
+      tabs: { NL: '#tabs-1', ML: '#tabs-2', SEO: '#tabs-3' },
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="content"], textarea.htmleditor, [name="content"]',
+        promo:  'textarea[name="promo_content"], [name="promo_content"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][content]"]`,
+        promo:   `[name="lang[${lang}][promo_content]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,
+        header_title:     `[name="meta[${lang}][header_title]"]`,
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]`
+      }),
+      defaults: { seoPage:true, seoHeader:true, seoDesc:true, seoFooter:true,
+                  labels:{content:'Content', promo:'Promo'},
+                  orderFields:['content','promo'] },
+      hideSeo: []
+    },
+
+    products: {
+      // dump: ML = #tabs-9, SEO = #tabs-10
+      tabs: { NL: '#tabs-1', ML: '#tabs-9', SEO: '#tabs-10' },
+      // Map: content → description, promo → summary
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="description"], [name="description"]',
+        promo:  'textarea[name="summary"], [name="summary"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][description]"]`,
+        promo:   `[name="lang[${lang}][summary]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,      // meestal niet aanwezig
+        header_title:     `[name="meta[${lang}][header_title]"]`,    // meestal niet aanwezig
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]`   // niet aanwezig
+      }),
+      // Verzoek: meta description standaard UIT; Page/Header/Foot NIET tonen
+      defaults: { seoPage:false, seoHeader:false, seoDesc:false, seoFooter:false,
+                  labels:{content:'Description', promo:'Summary'},
+                  orderFields:['content','promo'] },
+      hideSeo: ['page','header','footer']
+    },
+
+    publisher: {
+      // dump: ML = #tabs-3, SEO = #tabs-4
+      tabs: { NL: '#tabs-1', ML: '#tabs-3', SEO: '#tabs-4' },
+      nlFields: {
+        name:   '[name="name"]',
+        title:  '[name="title"]',
+        content:'textarea[name="content"], [name="content"]',
+        promo:  'textarea[name="summary"], [name="summary"]'
+      },
+      mlFields: (lang) => ({
+        name:    `[name="lang[${lang}][name]"]`,
+        title:   `[name="lang[${lang}][title]"]`,
+        content: `[name="lang[${lang}][content]"]`,
+        promo:   `[name="lang[${lang}][summary]"]`
+      }),
+      seoFields: (lang) => ({
+        page_title:       `[name="meta[${lang}][page_title]"]`,
+        header_title:     `[name="meta[${lang}][header_title]"]`,
+        meta_description: `[name="meta[${lang}][description]"]`,
+        meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+        footer_content:   `[name="meta[${lang}][footer_content]"]` // optioneel
+      }),
+      // Verzoek: “Footer content” checkbox niet tonen
+      defaults: { seoPage:true, seoHeader:true, seoDesc:true, seoFooter:false,
+                  labels:{content:'Content', promo:'Summary'},
+                  orderFields:['content','promo'] },
+      hideSeo: ['footer']
     }
   };
 
-  // ---------- Net: CSV ophalen (mini-cache) ----------
-  function gmFetch(url, responseType='text') {
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-        responseType,
-        withCredentials: true,
-        timeout: TIMEOUT,
-        headers: { 'Accept':'text/csv,text/plain,*/*;q=0.8', 'User-Agent': navigator.userAgent },
-        onload: r => resolve(r),
-        onerror: e => reject(e),
-        ontimeout: () => reject(new Error('Timeout')),
-      });
+  const CURRENT_SECTION = SCHEMAS[getSection()] || SCHEMAS.categories;
+  const TABS = CURRENT_SECTION.tabs;
+
+  // assets
+  const FLAG_URL = {
+    de: 'https://www.dutchdesignersoutlet.com/ddo/img/de.png',
+    en: 'https://www.dutchdesignersoutlet.com/ddo/img/gb.png',
+    fr: 'https://www.dutchdesignersoutlet.com/ddo/img/fr.png',
+  };
+
+  // taalstate (vlaggen)
+  let LANG_STATE = (() => {
+    try { return JSON.parse(localStorage.getItem(CONFIG.LS_LANGS) || '{}'); } catch { return {}; }
+  })();
+  if (typeof LANG_STATE.de !== 'boolean') LANG_STATE.de = true;
+  if (typeof LANG_STATE.en !== 'boolean') LANG_STATE.en = true;
+  if (typeof LANG_STATE.fr !== 'boolean') LANG_STATE.fr = true;
+
+  const allLangs = ['de','en','fr'];
+  const activeLangs = () => allLangs.filter(l => LANG_STATE[l]);
+  const saveLangState = () => localStorage.setItem(CONFIG.LS_LANGS, JSON.stringify(LANG_STATE));
+
+  // runtime settings (niet bewaren)
+  let keywordsEnabled = false;
+  let stayOnTab = !!CONFIG.STAY_ON_TAB_DEFAULT;
+
+  // Dynamische velden helpers
+  const NL_FIELDS = () => CURRENT_SECTION.nlFields;
+  const ML_FIELDS = (lang) => CURRENT_SECTION.mlFields(lang);
+  const SEO_FIELDS = (lang) => CURRENT_SECTION.seoFields(lang);
+
+  // ---------- STYLES + ASSETS ----------
+  const linkFA = document.createElement('link');
+  linkFA.rel = 'stylesheet';
+  linkFA.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css';
+  document.head.appendChild(linkFA);
+
+  const linkOrbitron = document.createElement('link');
+  linkOrbitron.rel = 'stylesheet';
+  linkOrbitron.href = 'https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap';
+  document.head.appendChild(linkOrbitron);
+
+  const css = `
+  #${CONFIG.UI_ID}{position:fixed;right:16px;bottom:16px;z-index:999999;width:460px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #${CONFIG.UI_ID} .card{background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:14px;box-shadow:0 12px 24px rgba(0,0,0,.25);overflow:hidden}
+  #${CONFIG.UI_ID} header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#111827}
+  #${CONFIG.UI_ID} h3{margin:0;font-size:16px;font-weight:800;font-family:'Orbitron',system-ui;letter-spacing:.5px;display:flex;align-items:center;gap:10px}
+  #${CONFIG.UI_ID} .flags{display:flex;align-items:center;gap:8px;margin-left:8px}
+  #${CONFIG.UI_ID} .flag{height:16px;width:auto;border-radius:4px;padding:2px;background:transparent;cursor:pointer;transition:filter .2s ease,opacity .2s ease,transform .05s}
+  #${CONFIG.UI_ID} .flag:hover{transform:translateY(-1px)}
+  #${CONFIG.UI_ID} .flag.off{filter:grayscale(100%);opacity:.45}
+  #${CONFIG.UI_ID} .row{display:flex;gap:8px;margin:10px 12px;flex-wrap:wrap}
+  #${CONFIG.UI_ID} button{cursor:pointer;border:1px solid #374151;background:#1f2937;color:#e5e7eb;border-radius:10px;padding:8px 10px;font-size:12px}
+  #${CONFIG.UI_ID} button:hover{background:#374151}
+  #${CONFIG.UI_ID} .iconbtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px}
+  #${CONFIG.UI_ID} .chip{background:#1f2937;border:1px solid #374151;border-radius:999px;padding:4px 8px;font-size:11px}
+  #${CONFIG.UI_ID} .chip.status{display:inline-flex;align-items:center;gap:6px}
+  #${CONFIG.UI_ID} .chip.status .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+  #${CONFIG.UI_ID} .chip.status.ok .dot{background:#10b981}
+  #${CONFIG.UI_ID} .chip.status.err .dot{background:#ef4444}
+  #${CONFIG.UI_ID} .checks{display:flex;gap:12px;align-items:center}
+  #${CONFIG.UI_ID} label{font-size:12px;display:flex;align-items:center;gap:6px}
+  #${CONFIG.UI_ID} .tools{display:flex;gap:6px}
+  #${CONFIG.UI_ID} .settings{position:absolute;right:10px;top:50px;background:#0b1220;border:1px solid #334155;border-radius:12px;box-shadow:0 8px 18px rgba(0,0,0,.3);padding:12px;min-width:300px;display:none}
+  #${CONFIG.UI_ID} .settings h4{margin:0 0 8px 0;font-size:13px;color:#9ca3af}
+  #${CONFIG.UI_ID} .settings .formrow{display:flex;align-items:center;gap:6px;margin:8px 0}
+  #${CONFIG.UI_ID} .settings input[type="password"],
+  #${CONFIG.UI_ID} .settings input[type="text"]{flex:1 1 auto;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;padding:6px 8px;font-size:12px}
+  #${CONFIG.OPENER_ID}{
+    position:fixed;right:16px;bottom:16px;z-index:1000001;background:#0f172a;color:#e5e7eb;border:1px solid #334155;
+    border-radius:999px;padding:10px 12px;font-size:14px;box-shadow:0 8px 18px rgba(0,0,0,.25);cursor:pointer;display:none
+  }
+  #${CONFIG.OPENER_ID} i{font-size:16px;line-height:1}
+  `;
+  if (typeof GM_addStyle === 'function') GM_addStyle(css);
+  else { const s=document.createElement('style'); s.textContent=css; document.head.appendChild(s); }
+
+  // ---------- UTILS ----------
+  const $ = (sel,root=document)=>root.querySelector(sel);
+  const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+  function sanitizeKey(s){ return (s||'').trim().replace(/[^\x20-\x7E]/g,'').replace(/\s+/g,''); }
+
+  async function ensureTabVisible(tabSel){
+    if (stayOnTab) return; // respecteer instelling
+    const tab = $(tabSel);
+    if (tab && tab.offsetParent !== null) return;
+    const href = `a[href="${tabSel}"], [data-target="${tabSel}"], [data-bs-target="${tabSel}"]`;
+    const a = document.querySelector(href);
+    if (a) { a.click(); await sleep(350); }
+  }
+
+  function readField(el){
+    if (!el) return '';
+    if (el.tagName==='TEXTAREA' || el.tagName==='INPUT') return el.value;
+    if (el.getAttribute && el.getAttribute('contenteditable')==='true') return el.innerHTML;
+    return el.textContent;
+  }
+
+  function getNLValues(){
+    const root = $(TABS.NL) || document;
+    const S = NL_FIELDS();
+    return {
+      name:    readField($(S.name, root)),
+      title:   readField($(S.title, root)),
+      content: readField($(S.content, root)),
+      promo:   readField($(S.promo, root)),
+    };
+  }
+  function getNLSeoValues(){
+    const root = $(TABS.SEO) || document;
+    const S = SEO_FIELDS('nl');
+    return {
+      page_title:       readField($(S.page_title, root)),
+      header_title:     readField($(S.header_title, root)),
+      meta_description: readField($(S.meta_description, root)),
+      meta_keywords:    readField($(S.meta_keywords, root)),
+      footer_content:   readField($(S.footer_content, root)),
+    };
+  }
+
+  function pickTarget(lang, key){
+    const root = $(TABS.ML) || document;
+    return $(ML_FIELDS(lang)[key], root);
+  }
+  function pickSeoTarget(lang, key){
+    const root = $(TABS.SEO) || document;
+    return $(SEO_FIELDS(lang)[key], root);
+  }
+
+  // --- TinyMCE helpers ---
+  function getTextareaIframe(textarea) {
+    if (!textarea) return null;
+    const isRich =
+      textarea.classList?.contains('htmleditor') ||
+      (!!textarea.id && /mce|tinymce/i.test(textarea.id));
+    if (textarea.id) {
+      const direct = document.getElementById(textarea.id + '_ifr');
+      if (direct) return direct;
+    }
+    if (!isRich) return null;
+    let c = textarea.parentElement;
+    for (let i = 0; i < 4 && c; i++) {
+      const iframe = c.querySelector('.mceIframeContainer iframe, iframe[id$="_ifr"]');
+      if (iframe) return iframe;
+      c = c.parentElement;
+    }
+    return null;
+  }
+
+  function setIframeHtml(iframe, html) {
+    try {
+      if (!iframe) return false;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return false;
+      const body = doc.body;
+      if (!body) return false;
+      if (body.innerHTML !== html) {
+        body.innerHTML = html;
+        body.dispatchEvent(new Event('input',  { bubbles: true }));
+        body.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return true;
+    } catch (e) {
+      console.warn('setIframeHtml() failed:', e);
+      return false;
+    }
+  }
+
+  function setIntoEditor(el, html) {
+    if (!el) return false;
+    let changed = false;
+
+    if (el.tagName === 'TEXTAREA') {
+      const isRich =
+        el.classList?.contains('htmleditor') ||
+        (!!el.id && /mce|tinymce/i.test(el.id)) ||
+        !!document.getElementById((el.id || '') + '_ifr');
+
+      if (isRich) {
+        const iframe = getTextareaIframe(el);
+        if (iframe) {
+          const ok = setIframeHtml(iframe, html);
+          if (ok) {
+            changed = true;
+            if (el.value !== html) {
+              el.value = html;
+              try {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              } catch {}
+            }
+            if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
+            return changed;
+          }
+        }
+      }
+      if (el.value !== html) { el.value = html; changed = true; }
+      try {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch {}
+      return changed;
+    }
+
+    if (el.tagName === 'INPUT') {
+      if (el.value !== html) { el.value = html; changed = true; }
+    } else if (el.getAttribute && el.getAttribute('contenteditable') === 'true') {
+      if (el.innerHTML !== html) { el.innerHTML = html; changed = true; }
+    } else {
+      const inner = el.querySelector && el.querySelector('textarea, [contenteditable="true"], input');
+      if (inner) return setIntoEditor(inner, html);
+      if (el.textContent !== html) { el.textContent = html; changed = true; }
+    }
+
+    try {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch {}
+    return changed;
+  }
+
+  async function waitForSeoEditors(langArr, timeoutMs = 4000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      let allReady = true;
+      for (const lang of langArr) {
+        const taFooter = document.querySelector(SEO_FIELDS(lang).footer_content);
+        if (taFooter) {
+          const iframe = getTextareaIframe(taFooter);
+          if (!iframe) { allReady = false; break; }
+        }
+      }
+      if (allReady) return true;
+      await sleep(150);
+    }
+    return false;
+  }
+
+  // ---------- CACHING ----------
+  function djb2(str){ let h=5381; for (let i=0;i<str.length;i++) h=((h<<5)+h)+str.charCodeAt(i); return (h>>>0).toString(36); }
+  function cacheKey(obj){ return 'ddo-i18n-cache-' + djb2(JSON.stringify(obj)); }
+  function getCache(obj){
+    try { const raw = localStorage.getItem(cacheKey(obj)); if (!raw) return null;
+      const {ts,data} = JSON.parse(raw); if (Date.now()-ts>7*24*3600e3) return null; return data;
+    } catch { return null; }
+  }
+  function setCache(obj,data){ localStorage.setItem(cacheKey(obj), JSON.stringify({ts:Date.now(), data})); }
+
+  // ---------- HTTP ----------
+  function postJson(url, headers, body){
+    return new Promise((resolve,reject)=>{
+      if (typeof GM_xmlhttpRequest==='function'){
+        GM_xmlhttpRequest({
+          method:'POST', url, headers, data: JSON.stringify(body),
+          onload: (resp)=>{
+            if (resp.status>=200 && resp.status<300) {
+              try { resolve(JSON.parse(resp.responseText)); }
+              catch(e){ reject(new Error('Kon JSON niet parsen: '+e.message)); }
+            } else reject(new Error('HTTP '+resp.status+': '+resp.responseText));
+          },
+          onerror:(e)=> reject(new Error('Netwerkfout (GM): '+(e.error||'unknown')))
+        });
+      } else {
+        fetch(url,{method:'POST', headers, body: JSON.stringify(body)})
+          .then(async r=>{ const t=await r.text(); if(!r.ok) throw new Error('HTTP '+r.status+': '+t); resolve(JSON.parse(t)); })
+          .catch(reject);
+      }
     });
   }
-  function loadCache() {
-    const raw = GM_getValue(CACHE_KEY, null);
-    if (!raw) return null;
-    const { t, data } = JSON.parse(raw);
-    return (Date.now() - t <= CACHE_TTL_MS) ? data : null;
+
+  // ---------- OPENAI ----------
+  function normalizeLangKey(k=''){
+    const s = k.toLowerCase();
+    if (['en','gb','uk','english'].includes(s)) return 'en';
+    if (['de','ger','german','du'].includes(s)) return 'de';
+    if (['fr','fra','french'].includes(s)) return 'fr';
+    return s;
   }
-  function saveCache(csv) {
-    GM_setValue(CACHE_KEY, JSON.stringify({ t: Date.now(), data: csv }));
-  }
-  async function fetchLiscaCSV() {
-    const cached = loadCache();
+
+  async function translateBatch(opts) {
+    const {
+      doName, doTitle, doContent, doPromo,
+      doSeoPage, doSeoHeader, doSeoDesc, /* doSeoKeys via keywordsEnabled */ doSeoFooter
+    } = opts;
+
+    const targets = activeLangs();
+    const nl = getNLValues();
+    const nlSeo = getNLSeoValues();
+
+    const payload = {
+      name:    doName    ? (nl.name||'')    : '',
+      title:   doTitle   ? (nl.title||'')   : '',
+      content: doContent ? (nl.content||'') : '',
+      promo:   doPromo   ? (nl.promo||'')   : '',
+      page_title:       doSeoPage  ? (nlSeo.page_title||'')       : '',
+      header_title:     doSeoHeader? (nlSeo.header_title||'')     : '',
+      meta_description: doSeoDesc  ? (nlSeo.meta_description||'') : '',
+      meta_keywords:    keywordsEnabled ? (nlSeo.meta_keywords||'') : '',
+      footer_content:   doSeoFooter? (nlSeo.footer_content||'')   : ''
+    };
+
+    const compact = {};
+    Object.keys(payload).forEach(k=>{
+      compact[k] = (payload[k]||'').replace(/\s+/g,' ').trim();
+    });
+
+    const totalChars = Object.values(compact).reduce((a,b)=>a+(b?b.length:0),0);
+    if (!totalChars) throw new Error('Geen broninhoud geselecteerd.');
+    if (totalChars > CONFIG.MAX_CHARS) throw new Error('Inhoud te groot — splits even op.');
+
+    const cacheProbe = { model: CONFIG.MODEL, targets: targets.join(','), compact };
+    const cached = getCache(cacheProbe);
     if (cached) return cached;
 
-    for (let au=0; au<=4; au++){
-      const url = CSV_URL(au, null);
-      const r = await gmFetch(url,'text');
-      if (r?.status===200 && typeof r.responseText==='string' && r.responseText.trim() && !r.responseText.trim().startsWith('<')) {
-        saveCache(r.responseText); return r.responseText;
-      }
-      const uUrl = CSV_URL(null, au);
-      const r2 = await gmFetch(uUrl,'text');
-      if (r2?.status===200 && typeof r2.responseText==='string' && r2.responseText.trim() && !r2.responseText.trim().startsWith('<')) {
-        saveCache(r2.responseText); return r2.responseText;
-      }
-    }
-    throw new Error('CSV niet beschikbaar');
-  }
+    const apiKey = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+    if (!apiKey) throw new Error('Geen API key gevonden. Klik op het tandwiel om je OpenAI key in te voeren.');
 
-  // ---------- CSV → Map(EAN -> stock) (F=EAN, G=stock) ----------
-  function parseCSVtoMap(csvText) {
-    const lines = csvText.split(/\r?\n/).filter(Boolean);
-    const map = new Map();
-    for (let i=0;i<lines.length;i++){
-      const row = lines[i].split(',');
-      const ean = (row[5]||'').trim();
-      const stockStr = (row[6]||'').trim();
-      if (!ean) continue;
-      const stock = parseInt(stockStr,10);
-      map.set(ean, Number.isFinite(stock)? stock : 0);
-    }
-    return map;
-  }
+    const system = [
+      'You are a professional ecommerce translator for lingerie & fashion.',
+      'Translate Dutch (nl) to the requested target languages (EN/DE/FR).',
+      'Preserve HTML structure and only translate visible text.',
+      'Keep brand/product names and sizes as in source.',
+      'Return JSON keyed by language code (en,de,fr).',
+      'Each language object may contain: name, title, content, promo, page_title, header_title, meta_description, meta_keywords, footer_content.',
+      'For meta_keywords, return a comma-separated plain list.'
+    ].join(' ');
 
-  // ---------- Regels & markering ----------
-  function applyLiscaRulesOnTable(table, remoteMap) {
-    let changes = 0;
-    const counts = { add:0, remove:0, missing_ean_remove:0, ignore_missing_ean_local0:0 };
-    const rows = table.querySelectorAll('tbody tr');
-    const report = [];
+    const user = [
+      'Source language: nl',
+      `Targets: ${targets.join(', ') || '(none)'}`,
+      'Fields JSON:',
+      JSON.stringify(compact)
+    ].join('\n');
 
-    rows.forEach(row => {
-      const tds = row.querySelectorAll('td');
-      if (tds.length < 3) return;
-      const sizeTd  = tds[0];
-      const stockTd = tds[1];
-      const eanTd   = tds[2];
+    const body = {
+      model: CONFIG.MODEL,
+      text: { format: { type: 'json_object' } },
+      input: [
+        { role: 'system', content: system },
+        { role: 'user', content: user + '\n\nReturn ONLY the requested targets as keys.' }
+      ]
+    };
 
-      [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = ''));
-      row.removeAttribute('data-status');
+    const data = await postJson('https://api.openai.com/v1/responses',
+      { 'Authorization':'Bearer '+apiKey, 'Content-Type':'application/json' },
+      body
+    );
 
-      const local = parseInt((stockTd.textContent || '0').trim(), 10) || 0;
-      const ean = (eanTd.textContent || '').trim();
-      const remote = remoteMap.get(ean); // undefined als niet gevonden
-      const effRemote = (remote === undefined) ? undefined : (remote < 5 ? 0 : remote); // drempel <5 => 0
-
-      let actie = 'none';
-
-      if (effRemote === undefined) {
-        if (local === 0) {
-          actie = 'ignore_missing_ean_local0';
-          counts.ignore_missing_ean_local0++;
-          report.push({ maat: (sizeTd.textContent||'').trim(), ean, local, remote, effRemote, actie });
-          return;
-        }
-        [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#FFD966')); // geel
-        row.dataset.status = 'remove';
-        actie = 'missing_ean_remove';
-        counts.missing_ean_remove++; changes++;
-      } else if (local > 0 && effRemote === 0) {
-        [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#F8D7DA')); // rood
-        row.dataset.status = 'remove';
-        actie = 'remove';
-        counts.remove++; changes++;
-      } else if (local === 0 && effRemote > 0) {
-        [sizeTd, stockTd, eanTd].forEach(td => td && (td.style.background = '#D4EDDA')); // groen
-        row.dataset.status = 'add';
-        actie = 'add';
-        counts.add++; changes++;
-      }
-
-      report.push({ maat:(sizeTd.textContent||'').trim(), ean, local, remote, effRemote, actie });
-    });
-
-    return { changes, counts, report };
-  }
-
-  // ---------- Main ----------
-  async function runLisca(btn) {
-    const progress = window.StockKit.makeProgress(btn);
-    const tables = Array.from(document.querySelectorAll('#output table'));
-    if (!tables.length){ alert('Geen tabellen gevonden in #output.'); return; }
-
-    progress.start(tables.length);
-
-    const csv = await fetchLiscaCSV();
-    const remoteMap = parseCSVtoMap(csv);
-
-    let totalChanges = 0, idx = 0;
-    let firstDiffTable = null;
-
-    for (const table of tables) {
-      idx++;
-
-      // Wacoal-style anchor: product-ID = table.id
-      const pid = (table.id || '').trim();
-      const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || pid || 'onbekend';
-      const anchorId = pid || label; // exact zoals Wacoal
-
-      const { changes, counts, report } = applyLiscaRulesOnTable(table, remoteMap);
-      totalChanges += changes;
-
-      const status = changes > 0 ? 'afwijking' : 'ok';
-
-      Logger.status(anchorId, status, counts);
-      Logger.perMaat(anchorId, report);
-
-      if (!firstDiffTable && changes > 0) firstDiffTable = table;
-
-      progress.setDone(idx);
+    function extractOutputText(resp) {
+      if (!resp || typeof resp !== 'object') return '';
+      if (resp.output_text && typeof resp.output_text === 'string') return resp.output_text;
+      const out = resp.output;
+      if (Array.isArray(out) && out[0]?.content?.[0]?.text) return out[0].content[0].text;
+      if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
+      return '';
     }
 
-    progress.success(totalChanges);
+    const text = extractOutputText(data);
+    if (!text) throw new Error('Lege model-output.');
 
-    // Auto-scroll naar eerste afwijking + jumpFlash hook (optioneel)
-    if (firstDiffTable) {
-      firstDiffTable.scrollIntoView({ behavior:'smooth', block:'center' });
-      if (typeof window.jumpFlash === 'function') window.jumpFlash(firstDiffTable);
+    const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```$/,'').trim();
+    let obj = JSON.parse(clean);
+
+    const norm = {};
+    for (const k of Object.keys(obj||{})) {
+      const nk = normalizeLangKey(k);
+      norm[nk] = obj[k];
     }
+    return norm;
   }
 
   // ---------- UI ----------
-  function addButton(){
-    if (document.getElementById('lisca-btn')) return;
+  if ($(CONFIG.UI_ID) || $(CONFIG.OPENER_ID)) return;
 
-    if (!document.getElementById('stockkit-css')) {
-      const link=document.createElement('link');
-      link.id='stockkit-css';
-      link.rel='stylesheet';
-      link.href='https://lingerieoutlet.nl/tools/stock/common/stockkit.css';
-      document.head.appendChild(link);
-    }
+  // opener (max)
+  const opener = document.createElement('button');
+  opener.id = CONFIG.OPENER_ID;
+  opener.title = 'Open FluentL';
+  opener.innerHTML = '<i class="fa-solid fa-up-right-and-down-left-from-center"></i>';
+  opener.addEventListener('click', ()=> setMinimized(false));
+  document.body.appendChild(opener);
 
-    const btn=document.createElement('button');
-    btn.id='lisca-btn';
-    btn.className='sk-btn';
-    btn.textContent='🔍 Check Stock Lisca';
-    Object.assign(btn.style,{ position:'fixed', top:'8px', right:'250px', zIndex:9999, display:'none' });
-    btn.addEventListener('click', ()=>runLisca(btn));
-    document.body.appendChild(btn);
+  // paneel
+  const wrap = document.createElement('div');
+  wrap.id = CONFIG.UI_ID;
+  wrap.innerHTML = `
+    <div class="card">
+      <header>
+        <h3>
+          FluentL
+          <span class="flags" id="fluentl-flags"></span>
+        </h3>
+        <div class="tools">
+          <button id="ddo-gear" class="iconbtn" title="Instellingen"><i class="fa-solid fa-gear"></i></button>
+          <button id="ddo-minimize" class="iconbtn" title="Minimaliseer"><i class="fa-solid fa-down-left-and-up-right-to-center"></i></button>
+        </div>
+      </header>
 
-    const outputHasTables = ()=> !!document.querySelector('#output')?.querySelector('table');
+      <div class="settings" id="ddo-settings">
+        <h4>Instellingen</h4>
+        <div class="formrow">
+          <label style="min-width:64px">API key</label>
+          <input type="password" id="inp-apikey" placeholder="OpenAI API key">
+          <button id="btn-showkey" class="iconbtn" title="Toon/verberg">
+            <i class="fa-solid fa-eye-slash"></i>
+          </button>
+          <button id="btn-savekey">Opslaan</button>
+        </div>
+        <div class="formrow">
+          <label><input type="checkbox" id="opt-keys"> Meta keywords meenemen</label>
+        </div>
+        <div class="formrow">
+          <label><input type="checkbox" id="opt-stay"> Niet wisselen van tabbladen</label>
+        </div>
+        <div class="btns">
+          <button id="btn-nlcheck">NL Check</button>
+          <button id="btn-close-settings">Sluiten</button>
+        </div>
+      </div>
 
-    function isLiscaSelected(){
-      const el = document.querySelector('#leverancier-keuze');
-      if (!el) return true;
-      const v = (el.value || '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/_/g, '-');
-      return v === 'lisca';
-    }
+      <div id="ddo-body">
+        <div class="row checks" id="row-basic">
+          <label><input type="checkbox" id="chk-name" checked> Name</label>
+          <label><input type="checkbox" id="chk-title" checked> Title</label>
+          <span id="content-promoslot"></span>
+        </div>
 
-    function isBusy(){ return btn.classList.contains('is-busy'); }
-    function isTerminal(){
-      const t=(btn.textContent||'').trim();
-      return /^(?:.*)?Klaar:/u.test(t) || t.includes('❌ Fout');
-    }
-    function maybeUpdateLabel(){
-      if (!isBusy() && !isTerminal()) btn.textContent='🔍 Check Stock Lisca';
-    }
+        <div class="row checks" id="seo-checks"></div>
 
-    function toggle(){
-      btn.style.display = (outputHasTables() && isLiscaSelected()) ? 'block' : 'none';
-      if (btn.style.display==='block') maybeUpdateLabel();
-    }
+        <div class="row">
+          <button id="ddo-translate">Vertaal!</button>
+        </div>
 
-    const out=document.querySelector('#output'); if(out) new MutationObserver(toggle).observe(out,{ childList:true, subtree:true });
-    const select=document.querySelector('#leverancier-keuze'); if(select) select.addEventListener('change', toggle);
-    const upload=document.querySelector('#upload-container'); if(upload) new MutationObserver(toggle).observe(upload,{ attributes:true, attributeFilter:['style','class'] });
+        <div class="row" id="ddo-stats">
+          <span id="ddo-status" class="chip status"><span class="dot"></span>Online</span>
+          <span id="ddo-msg" class="chip" style="display:none"></span>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
 
-    toggle();
+  // ---------- STATUS (gratis ping) ----------
+  function hasApiKey(){ return !!(localStorage.getItem(CONFIG.LS_KEY)||'').trim(); }
+
+  function setStatus(isOnline){
+    const el = $('#ddo-status');
+    if (!el) return;
+    el.classList.toggle('ok', !!isOnline);
+    el.classList.toggle('err', !isOnline);
+    el.innerHTML = `<span class="dot"></span>${isOnline ? 'Online' : 'Offline'}`;
   }
 
-  (document.readyState==='loading') ? document.addEventListener('DOMContentLoaded', addButton) : addButton();
+  function renderStatus(){ setStatus(hasApiKey()); }
+
+  function getStatusCode(url, headers){
+    return new Promise((resolve)=>{
+      if (typeof GM_xmlhttpRequest === 'function'){
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          headers,
+          onload: (resp)=> resolve(resp.status || 0),
+          onerror: ()=> resolve(0)
+        });
+      } else {
+        fetch(url, { method:'GET', headers })
+          .then(r=> resolve(r.status || 0))
+          .catch(()=> resolve(0));
+      }
+    });
+  }
+
+  async function pingStatus({ silent = true } = {}){
+    const key = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+    if (!key){ setStatus(false); return false; }
+    const url = `https://api.openai.com/v1/models/${encodeURIComponent(CONFIG.MODEL)}`;
+    const status = await getStatusCode(url, { 'Authorization': 'Bearer ' + key });
+    const ok = status >= 200 && status < 300;
+    setStatus(ok);
+    if (!ok && !silent){
+      const msgEl = $('#ddo-msg');
+      if (msgEl){
+        msgEl.textContent = (status === 401 || status === 403)
+          ? 'API key ongeldig of geen toegang tot model.'
+          : 'Kan OpenAI niet bereiken.';
+        msgEl.style.display = 'inline-flex';
+      }
+    }
+    return ok;
+  }
+
+  // ---------- UI helpers ----------
+  function setStat(msg){
+    const msgEl = $('#ddo-msg');
+    if (!msgEl) return;
+    if (msg && String(msg).trim()) {
+      msgEl.textContent = msg;
+      msgEl.style.display = 'inline-flex';
+    } else {
+      msgEl.textContent = '';
+      msgEl.style.display = 'none';
+    }
+  }
+
+  // Show/hide key
+  const btnShow = $('#btn-showkey');
+  if (btnShow) {
+    btnShow.addEventListener('click', ()=>{
+      const inp = $('#inp-apikey');
+      const isPw = inp.type === 'password';
+      inp.type = isPw ? 'text' : 'password';
+      btnShow.querySelector('i').className = 'fa-solid ' + (isPw ? 'fa-eye' : 'fa-eye-slash');
+    });
+  }
+
+  // Vul bestaand keyveld
+  (function preloadKey(){
+    const saved = (localStorage.getItem(CONFIG.LS_KEY) || '').trim();
+    if (saved) $('#inp-apikey').value = saved;
+  })();
+
+  // Eén settings toggle
+  const settings = $('#ddo-settings');
+  function toggleSettings(show=null){
+    const willShow = (show===null)? (settings.style.display!=='block') : show;
+    settings.style.display = willShow ? 'block' : 'none';
+    if (willShow){
+      const saved = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+      if (saved) $('#inp-apikey').value = saved;
+    }
+  }
+
+  // Content/Summary in gewenste volgorde renderen (Description eerst, dan Summary)
+  (function renderContentPromo(){
+    const slot = $('#content-promoslot');
+    const labels = CURRENT_SECTION.defaults.labels;
+    const order = CURRENT_SECTION.defaults.orderFields || ['content','promo'];
+    const frag = document.createDocumentFragment();
+    order.forEach(key=>{
+      if (key === 'content') {
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="checkbox" id="chk-content" checked> <span id="lbl-content">${labels.content}</span>`;
+        frag.appendChild(lbl);
+      } else if (key === 'promo') {
+        const lbl = document.createElement('label');
+        lbl.innerHTML = `<input type="checkbox" id="chk-promo" checked> <span id="lbl-promo">${labels.promo}</span>`;
+        frag.appendChild(lbl);
+      }
+    });
+    slot.replaceWith(frag);
+  })();
+
+  // SEO-checks dynamisch tonen + defaults
+  (function renderSeoChecks(){
+    const host = $('#seo-checks');
+    const hide = new Set(CURRENT_SECTION.hideSeo || []);
+    const defs = CURRENT_SECTION.defaults;
+
+    const items = [
+      { id:'chk-seo-page',   key:'page',   text:'Page title',       def:!!defs.seoPage },
+      { id:'chk-seo-header', key:'header', text:'Header title',     def:!!defs.seoHeader },
+      { id:'chk-seo-desc',   key:'desc',   text:'Meta description', def:!!defs.seoDesc },
+      { id:'chk-seo-footer', key:'footer', text:'Footer content',   def:!!defs.seoFooter },
+    ];
+
+    items.forEach(it=>{
+      if (hide.has(it.key)) return; // niet tonen
+      const label = document.createElement('label');
+      label.innerHTML = `<input type="checkbox" id="${it.id}" ${it.def?'checked':''}> ${it.text}`;
+      host.appendChild(label);
+    });
+  })();
+
+  // Flags render
+  function renderFlags(){
+    const host = $('#fluentl-flags');
+    if (!host) return;
+    host.innerHTML = '';
+    for (const lang of allLangs) {
+      const img = document.createElement('img');
+      img.src = FLAG_URL[lang];
+      img.alt = lang.toUpperCase();
+      img.className = 'flag' + (LANG_STATE[lang] ? '' : ' off');
+      img.dataset.lang = lang;
+      img.title = `Toggle ${lang.toUpperCase()}`;
+      img.addEventListener('click', ()=>{
+        LANG_STATE[lang] = !LANG_STATE[lang];
+        saveLangState();
+        renderFlags();
+      });
+      host.appendChild(img);
+    }
+  }
+  renderFlags();
+
+  // Minimizer / Maximizer
+  function setMinimized(min) {
+    const wrapEl = $('#'+CONFIG.UI_ID);
+    const op = $('#'+CONFIG.OPENER_ID);
+    if (!wrapEl || !op) return;
+    if (min) { wrapEl.style.display = 'none'; op.style.display = 'inline-block'; }
+    else     { wrapEl.style.display = 'block'; op.style.display = 'none'; }
+  }
+  setMinimized(!CONFIG.MAXI_VIEW_DEFAULT);
+
+  // Listeners topbar
+  $('#ddo-minimize').addEventListener('click', ()=> setMinimized(true));
+  $('#ddo-gear').addEventListener('click', ()=> toggleSettings());
+
+  // Settings listeners
+  $('#btn-close-settings').addEventListener('click', ()=> toggleSettings(false));
+  $('#btn-savekey').addEventListener('click', async ()=>{
+    const v = sanitizeKey($('#inp-apikey').value);
+    if (v) {
+      localStorage.setItem(CONFIG.LS_KEY, v);
+      setStat('API key opgeslagen');
+      renderStatus();
+      await pingStatus({ silent: true });
+    } else {
+      setStat('Lege key — niets opgeslagen');
+    }
+  });
+
+  // defaults in UI zetten
+  $('#opt-stay').checked = !!CONFIG.STAY_ON_TAB_DEFAULT;
+  $('#opt-keys').checked = false;
+
+  $('#opt-keys').addEventListener('change', (e)=> { keywordsEnabled = !!e.target.checked; });
+  $('#opt-stay').addEventListener('change', (e)=> { stayOnTab = !!e.target.checked; });
+
+  $('#btn-nlcheck').addEventListener('click', ()=>{
+    const v = getNLValues();
+    const s = getNLSeoValues();
+    const act = activeLangs().map(x=>x.toUpperCase()).join('/');
+    const report = [
+      `Actief: ${act || '—'}`,
+      `${TABS.NL} → Name:${(v.name||'').length} | Title:${(v.title||'').length} | ${CURRENT_SECTION.defaults.labels.content}:${(v.content||'').length} | ${CURRENT_SECTION.defaults.labels.promo}:${(v.promo||'').length}`,
+      `${TABS.SEO} → Page:${(s.page_title||'').length} | Header:${(s.header_title||'').length} | Desc:${(s.meta_description||'').length} | Keys:${(s.meta_keywords||'').length} | Footer:${(s.footer_content||'').length}`
+    ];
+    setStat(report.join(' — '));
+  });
+
+  // Translate button
+  $('#ddo-translate').addEventListener('click', async ()=>{
+    try{
+      // check status zonder kosten
+      const ok = await pingStatus({ silent: false });
+      if (!ok) return;
+
+      const langs = activeLangs();
+      if (!langs.length) { setStat('Geen talen actief (vlaggen).'); return; }
+
+      const doName    = $('#chk-name').checked;
+      const doTitle   = $('#chk-title').checked;
+      const doContent = $('#chk-content')?.checked;
+      const doPromo   = $('#chk-promo')?.checked;
+
+      const doSeoPage   = $('#chk-seo-page')?.checked;
+      const doSeoHeader = $('#chk-seo-header')?.checked;
+      const doSeoDesc   = $('#chk-seo-desc')?.checked;
+      const doSeoFooter = $('#chk-seo-footer')?.checked;
+
+      const base = getNLValues();
+      const seo  = getNLSeoValues();
+      const totalChars =
+        (doName?(base.name||'').length:0) +
+        (doTitle?(base.title||'').length:0) +
+        (doContent?(base.content||'').length:0) +
+        (doPromo?(base.promo||'').length:0) +
+        (doSeoPage?(seo.page_title||'').length:0) +
+        (doSeoHeader?(seo.header_title||'').length:0) +
+        (doSeoDesc?(seo.meta_description||'').length:0) +
+        (keywordsEnabled?(seo.meta_keywords||'').length:0) +
+        (doSeoFooter?(seo.footer_content||'').length:0);
+
+      if (!totalChars) { setStat('Geen broninhoud (NL) geselecteerd.'); return; }
+      if (totalChars > CONFIG.MAX_CHARS) { setStat('Inhoud te groot — splits even op.'); return; }
+
+      setStat('Vertalen…');
+      const out = await translateBatch({
+        doName, doTitle, doContent, doPromo,
+        doSeoPage, doSeoHeader, doSeoDesc, doSeoFooter
+      });
+
+      // Vul ML
+      await ensureTabVisible(TABS.ML);
+      let filled = 0;
+      const touched = [];
+
+      for (const lang of langs) {
+        const pack = out[lang] || {};
+
+        if (doName && pack.name) {
+          const el = pickTarget(lang,'name');
+          if (setIntoEditor(el, pack.name)) { filled++; touched.push(`${lang}:name`); }
+        }
+        if (doTitle && pack.title) {
+          const elT = pickTarget(lang,'title');
+          if (setIntoEditor(elT, pack.title)) { filled++; touched.push(`${lang}:title`); }
+        }
+        if (doContent && pack.content) {
+          const elC = pickTarget(lang,'content');
+          if (setIntoEditor(elC, pack.content)) { filled++; touched.push(`${lang}:content`); }
+        }
+        if (doPromo && pack.promo) {
+          const elP = pickTarget(lang,'promo');
+          if (setIntoEditor(elP, pack.promo)) { filled++; touched.push(`${lang}:promo`); }
+        }
+      }
+
+      // Vul SEO
+      await ensureTabVisible(TABS.SEO);
+      await waitForSeoEditors(langs);
+
+      for (const lang of langs) {
+        const pack = out[lang] || {};
+
+        if (doSeoPage && pack.page_title) {
+          const el = pickSeoTarget(lang,'page_title');
+          if (setIntoEditor(el, pack.page_title)) { filled++; touched.push(`${lang}:seo_page_title`); }
+        }
+        if (doSeoHeader && pack.header_title) {
+          const el = pickSeoTarget(lang,'header_title');
+          if (setIntoEditor(el, pack.header_title)) { filled++; touched.push(`${lang}:seo_header_title`); }
+        }
+        if (doSeoDesc && pack.meta_description) {
+          const el = pickSeoTarget(lang,'meta_description');
+          if (setIntoEditor(el, pack.meta_description)) { filled++; touched.push(`${lang}:seo_meta_description`); }
+        }
+        if (keywordsEnabled && pack.meta_keywords) {
+          const el = pickSeoTarget(lang,'meta_keywords');
+          if (setIntoEditor(el, pack.meta_keywords)) { filled++; touched.push(`${lang}:seo_meta_keywords`); }
+        }
+        if (doSeoFooter && pack.footer_content) {
+          const el = pickSeoTarget(lang,'footer_content');
+          if (setIntoEditor(el, pack.footer_content)) { filled++; touched.push(`${lang}:seo_footer_content`); }
+        }
+      }
+
+      if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
+
+      if (console && console.table) console.table(touched.map(x=>({changed:x})));
+      setStat(`Klaar: ${filled} veld(en) gevuld • Actief: ${langs.map(x=>x.toUpperCase()).join('/')} • Sectie: ${getSection()||'categories'}`);
+    } catch(e){
+      console.error(e);
+      setStat('Fout: '+(e.message||e));
+    }
+  });
+
+  // Init status + cross-tab updates
+  renderStatus();
+  pingStatus({ silent: true });
+  window.addEventListener('storage', (e)=>{
+    if (e.key === CONFIG.LS_KEY){
+      renderStatus();
+      pingStatus({ silent: true });
+    }
+  });
+
 })();
