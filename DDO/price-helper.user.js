@@ -42,7 +42,7 @@
   function addStyles() {
     if (document.getElementById('ddo-price-helpers-css')) return;
     const css = `
-      .ddo-price-actions{display:inline-flex;gap:6px;margin-left:8px;vertical-align:middle;flex-wrap:wrap}
+      .ddo-price-actions{display:inline-flex;vertical-align:middle;flex-wrap:wrap}
       .ddo-price-btn{font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:4px 8px;border-radius:6px;border:1px solid #d0d0d0;background:#eee;color:#333;cursor:pointer;transition:background-color .12s,color .12s,border-color .12s,transform .06s;user-select:none}
       .ddo-price-btn:hover{background:linear-gradient(0deg,#ff7a00 0%,#ffb300 100%);color:#111;border-color:#ff7a00}
       .ddo-price-btn:active{transform:translateY(1px)}
