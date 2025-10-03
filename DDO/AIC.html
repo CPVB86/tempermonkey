@@ -1,0 +1,338 @@
+
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anita's Invoice Checker</title>
+
+  <!-- Title font -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root { --gap: 14px; --pad: 16px; }
+    /* Global (light theme) */
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial; margin: 0; background: #f5f5f5; color: #111; }
+
+    /* Sticky header */
+    header { position: sticky; top: 0; background: #fff; height: 50px; padding: 0 20px; border-bottom: 1px solid #ccc; z-index: 10; display: flex; align-items: center; justify-content: space-between; }
+    h1.title { font-family: 'Orbitron', sans-serif; font-size: 20px; margin: 0; }
+
+    /* Layout */
+    .wrap { display: grid; grid-template-columns: 360px 1fr; gap: var(--gap); padding: var(--pad); }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.05); max-height: 80vh; }
+    .card h2 { font-size: 14px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #eee; color: #333; letter-spacing:.2px }
+    .card .body { padding: 16px; }
+
+    /* Result card */
+    .result_card h2 { font-size: 14px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #eee; color: #333; letter-spacing:.2px }
+    .result_card .body { padding: 16px; }
+
+    /* Inputs */
+    label { display: block; font-size: 12px; color: #333; margin-bottom: 6px; }
+    input[type="file"], input[type="url"] { width: 95%; border-radius: 10px; padding: 10px 8px; border: 1px solid #ddd; background: #fff; color: #111; }
+    .help { font-size: 12px; color: #666; line-height: 1.4; }
+    .small { color:#666; }
+
+    .btn { display: inline-flex; align-items:center; gap:8px; border: 1px solid #ddd; background: #fff; color: #111; padding: 10px 14px; border-radius: 12px; cursor: pointer; text-decoration: none; user-select: none; }
+    .btn:hover { background:#f7f9ff; border-color:#bfd0ff; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+
+    .stack { display:flex; flex-wrap:wrap; gap:10px; }
+    .log { display: none; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; background: #fff; border:1px solid #ddd; padding:12px; border-radius: 10px; max-height: 180px; overflow:auto; white-space:pre-wrap; color:#222; }
+
+    /* Drag/drop zone */
+    .paste-zone { border: 2px dashed #aaa; padding: 2em; cursor: pointer; background: #fff; border-radius: 8px; transition: background 0.3s, border-color 0.3s; text-align: center; max-width: 90%; margin-top: 6px; }
+    .paste-zone.dragover { background: #f0f7ff; border-color: #2b5cff; }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+    th { text-align: left; color: #333; position: sticky; top: 0; background: #fafafa; }
+
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid #ddd; background:#fff; }
+    .ok { color:#0a6b2d; border-color:#bfe7c8; background:#e9f7ec; }
+    .warn { color:#7a4a00; border-color:#f4d7a6; background:#fff5e6; }
+
+    .sale-cell a.cart { margin-left: 8px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none; border:0; padding:0 6px; border-radius: 8px; font-size: 12px; line-height: 18px; height: 18px; }
+  </style>
+
+  <!-- pdf.js (stable) -->
+  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';</script>
+</head>
+<body>
+  <header>
+    <h1 class="title">Anita's Invoice Checker</h1>
+  </header>
+
+  <div class="wrap">
+    <aside class="card">
+      <h2>Facturen</h2>
+      <div class="body">
+        <div id="dropZone" class="paste-zone">Drop hier de Anita facturen<br><span class="small">of klik om te selecteren</span></div>
+        <input id="pdfs" type="file" accept="application/pdf" multiple style="display:none" />
+      </div>
+
+      <h2>Vergelijklijst</h2>
+      <div class="body">
+        <div class="stack" style="margin-top:8px">
+          <button id="loadCodes" class="btn">Controleer</button>
+          <button id="clearCodes" style="display: none;" class="btn">Wissen</button>
+          <button id="dlCsv" style="display: none;" class="btn">Exporteer resultaat</button>
+        </div>
+        <div id="log" class="log" style="margin-top:10px">Klaar…</div>
+      </div>
+    </aside>
+
+    <main class="result_card">
+      <h2>Resultaten</h2>
+      <div class="body">
+        <div id="summary" class="stack" style="margin-bottom:12px"></div>
+        <div style="overflow:auto">
+          <table id="tbl">
+            <thead>
+              <tr>
+                <th>Pos</th>
+                <th>Code</th>
+                <th>Herkomst factuur</th>
+                <th>Sale</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const log = (msg) => { const el = $('#log'); if(!el) return; el.textContent += (el.textContent ? "\n" : "") + msg; el.scrollTop = el.scrollHeight; };
+
+    let pdfFiles = [];
+    let rows = []; // {pos, code, file, sale}
+    let compareSet = new Set();
+    let compareUrl = new Map(); // CODE (upper) -> URL
+
+    // POS-regel: "001 4761X C 408 ..." of "014 M5 8851-1 E 001 ..."
+    const ROW_RE = /^\s*(\d{3})\s+(?:M\d\s+)?([A-Z0-9-]+)\s+([A-Z]{1,2})\s+(\d{2,3})\b/i;
+    const CODE_ONLY = /\b([A-Z0-9]{3,10}-\d{2,3})\b/;
+
+    // === Drag & drop for PDFs ===
+    function setPdfFiles(files){
+      const dz = $('#dropZone');
+      pdfFiles = Array.from(files || []).filter(f => /\.pdf$/i.test(f.name));
+      const n = pdfFiles.length;
+      const label = n ? ('✅ ' + n + ' ' + (n === 1 ? 'factuur' : 'facturen') + ' klaar') : 'Drop hier de Anita facturen<br><span class="small">of klik om te selecteren</span>';
+      dz.innerHTML = label;
+      log('PDFs geselecteerd: ' + n);
+      if(n) processAllPdfs();
+    }
+
+    $('#pdfs').addEventListener('change', (e)=> setPdfFiles(e.target.files));
+    const dz = document.getElementById('dropZone');
+    dz.addEventListener('click', ()=> document.getElementById('pdfs').click());
+    ['dragenter','dragover'].forEach(ev=> dz.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); }));
+    ['dragleave','drop'].forEach(ev=> dz.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); }));
+    dz.addEventListener('drop', (e)=> setPdfFiles(e.dataTransfer.files));
+
+    // === Vergelijklijst uit vaste Google Sheet ===
+    const SHEET_ID = '1WfdA1EJtLancYOyc-vbg9cqGDyf-5_x-fm6LeQ7cmUU';
+    const SHEET_GID = '0'; // pas aan als een ander tabblad nodig is
+
+    document.getElementById('loadCodes').addEventListener('click', async ()=>{
+      try {
+        await loadFixedSheet();
+      } catch (err) {
+        console.error(err);
+        alert('Kon de Google Sheet niet laden. Publiceer als TSV of zorg dat "Iedereen met de link" kan bekijken. Fout: ' + (err && err.message ? err.message : err));
+      }
+    });
+
+    document.getElementById('clearCodes').addEventListener('click', ()=>{
+      compareSet = new Set();
+      compareUrl = new Map();
+      computeSale();
+      render();
+      log('Vergelijklijst gewist');
+    });
+
+    async function loadFixedSheet(){
+      const tsv = await fetchGoogleSheetTSVById(SHEET_ID, SHEET_GID);
+      const parsed = parseCompareInput(tsv);
+      compareSet = parsed.set;
+      compareUrl = parsed.urlMap;
+      computeSale();
+      render();
+      log('Google Sheet geladen: ' + compareSet.size + ' codes' + (compareUrl.size? ' (met URL)':''));
+    }
+
+    async function fetchGoogleSheetTSVById(id, gid){
+      const urls = [
+        'https://docs.google.com/spreadsheets/d/' + id + '/export?format=tsv&gid=' + (gid||'0'),
+        'https://docs.google.com/spreadsheets/d/' + id + '/pub?gid=' + (gid||'0') + '&single=true&output=tsv'
+      ];
+      let lastErr = null;
+      for(const u of urls){
+        try { return await fetchText(u); } catch(e){ lastErr = e; }
+      }
+      throw lastErr || new Error('Download is mislukt');
+    }
+
+    async function fetchText(url){
+      const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.text();
+    }
+
+    function parseCompareInput(text){
+      const set = new Set();
+      const urlMap = new Map();
+      if(!text) return { set, urlMap };
+      const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+      for(const line of lines){
+        const parts = line.split('\t');
+        if(parts.length > 1){
+          let code = null;
+          for(const part of parts){ const m = CODE_ONLY.exec(part); if(m){ code = m[1]; break; } }
+          if(!code){
+            const art = (parts[1]||'').trim(); const kleur = (parts[3]||'').trim();
+            if(art && kleur) code = art + '-' + kleur;
+          }
+          if(code){
+            const up = code.toUpperCase();
+            set.add(up);
+            for(let i=parts.length-1;i>=0;i--){
+              const candidate = String(parts[i]||'').trim();
+              if(/^https?:\/\//i.test(candidate)){ urlMap.set(up, candidate); break; }
+            }
+          }
+        } else {
+          const m = CODE_ONLY.exec(line);
+          if(m){ set.add(m[1].toUpperCase()); }
+        }
+      }
+      return { set, urlMap };
+    }
+
+    function saleValueFor(code){
+      if(compareSet.size===0) return '';
+      return compareSet.has(code.toUpperCase()) ? 'Ja' : 'Nee';
+    }
+
+    function computeSale(){ rows = rows.map(r => ({...r, sale: saleValueFor(r.code)})); }
+
+    async function processAllPdfs(){
+      rows = [];
+      $('#tbl tbody').innerHTML='';
+      $('#summary').innerHTML='';
+      for(let i=0;i<pdfFiles.length;i++){
+        const f = pdfFiles[i];
+        try{
+          const found = await extractPosCodesFromPdf(f);
+          rows.push(...found);
+          log('• ' + f.name + ' → ' + found.length + ' regels');
+        }catch(err){ log('✖ ' + f.name + ': ' + (err && err.message ? err.message : err)); console.error(err); }
+      }
+      computeSale();
+      render();
+    }
+
+    async function extractPosCodesFromPdf(file){
+      const arr = new Uint8Array(await file.arrayBuffer());
+      const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
+      const out = [];
+      for(let p=1; p<=pdf.numPages; p++){
+        const page = await pdf.getPage(p);
+        const tc = await page.getTextContent();
+
+        // Reconstructeer regels via coördinaten
+        const tol = 2; // y-tolerantie
+        const groups = [];
+        for(const it of tc.items){
+          const y = it.transform[5];
+          const x = it.transform[4];
+          let g = groups.find(r => Math.abs(r.y - y) <= tol);
+          if(!g){ g = { y, items: [] }; groups.push(g); }
+          g.items.push({ x, str: it.str });
+        }
+        groups.sort((a,b)=> b.y - a.y);
+        const lines = groups.map(g => g.items.sort((a,b)=> a.x - b.x).map(i=>i.str).join(' '));
+
+        let pageFound = 0;
+        for(const line of lines){
+          const m = ROW_RE.exec(line); ROW_RE.lastIndex = 0;
+          if(m){
+            const pos = m[1];
+            const art = m[2].replace(/\s+/g,'');
+            const kleur = m[4];
+            const code = art + '-' + kleur;
+            out.push({ pos, code, file: file.name, sale: '' });
+            pageFound++;
+          }
+        }
+
+        if(pageFound===0){
+          log('(debug ' + file.name + ' p.' + p + ') 0 POS-regels; voorbeeld:');
+          for(let i=0;i<Math.min(5, lines.length); i++){ log('  ' + lines[i]); }
+        }
+      }
+      // de-dupe op (file,pos,code)
+      const seen = new Set();
+      return out.filter(r=>{ const k=r.file+'|'+r.pos+'|'+r.code; if(seen.has(k)) return false; seen.add(k); return true; });
+    }
+
+    function render(){
+      const tb = $('#tbl tbody');
+      tb.innerHTML = '';
+      const sorted = [].concat(rows).sort((a,b)=> (a.file.localeCompare(b.file) || (a.pos||'').localeCompare(b.pos||'') || a.code.localeCompare(b.code)));
+      for(const r of sorted){
+        const tr = document.createElement('tr');
+
+        const tdPos = document.createElement('td'); tdPos.textContent = r.pos || ''; tr.appendChild(tdPos);
+        const tdCode = document.createElement('td'); tdCode.textContent = r.code; tr.appendChild(tdCode);
+        const tdFile = document.createElement('td'); tdFile.textContent = r.file; tr.appendChild(tdFile);
+
+        const tdSale = document.createElement('td'); tdSale.className = 'sale-cell';
+        if(r.sale === 'Ja'){
+          const up = r.code.toUpperCase();
+          const url = compareUrl.get(up);
+          if(url && /^https?:\/\//i.test(url)){
+            tdSale.innerHTML = 'Ja <a class="cart" href="'+escapeHtml(url)+'" target="_blank" rel="noopener noreferrer" title="Open product (leverancier)">🛒</a>';
+          } else {
+            tdSale.textContent = 'Ja';
+          }
+        } else {
+          tdSale.textContent = r.sale || '';
+        }
+        tr.appendChild(tdSale);
+
+        tb.appendChild(tr);
+      }
+      const s = $('#summary'); s.innerHTML = '';
+      const mk = (label, val, cls)=>{ const span=document.createElement('span'); span.className='pill '+(cls||''); span.textContent = label + ': ' + val; return span; };
+      const total = rows.length; const matched = rows.filter(r=>r.sale==='Ja').length; const unmatched = compareSet.size? rows.filter(r=>r.sale==='Nee').length : 0;
+      s.append(mk('Regels', total, 'ok'), mk('Sale=Ja', matched, matched? 'ok':'warn'), mk(compareSet.size? 'Sale=Nee':'Nog niet vergeleken', compareSet.size? unmatched : '\u2014', compareSet.size? 'warn':''));
+    }
+
+    // CSV export (4 kolommen)
+    document.getElementById('dlCsv').addEventListener('click', ()=>{
+      const cols = ['Pos','Code','Herkomst factuur','Sale'];
+      const lines = [cols.join(',')];
+      for(const r of rows){
+        const vals = [r.pos||'', r.code, r.file, r.sale||''];
+        lines.push(vals.map(v => /[",\n]/.test(String(v)) ? '"'+String(v).replace(/"/g,'""')+'"' : v).join(','));
+      }
+      const csv = lines.join('\n');
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+      a.download='pos_code_lijst.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    });
+
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]); }); }
+
+    console.log('pdfjs loaded?', !!window.pdfjsLib);
+  </script>
+</body>
+</html>
