@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Voorraadchecker Proxy - Naturana
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.2
+// @version      1.3
 // @description  Vergelijk local stock met Naturana stock (sneller en stabieler)
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://naturana-online.de/*
@@ -20,8 +20,7 @@
   'use strict';
 
   // ============ Shared ============
-  // BELANGRIJK: Naturana gebruikt "ModellView" met dubbel L
-  const MODELVIEW_URL   = 'https://naturana-online.de/naturana/ModellView';
+  const MODELVIEW_URL   = 'https://naturana-online.de/naturana/ModellView'; // dubbel L
   const ARTICLEVIEW_URL = 'https://naturana-online.de/naturana/ArticleView';
 
   const TIMEOUT_MS   = 20000;
@@ -31,7 +30,7 @@
   const HB_INTERVAL   = 2500;
 
   // Bridge tuning
-  const BRIDGE_CONCURRENCY = 4; // 3–4 is prima
+  const BRIDGE_CONCURRENCY = 4;
 
   // Client tuning
   const CONFIG = {
@@ -41,7 +40,7 @@
       backoffStart: 600,
       backoffMax: 5000,
       keepAlive: true,
-      clientConcurrency: 3, // 3 parallelle modellen
+      clientConcurrency: 3,
     }
   };
 
@@ -62,17 +61,14 @@
 
   // ============ Bridge (Naturana) ============
   if (ON_NATURANA){
-    // heartbeat badge
     setInterval(()=>{ GM_setValue(HEARTBEAT_KEY, Date.now()); }, HB_INTERVAL);
 
-    // ping/pong voor detectie
     forEachChannel(ch=>{
       GM_addValueChangeListener(ch.ping, (_n,_o,msg)=>{
         if (msg==='ping') GM_setValue(ch.pong, 'pong:'+Date.now());
       });
     });
 
-    // --- Pool i.p.v. single queue ---
     const q = [];
     let active = 0;
 
@@ -111,7 +107,6 @@
       });
     });
 
-    // info
     if (document.readyState!=='loading') console.info('[Naturana Bridge] actief op', location.href);
     else document.addEventListener('DOMContentLoaded', ()=>console.info('[Naturana Bridge] actief op', location.href));
     return;
@@ -128,10 +123,11 @@
       console.groupCollapsed(`[Naturana][${id}] maatvergelijking`);
       try{
         console.table(report.map(r=>({
-          maat:r.maat,
-          local:r.local,
-          remote:Number.isFinite(r.sup)?r.sup:'—',
-          status:r.actie
+          maat:   r.maat,
+          local:  r.local,
+          remote: Number.isFinite(r.remote) ? r.remote : '—', // feitelijke Naturana-stock
+          stock:  Number.isFinite(r.stock)  ? r.stock  : '—', // toegepaste interne waarde
+          status: r.actie
         })));
       } finally{
         console.groupEnd();
@@ -243,10 +239,6 @@
   }
 
   // ---- Naturana stock → interne stockwaarde ----
-  // naturana <3  => wij 0
-  // naturana 3   => wij 2
-  // naturana 4   => wij 4
-  // naturana >4  => wij 5
   function mapNaturanaStockLevel(stockNum){
     const n = Number(stockNum) || 0;
     if (n < 3)  return 0;
@@ -264,7 +256,6 @@
     const t=(doc.body?.textContent||'').toLowerCase();
     if(t.includes('login') && (t.includes('password')||t.includes('passwort'))) return {};
 
-    // Naturana: voorraad zit in input.gridAmount (max attribuut + CSS kleur)
     const inputs=doc.querySelectorAll('.color-size-grid input.gridAmount');
     inputs.forEach(inp=>{
       const wrap=inp.closest('.p-2.text-center, [id*="_divOID_"]')||inp.parentElement; if(!wrap) return;
@@ -273,26 +264,18 @@
 
       const size=sizeEl.textContent.trim().toUpperCase();
 
-      // max = aantal dat je kunt bestellen (proxy voor stock)
       let stockNum=parseInt(inp.getAttribute('max') || '0',10);
       if(!Number.isFinite(stockNum) || stockNum<0) stockNum=0;
 
-      // statuskleur uit CSS variabele --availability-color
       const styleVal=inp.getAttribute('style') || '';
       const mColor=styleVal.match(/--availability-color:\s*(#[0-9a-fA-F]{6})/i);
       const colorHex=mColor ? mColor[1].toUpperCase() : null;
 
-      // Legenda (uit de HTML):
-      // #2AE849 → SOFORT
-      // #E8B41E → RESTBESTÄNDE
-      // #1E6AE8 → MIT LIEFERZEIT
       let status='OUT_OF_STOCK';
 
       if (stockNum > 0){
-        // SOFORT + RESTBESTÄNDE zien we als IN_STOCK
         status='IN_STOCK';
       } else if (colorHex === '#1E6AE8'){
-        // MIT LIEFERZEIT: geen directe voorraad, maar wél leverbaar → LOW
         status='LOW';
       } else {
         status='OUT_OF_STOCK';
@@ -303,7 +286,6 @@
       }
     });
 
-    // fallback (extra defensief voor toekomstige layout tweaks)
     if(Object.keys(map).length===0){
       let m;
       const sizeRe   = /class="gridSize"[^>]*>([^<]+)/gi;
@@ -351,19 +333,16 @@
     rows.forEach(row=>{
       const maat=(row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
       const local=parseInt((row.children[1]?.textContent||'').trim(),10)||0;
-      const remote=resolveRemote(statusMap, maat);
-      const st=remote?.status;
-      const stockNum=Number(remote?.stock ?? 0)||0;
+      const remoteEntry=resolveRemote(statusMap, maat);
+      const st=remoteEntry?.status;
+      const supplierStock=Number(remoteEntry?.stock ?? 0)||0;
 
-      // supVal = interne "doel-stock" o.b.v. Naturana
       let supVal;
       if (st === 'IN_STOCK') {
-        supVal = mapNaturanaStockLevel(stockNum);
+        supVal = mapNaturanaStockLevel(supplierStock);
       } else if (st) {
-        // LOW / OUT_OF_STOCK → voor ons 0
         supVal = 0;
       } else {
-        // maat bestaat niet bij Naturana
         supVal = -1;
       }
 
@@ -396,7 +375,8 @@
         actie='negeren';
       }
 
-      report.push({ maat, local, sup:supVal, actie });
+      // remote = feitelijke leverancierstock, stock = toegepaste interne waarde
+      report.push({ maat, local, remote: supplierStock, stock: supVal, actie });
     });
 
     if(firstMut) jumpFlash(firstMut);
@@ -447,10 +427,8 @@
 
     if (!state.doc || !state.vs) await ensureFreshMV();
 
-    // probeer met bestaande tokens
     let item = findModelItem(state.doc, pidColor);
     if (!item) {
-      // refresh 1× en opnieuw
       await ensureFreshMV();
       item = findModelItem(state.doc, pidColor);
       if (!item) throw new Error('TARGET_NOT_FOUND');
@@ -468,7 +446,6 @@
     if (isLoginPage(resp)) throw new Error('LOGIN_REQUIRED');
 
     if (!/gridSize|gridAmount|color-size-grid/i.test(resp)) {
-      // tokens kunnen stale zijn → één harde refresh + nog eens posten
       await ensureFreshMV();
       const item2 = findModelItem(state.doc, pidColor);
       if (!item2) throw new Error('TARGET_NOT_FOUND');
@@ -497,7 +474,6 @@
       return;
     }
 
-    // Logincheck + init state via ModellView (scheelt extra ArticleView-ping)
     const mvHtml = await httpGET(MODELVIEW_URL);
     if (isLoginPage(mvHtml)){
       alert('Niet ingelogd op Naturana. Log in op Naturana-tab.');
@@ -519,12 +495,10 @@
       const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || pidColor || 'onbekend';
       const anchorId = pidColor || label;
 
-      // lichte jitter zodat requests niet perfect tegelijk schieten
       await jitter();
 
       try{
         const html = await openArticleViewViaPostback_cached(pidColor, state);
-        // console.info('[Naturana][adv] Geopend voor', pidColor, '→', articleSummary(html));
         const statusMap=buildStatusMapFromArticleView(html);
 
         if (!statusMap || Object.keys(statusMap).length===0){
@@ -538,7 +512,6 @@
         Logger.status(anchorId, bepaalLogStatus(report,statusMap));
         Logger.perMaat(anchorId, report);
 
-        // succes → backoff reset
         backoff=CONFIG.NAV.backoffStart;
 
       }catch(e){
@@ -546,7 +519,7 @@
         const emsg = String(e.message||e);
         if (emsg==='LOGIN_REQUIRED'){
           alert('Naturana wil opnieuw inloggen. Stop advanced. Log in en probeer opnieuw.');
-          throw e; // abort alle parallelle taken
+          throw e;
         }
         if (emsg==='TARGET_NOT_FOUND'){
           Logger.status(anchorId,'niet-gevonden');
@@ -557,7 +530,6 @@
         }
       } finally {
         progress.setDone(++idx);
-        // milde globale backoff om anti-bot te pleasen
         await delay(backoff);
         if (backoff<CONFIG.NAV.backoffMax) backoff=Math.min(CONFIG.NAV.backoffMax, backoff*1.2);
       }
@@ -600,7 +572,6 @@
       paddingRight: '26px'
     });
 
-    // badge
     const badge=document.createElement('span');
     badge.className='naturana-badge';
     Object.assign(badge.style, {
@@ -628,7 +599,7 @@
 
     const setBadge=(ok)=>{ badge.style.background = ok ? '#24b300' : 'red'; };
     setBadge(bridgeIsOnlineByHeartbeat());
-    GM_addValueChangeListener(HEARTBEAT_KEY, (_n,_o,_t)=> setBadge(true));
+    GM_addValueChangeListener(HEARTBEAT_KEY, ()=> setBadge(true));
 
     return btn;
   }
@@ -661,7 +632,6 @@
   if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', bootUI);
   else bootUI();
 
-  // keep-alive
   if (CONFIG.NAV.keepAlive){
     setInterval(()=>{
       if(bridgeIsOnlineByHeartbeat()) httpGET(MODELVIEW_URL).catch(()=>{});
