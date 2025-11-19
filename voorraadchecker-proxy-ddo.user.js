@@ -70,13 +70,13 @@
   function basePayload(){ return { format: 'excel_attribute', export: 'Export products' }; }
 
   const EXPORTS = {
-    freya: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=180', payload: basePayload() },
-    'freya-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=187', payload: basePayload() },
-    fantasie: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=183', payload: basePayload() },
-    'fantasie-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=181', payload: basePayload() },
-    elomi: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=179', payload: basePayload() },
-    'elomi-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=186', payload: basePayload() },
-    wacoal: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=184', payload: basePayload() },
+    freya: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=215', payload: basePayload() },
+    'freya-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=216', payload: basePayload() },
+    fantasie: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=217', payload: basePayload() },
+    'fantasie-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=218', payload: basePayload() },
+    elomi: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=219', payload: basePayload() },
+    'elomi-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=220', payload: basePayload() },
+    wacoal: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=214', payload: basePayload() },
     muchachomalo: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=203', payload: basePayload() },
     hom: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=205', payload: basePayload() },
     'hom-swimwear': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=190', payload: basePayload() },
@@ -91,6 +91,12 @@
     'anita-maternity': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=200', payload: basePayload() },
     'rosa-faia': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=195', payload: basePayload() },
     'rosa-faia-badmode': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=194', payload: basePayload() },
+    'lingadore': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=213', payload: basePayload() },
+    'lingadore-beach': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=223', payload: basePayload() },
+    'triumph': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=221', payload: basePayload() },
+    'sloggi': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=222', payload: basePayload() },
+    'ringella': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=191', payload: basePayload() },
+    'pastunette': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=224', payload: basePayload() },
     'charlie-choe': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=204', payload: basePayload() }
   };
 
@@ -103,6 +109,11 @@
     'sugar-candy': 'https://b2b.cakelingerie.eu/authentication',
     'charlie-choe':'https://vangennip.itsperfect.it/webshop/shop/',
     hom:           'https://b2b.huberholding.com/huberholdingb2b/',
+    lingadore:     'https://b2b.lingadore.com/',
+    triumph:       'https://b2b.triumph.com/categories/NL_TriumphPROD',
+    sloggi:        'https://b2b.triumph.com/categories/NL_sloggiPROD',
+    zetex:         'https://b2b.zetex.nl/',
+    ringella:      'https://b2b.ringella.com/',
     // qlinn:      'https://…' // toevoegen zodra beschikbaar
   };
 
@@ -135,6 +146,11 @@
     if (/^charlie-choe/.test(key)) return 'charlie-choe';
     if (/^hom/.test(key)) return 'hom';
     if (/^q-linn/.test(key)) return 'qlinn';
+    if (/^(lingadore|lingadore-beach)/.test(key)) return 'lingadore';
+    if (/^triumph/.test(key)) return 'triumph';
+    if (/^sloggi/.test(key)) return 'sloggi';
+    if (/^ringella/.test(key)) return 'ringella';
+    if (/^pastunette/.test(key)) return 'zetex';
     return null;
   }
   function getB2BUrlForKey(key){
