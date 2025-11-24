@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO | Price Helper
 // @namespace    ddo-tools
-// @version      2.0
+// @version      2.1
 // @description  Snel Price zetten o.b.v. Advice met % knoppen en slimme highlighting
 // @author       you
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
@@ -15,7 +15,7 @@
   'use strict';
 
   // Inclusief 0% als reset
-  const pctList = [0, 10, 20, 30, 40, 50, 60, 70];
+  const pctList = [0, 10, 20, 25, 30, 35, 40, 50, 60, 70];
   const EPS = 0.01;
   const $ = (s, r = document) => r.querySelector(s);
 
