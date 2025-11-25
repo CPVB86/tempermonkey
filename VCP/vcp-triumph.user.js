@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP | Triumph
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1
-// @description  Vergelijk local stock met Triumph stock via grid-API (met bridge & auth-capture in page-context)
+// @version      1.3
+// @description  Vergelijk local stock met Triumph/Sloggi stock via grid-API (met bridge & auth-capture in page-context)
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://b2b.triumph.com/*
 // @grant        unsafeWindow
@@ -28,11 +28,13 @@
   const TIMEOUT_MS   = 20000;
   const KEEPALIVE_MS = 300000;
 
-  // Uit jouw network-call
+  // Uit jouw network-calls (Triumph + Sloggi op dezelfde webstore, andere cart)
   const TRIUMPH_WEBSTORE_ID = 2442;
-  const TRIUMPH_CART_ID     = 2155706;
+  const CART_ID_TRIUMPH     = 2155706;
+  const CART_ID_SLOGGI      = 2383370;
+
   const TRIUMPH_API_BASE =
-    `https://b2b.triumph.com/api/shop/webstores/${TRIUMPH_WEBSTORE_ID}/carts/${TRIUMPH_CART_ID}/grid/`;
+    `https://b2b.triumph.com/api/shop/webstores/${TRIUMPH_WEBSTORE_ID}/carts/`;
 
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
   const uid   = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -152,9 +154,12 @@
       }
     })();
 
-    // --- API-call met Authorization ---
-    async function fetchTriumphGrid(styleId, timeout = TIMEOUT_MS) {
-      const url  = `${TRIUMPH_API_BASE}${encodeURIComponent(styleId)}/products`;
+    // --- API-call met Authorization + dynamische cartId (Triumph/Sloggi) ---
+    async function fetchTriumphGrid(styleId, cartId, timeout = TIMEOUT_MS) {
+      const effectiveCartId = cartId || CART_ID_TRIUMPH;
+      const url  =
+        `${TRIUMPH_API_BASE}${encodeURIComponent(effectiveCartId)}` +
+        `/grid/${encodeURIComponent(styleId)}/products`;
       const auth = GM_getValue(AUTH_HEADER_KEY, null);
 
       console.debug('[Triumph-bridge][DEBUG] grid-call',
@@ -192,7 +197,11 @@
 
       (async () => {
         try {
-          const text = await fetchTriumphGrid(req.styleId, req.timeout || TIMEOUT_MS);
+          const text = await fetchTriumphGrid(
+            req.styleId,
+            req.cartId,
+            req.timeout || TIMEOUT_MS
+          );
           GM_setValue('triumph_bridge_resp', {
             id: req.id,
             ok: true,
@@ -270,8 +279,8 @@
     }
   }
 
-  // --- Bridge-client (tool-kant) ---
-  function bridgeGetGrid(styleId, timeout = TIMEOUT_MS) {
+  // --- Bridge-client (tool-kant) met cartId ---
+  function bridgeGetGrid(styleId, cartId, timeout = TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
       const id = uid();
 
@@ -292,7 +301,7 @@
         return;
       }
 
-      GM_setValue('triumph_bridge_req', { id, styleId, timeout });
+      GM_setValue('triumph_bridge_req', { id, styleId, cartId, timeout });
 
       setTimeout(() => {
         try { GM_removeValueChangeListener(handle); } catch {}
@@ -323,7 +332,19 @@
   }
 
   // --- Maat-aliases ---
+  // 1–8 voor Triumph/Sloggi one-size / alpha
   const SIZE_ALIAS = {
+    // Triumph numeriek → alpha / beschrijvend
+    '1': 'ONE SIZE',
+    '2': 'TWO SIZE',
+    '3': 'XS',
+    '4': 'S',
+    '5': 'M',
+    '6': 'L',
+    '7': 'XL',
+    '8': 'XXL',
+
+    // Bestaande aliassen
     '2XL':    'XXL',
     'XXL':    '2XL',
     '3XL':    'XXXL',
@@ -527,11 +548,12 @@
     return 'afwijking';
   }
 
-  // --- Grid-cache ---
+  // --- Grid-cache (per cartId + styleId) ---
   const gridCache = new Map();
-  async function getGrid(styleId) {
-    if (gridCache.has(styleId)) return gridCache.get(styleId);
-    const p = bridgeGetGrid(styleId).then(text => {
+  async function getGrid(styleId, cartId) {
+    const key = `${cartId || CART_ID_TRIUMPH}:${styleId}`;
+    if (gridCache.has(key)) return gridCache.get(key);
+    const p = bridgeGetGrid(styleId, cartId).then(text => {
       let json;
       try {
         json = JSON.parse(text);
@@ -541,11 +563,23 @@
       }
       return json;
     }).catch(err => {
-      gridCache.delete(styleId);
+      gridCache.delete(key);
       throw err;
     });
-    gridCache.set(styleId, p);
+    gridCache.set(key, p);
     return p;
+  }
+
+  // --- Huidige leverancier → juiste cartId (Triumph/Sloggi) ---
+  function getCartIdForCurrentSupplier() {
+    const sel = document.querySelector('#leverancier-keuze');
+    if (!sel) return CART_ID_TRIUMPH;
+    const val = norm(sel.value || '');
+    const txt = norm(sel.options[sel.selectedIndex] &&
+                     sel.options[sel.selectedIndex].text || '');
+    const blob = `${val} ${txt}`;
+    if (/\bsloggi\b/i.test(blob)) return CART_ID_SLOGGI;
+    return CART_ID_TRIUMPH;
   }
 
   // --- Hoofd-run ---
@@ -565,6 +599,8 @@
       return;
     }
 
+    const cartId = getCartIdForCurrentSupplier();
+
     const progress = StockKit.makeProgress(btn);
     progress.start(tables.length);
 
@@ -576,7 +612,9 @@
       tables.map(table =>
         limit(async () => {
           const tableId = (table.id || '').trim();
-          const m = tableId.match(/^(\d+)-(\d{4})$/); // bv 10162782-0003
+
+          // ✳ AANGEPASTE REGEX: stijl-kleur met ook V014 / 00ME / M013 etc.
+          const m = tableId.match(/^(\d+)-([0-9A-Z]{3,4})$/i); // bv 10162782-0003 / 10103326-V014
           const anchorId = tableId || 'onbekend';
 
           if (!m) {
@@ -587,10 +625,10 @@
           }
 
           const styleId   = m[1];
-          const colorCode = m[2];
+          const colorCode = m[2].toUpperCase();
 
           try {
-            const json      = await getGrid(styleId);
+            const json      = await getGrid(styleId, cartId);
             const statusMap = buildStatusMapFromTriumphGrid(json, colorCode);
 
             if (!statusMap || Object.keys(statusMap).length === 0) {
@@ -633,7 +671,8 @@
     const txt = norm(sel.options[sel.selectedIndex] &&
                      sel.options[sel.selectedIndex].text || '');
     const blob = `${val} ${txt}`;
-    return /\btriumph\b/i.test(blob);
+    // Zowel Triumph als Sloggi gebruiken deze proxy
+    return /\btriumph\b/i.test(blob) || /\bsloggi\b/i.test(blob);
   }
 
   function ensureButton() {
@@ -644,7 +683,7 @@
     btn.id = 'adv-triumph-btn';
     btn.className = 'sk-btn';
     btn.type = 'button';
-    btn.textContent = 'Check Triumph Stock';
+    btn.textContent = 'Check Triumph/Sloggi Stock';
 
     Object.assign(btn.style, {
       position: 'fixed',
