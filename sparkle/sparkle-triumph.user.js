@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Sparkle | Triumph
-// @version      0.6
+// @version      1.0
 // @description  Klik op de kleur-swatch om DDO-HTML te kopiëren (RSP-prijs, Product Code, samenvatting, materiaal, model).
 // @match        https://b2b.triumph.com/products/NL_TriumphPROD/*
+// @match        https://b2b.triumph.com/products/NL_sloggiPROD/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-triumph.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-triumph.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-triumph.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-triumph.user.js
 // ==/UserScript==
 
 (function () {
@@ -14,7 +15,7 @@
 
   console.log('[Sparkle | Triumph] script geladen');
 
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const $$ = (sel, root = document) => Array.from((root || document).querySelectorAll(sel));
 
   const escapeHtml = (str = '') =>
     str
@@ -27,6 +28,22 @@
 
   const capitalizeWords = (str = '') =>
     str.replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
+  // EU-maat → alpha-maat
+  const SIZE_MAP_EU_TO_ALPHA = {
+    '3':  'XS',
+    '4':  'S',
+    '5':  'M',
+    '6':  'L',
+    '7':  'XL',
+    '8':  'XXL'
+  };
+
+  function mapEuSizeToAlpha(euSize) {
+    if (euSize == null) return '';
+    const key = String(euSize).trim();
+    return SIZE_MAP_EU_TO_ALPHA[key] || key;
+  }
 
   // ─────────────────────────────────────────────
   // Style + kleurcode + kleurnaam uit description:
@@ -90,39 +107,75 @@
     const section = document.querySelector(
       'section.product-details-information__section.productinformatie'
     );
-    if (!section) {
-      return result;
+    if (section) {
+      const fields = $$('.product-details-extra-field', section);
+
+      fields.forEach(field => {
+        const titleEl = field.querySelector('.product-details-extra-field__title');
+        const valueEl = field.querySelector('.product-details-extra-field__value');
+        if (!titleEl || !valueEl) return;
+
+        const title = (titleEl.textContent || '').trim().toLowerCase();
+
+        if (title.includes('samenvatting')) {
+          const txt = (valueEl.textContent || '').trim();
+          result.summary = txt;
+        } else if (title.includes('materiaal')) {
+          const txt = (valueEl.textContent || '').trim();
+          result.material = txt;
+        } else if (title.includes('beschrijving')) {
+          let txt = (valueEl.textContent || '').trim();
+          // merkprefix weg: sloggi men / sloggi / triumph
+          txt = txt
+            .replace(/^sloggi\s+men\s+/i, '')
+            .replace(/^sloggi\s+/i, '')
+            .replace(/^triumph\s+/i, '');
+          result.model = txt;
+        }
+      });
     }
 
-    const fields = $$('.product-details-extra-field', section);
-
-    fields.forEach(field => {
-      const titleEl = field.querySelector('.product-details-extra-field__title');
-      const valueEl = field.querySelector('.product-details-extra-field__value');
-      if (!titleEl || !valueEl) return;
-
-      const title = (titleEl.textContent || '').trim().toLowerCase();
-
-      if (title.includes('samenvatting')) {
-        const txt = (valueEl.textContent || '').trim();
-        result.summary = txt;
-      } else if (title.includes('materiaal')) {
-        const txt = (valueEl.textContent || '').trim();
-        result.material = txt;
-      } else if (title.includes('beschrijving')) {
-        const txt = (valueEl.textContent || '').trim();
-        result.model = txt;
+    // Override model met product-row__name als die bestaat (incl. type, zonder merk)
+    const rowNameEl = document.querySelector('.product-row__name');
+    if (rowNameEl) {
+      let name = (rowNameEl.textContent || '').trim();
+      name = name
+        .replace(/^sloggi\s+men\s+/i, '')
+        .replace(/^sloggi\s+/i, '')
+        .replace(/^triumph\s+/i, '');
+      if (name) {
+        result.model = name;
       }
-    });
+    }
 
     return result;
   }
 
   // ─────────────────────────────────────────────
-  // DDO-HTML bouwen (Zetex-achtige structuur)
-  // - Titel:
-  //   - hoofd-swatch: Model + colorName (uit description)
-  //   - grid-swatch:  Model + kleur uit swatch-label (SKIN → Skin)
+  // Productcode uit grid-rij:
+  // "10151218 - 0003" → "10151218-0003"
+  // ─────────────────────────────────────────────
+  function getProductCodeFromRow(row) {
+    if (!row) return '';
+    const idEl = row.querySelector('.product-row__id');
+    if (!idEl) return '';
+
+    const raw = (idEl.textContent || '').trim();
+    if (!raw) return '';
+
+    const parts = raw.split('-');
+    if (parts.length >= 2) {
+      const left  = (parts[0] || '').trim();
+      const right = (parts[1] || '').trim();
+      if (left && right) return `${left}-${right}`;
+    }
+
+    // fallback: alle spaties eruit
+    return raw.replace(/\s+/g, '');
+  }
+
+  // ─────────────────────────────────────────────
+  // DDO-HTML bouwen
   // ─────────────────────────────────────────────
   function buildDDOHtmlTriumph({
     productCode,
@@ -132,18 +185,30 @@
     colorName,
     price,
     fromGrid,
-    swatchLabel
+    swatchLabel,
+    rowName
   }) {
-    const safeModel       = escapeHtml(model || '');
     const safeProductCode = escapeHtml(productCode || '');
     const safePrice       = escapeHtml(price || '');
 
-    // Kleur bepalen voor heading
+    // Kleur bepalen
     let displayColor = colorName || '';
     if (fromGrid && swatchLabel) {
       displayColor = capitalizeWords((swatchLabel || '').toLowerCase());
     }
     const safeDisplayColor = escapeHtml(displayColor || '');
+
+    // Model voor in de titel
+    let modelForHeading = model || '';
+    if (fromGrid && rowName) {
+      let cleaned = rowName.trim();
+      cleaned = cleaned
+        .replace(/^sloggi\s+men\s+/i, '')
+        .replace(/^sloggi\s+/i, '')
+        .replace(/^triumph\s+/i, '');
+      modelForHeading = cleaned;
+    }
+    const safeModelForHeading = escapeHtml(modelForHeading || '');
 
     const summaryEscaped  = escapeHtml(summary || '').replace(/\r?\n/g, '<br>');
     const materialEscaped = escapeHtml(material || '');
@@ -158,10 +223,12 @@
     const descriptionHtml = descriptionHtmlParts.join('\n    ');
 
     const h1Parts = [];
-    if (safeModel)        h1Parts.push(safeModel);
-    if (safeDisplayColor) h1Parts.push(safeDisplayColor);
+    if (safeModelForHeading) h1Parts.push(safeModelForHeading);
+    if (safeDisplayColor)    h1Parts.push(safeDisplayColor);
     const heading = h1Parts.join(' ');
 
+    // Model-div = Beschrijving / grid-model (zonder merk)
+    const safeModel = escapeHtml(model || '');
     const modelHtml = safeModel
       ? `  <div class="pdp-details_model">Model: <span>${safeModel}</span></div>\n`
       : '';
@@ -207,14 +274,30 @@ ${priceHtml}${modelHtml}${codeHtml}  <div class="pdp-details_description">
 
     const fromGrid = button.classList.contains('product-row__swatch');
 
+    // RowName + productCode uit de grid (indien aanwezig)
+    let rowName = '';
+    let productCode = '';
+
+    if (fromGrid) {
+      const row = button.closest('.product-row');
+      const nameEl = row?.querySelector('.product-row__name');
+      if (nameEl) {
+        rowName = (nameEl.textContent || '').trim();
+      }
+      productCode = getProductCodeFromRow(row);
+    }
+
+    // Style/color info uit description (voor kleur + fallback code)
     const { styleNumber, colorCode, colorName } = getStyleColorInfo();
     const info  = getProductInfo();
     const price = getPrice();
 
-    // ProductCode = 10004928-0026
-    const productCode = (styleNumber && colorCode)
-      ? `${styleNumber}-${colorCode}`
-      : (styleNumber || colorCode || '');
+    // Als we níet uit de grid komen, of grid gaf geen code → fallback op description
+    if (!fromGrid || !productCode) {
+      productCode = (styleNumber && colorCode)
+        ? `${styleNumber}-${colorCode}`
+        : (styleNumber || colorCode || '');
+    }
 
     const html = buildDDOHtmlTriumph({
       productCode,
@@ -224,13 +307,14 @@ ${priceHtml}${modelHtml}${codeHtml}  <div class="pdp-details_description">
       colorName,
       price,
       fromGrid,
-      swatchLabel
+      swatchLabel,
+      rowName
     });
 
     try {
       await navigator.clipboard.writeText(html);
       console.log(
-        `[Sparkle | Triumph] Gekopieerd: ProductCode=${productCode} | Model=${info.model} | Color=${colorName} | Swatch="${swatchLabel}" | Price=${price} | fromGrid=${fromGrid}`
+        `[Sparkle | Triumph] Gekopieerd: ProductCode=${productCode} | Model=${info.model} | HeadingModel=${rowName || info.model} | Color=${colorName} | Swatch="${swatchLabel}" | Price=${price} | fromGrid=${fromGrid}`
       );
     } catch (err) {
       console.error('[Sparkle | Triumph] Kopiëren mislukt:', err);
@@ -239,7 +323,7 @@ ${priceHtml}${modelHtml}${codeHtml}  <div class="pdp-details_description">
   }
 
   // ─────────────────────────────────────────────
-  // ✨ bij de kleur-swatch plaatsen
+  // ✨ vóór de kleur-tekst plaatsen
   // ─────────────────────────────────────────────
   function decorateSwatches() {
     const buttons = $$('.product-swatch');
@@ -252,12 +336,14 @@ ${priceHtml}${modelHtml}${codeHtml}  <div class="pdp-details_description">
       if (!label) return;
 
       const sparkle = document.createElement('span');
-      sparkle.textContent = ' ✨';
+      sparkle.textContent = '✨ ';
       sparkle.style.cursor = 'pointer';
       sparkle.title = 'Klik om DDO-HTML voor deze kleur te kopiëren';
       sparkle.addEventListener('click', onSparkleClick);
 
-      label.appendChild(sparkle);
+      // Voor de bestaande content zetten, zodat lange namen niet afkappen
+      label.insertBefore(sparkle, label.firstChild);
+
       btn.dataset.sparkleReady = '1';
     });
 
