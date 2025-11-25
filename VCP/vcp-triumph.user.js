@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Triumph
+// @name         VCP | Triumph
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      1.1
 // @description  Vergelijk local stock met Triumph stock via grid-API (met bridge & auth-capture in page-context)
@@ -12,8 +12,8 @@
 // @grant        GM_removeValueChangeListener
 // @run-at       document-start
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-triumph.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-triumph.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-triumph.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-triumph.user.js
 // ==/UserScript==
 
 (() => {
