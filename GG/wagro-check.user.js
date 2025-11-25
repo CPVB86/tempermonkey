@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         GG / WaGro Check
+// @name         GG | WaGro Check
 // @version      1.2
 // @description  Markeert alle regels met een WaGro productlocatie en biedt bulk-verwijderen voor alleen-WaGro regels
 // @author       C. P. v. Beek
