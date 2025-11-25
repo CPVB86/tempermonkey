@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Lisca PDP Sparkle
+// @name         Sparkle | Lisca
 // @version      2.1.5
 // @description  Voeg een klikbare ✨ toe onder de h1 om de relevante product-info HTML te kopiëren voor DDO
 // @match        https://b2b-eu.lisca.com/*
 // @grant        none
 // @run-at       document-idle
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/lisca-pdp-sparkle.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/lisca-pdp-sparkle.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-lisca.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-lisca.user.js
 // ==/UserScript==
 
 (function () {
