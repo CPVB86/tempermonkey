@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         GG / Return Clipper Visual
+// @name         GG | Return Clipper Visual
 // @author       C. P. v. Beek
 // @version      1.4
 // @description  Kopieert een screenshot van een return op het klembord.
