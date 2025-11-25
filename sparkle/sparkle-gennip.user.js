@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Van Gennip PDP Sparkle
+// @name         Sparkle | Van Gennip
 // @version      1.1
 // @description  Voeg een klikbare ✨ toe achter de favoriet-button om HTML voor DDO te genereren
 // @match        https://vangennip.itsperfect.it/*
