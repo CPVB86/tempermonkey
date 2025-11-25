@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         DDO / Unlock Stock
+// @name         DDO | Unlock Stock
 // @version      1.0
 // @description  Ontgrendel alle stock-inputs (disabled/readonly uit)
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
