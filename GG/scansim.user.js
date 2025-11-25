@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         GG / ScanSim
+// @name         GG | ScanSim
 // @version      1.1
 // @description  Scan Simulater; leest barcodes uit klembord en activeert scannerloop
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/incoming-products
