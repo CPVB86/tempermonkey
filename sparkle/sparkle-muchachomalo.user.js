@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Muchachomalo PDP Sparkle
+// @name         Sparkle | Muchachomalo
 // @version      1
 // @description  Voeg een klikbare ✨ toe onder de h1 om de relevante product-info HTML te kopiëren voor DDO
 // @match        https://agent.muchachomalo.com/*
 // @grant        none
 // @run-at       document-idle
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/muchachomalo-pdp-sparkle.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/muchachomalo-pdp-sparkle.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-muchachomalo.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-muchachomalo.user.js
 // ==/UserScript==
 
 (function () {
