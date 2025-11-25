@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Anita
+// @name         VCP | Anita
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      4.0
 // @description  Vergelijk local stock met remote stock
@@ -9,8 +9,8 @@
 // @connect      b2b.anita.com
 // @run-at       document-idle
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-anita.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-anita.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-anita.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-anita.user.js
 // ==/UserScript==
 (() => {
   'use strict';
