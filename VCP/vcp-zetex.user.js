@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Zetex B2B
+// @name         VCP | Zetex
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      1.3
 // @description  Vergelijk local stock met Zetex B2B-stock op EAN — knop/progress via StockKit, badges, logboek.
@@ -9,8 +9,8 @@
 // @run-at       document-idle
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @connect      b2b.zetex.nl
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-zetex.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-zetex.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-zetex.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-zetex.user.js
 // ==/UserScript==
 
 (() => {
