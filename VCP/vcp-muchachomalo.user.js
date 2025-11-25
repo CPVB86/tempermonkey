@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Muchachomalo
+// @name         VCP | Muchachomalo
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      2.0
 // @description  Vergelijk local stock met remote stock
@@ -10,8 +10,8 @@
 // @run-at       document-idle
 // @connect      agent.muchachomalo.com
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js?v=2025-08-13-1
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-muchachomalo.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-muchachomalo.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-muchachomalo.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-muchachomalo.user.js
 // ==/UserScript==
 
 (function () {
