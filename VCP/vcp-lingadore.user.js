@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - LingaDore
+// @name         VCP | LingaDore
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      1.2
 // @description  Vergelijk local stock met XLSX-stock op EAN — knop/progress via StockKit, badges, logboek.
@@ -8,8 +8,8 @@
 // @run-at       document-idle
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-lingadore-xlsx-ean.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-lingadore-xlsx-ean.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-lingadore.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-lingadore.user.js
 // ==/UserScript==
 
 (() => {
