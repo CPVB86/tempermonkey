@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - DDO Ex>Import
+// @name         VCP | DDO Ex>Import
 // @version      1.7
 // @description  Start vanuit de checker direct een Attributes-export en biedt link naar B2B per merk
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -8,8 +8,8 @@
 // @connect      www.dutchdesignersoutlet.com
 // @connect      dutchdesignersoutlet.com
 // @require      https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-ddo.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-ddo.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-ddo.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-ddo.user.js
 // ==/UserScript==
 
 (function () {
