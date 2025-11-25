@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Wacoal PDP Sparkle
+// @name         Sparkle | Wacoal
 // @version      1.2
 // @description  Voeg een klikbare ✨ toe onder de h1 om .pdp-details HTML te kopiëren
 // @match        https://b2b.wacoal-europe.com/b2b/*
