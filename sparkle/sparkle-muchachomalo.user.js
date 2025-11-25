@@ -6,8 +6,8 @@
 // @grant        none
 // @run-at       document-idle
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-muchachomalo.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-muchachomalo.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-muchachomalo.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-muchachomalo.user.js
 // ==/UserScript==
 
 (function () {
