@@ -5,8 +5,8 @@
 // @match        https://b2b.zetex.nl/webstore/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-zetex.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-zetex.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-zetex.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-zetex.user.js
 // ==/UserScript==
 
 (function () {
