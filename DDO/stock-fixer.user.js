@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         Fix Stock 1 → 0
+// @name         DDO | Fix Stock
 // @version      1.0
 // @description  Zet alle stockwaarden van '1' in #tabs-3 in één klik om naar '0'
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/stock-fixer.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/stock-fixer.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/stock-fixer.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/stock-fixer.user.js
 // ==/UserScript==
 
 (function () {
