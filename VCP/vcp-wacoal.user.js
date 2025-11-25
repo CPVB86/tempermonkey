@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Wacoal Group
+// @name         VCP | Wacoal
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
 // @description  Vergelijk local stock met remote stock (Wacoal Group) — knop/progress via StockKit, geen inline-overschrijvingen.
@@ -9,8 +9,8 @@
 // @run-at       document-idle
 // @connect      b2b.wacoal-europe.com
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-wacoal.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-wacoal.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-wacoal.user.js
 // ==/UserScript==
 
 (() => {
