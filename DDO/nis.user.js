@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         NIS
+// @name         DDO | NIS
 // @version      1.8
 // @description  Never In Stock - kopieert de EAN en Stock van producten
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
