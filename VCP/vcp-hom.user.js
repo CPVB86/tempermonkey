@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - HOM
+// @name         VCP | HOM
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      4.0
 // @description  Vergelijk local stock met remote stock (sneller en stabieler)
@@ -12,8 +12,8 @@
 // @grant        unsafeWindow
 // @run-at       document-start
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-hom.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-hom.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-hom.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-hom.user.js
 // ==/UserScript==
 
 (() => {
