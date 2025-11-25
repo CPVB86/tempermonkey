@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         GG / Tabber
+// @name         GG | Tabber
 // @version      1.1
 // @description  Opent producten in eigen tabbladen - view, edit of stock
 // @match        https://fm-e-warehousing.goedgepickt.nl/picklocations/view*
