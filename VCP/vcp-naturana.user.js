@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Naturana
+// @name         VCP | Naturana
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      1.3
 // @description  Vergelijk local stock met Naturana stock (sneller en stabieler)
@@ -12,8 +12,8 @@
 // @grant        unsafeWindow
 // @run-at       document-start
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-naturana.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-naturana.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-naturana.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-naturana.user.js
 // ==/UserScript==
 
 (() => {
