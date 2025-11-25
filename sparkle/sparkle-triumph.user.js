@@ -6,8 +6,8 @@
 // @match        https://b2b.triumph.com/products/NL_sloggiPROD/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-triumph.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-triumph.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-triumph.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-triumph.user.js
 // ==/UserScript==
 
 (function () {
