@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Voorraadchecker Proxy - Ringella XLSX
+// @name         VCP | Ringella
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      1.0
 // @description  Vergelijk local stock met Ringella XLSX-stock op EAN — knop/progress via StockKit, badges, logboek.
@@ -9,8 +9,8 @@
 // @run-at       document-idle
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-ringella.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/voorraadchecker-proxy-ringella.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-ringella.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-ringella.user.js
 // ==/UserScript==
 
 (() => {
