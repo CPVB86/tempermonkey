@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         CAP
+// @name         DDO | CAP
 // @version      2.0
 // @description  Copy (Advice) Price van tab#1 naar relevante velden op tab#3
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
