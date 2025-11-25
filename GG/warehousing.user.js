@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         GG / Warehousing
+// @name         GG | Warehousing
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
 // @version      1.0
 // @description  Kopieert data van aangevinkte orders op klembord voor op het logboek.
