@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         GG / Return Clipper Textual
+// @name         GG | Return Clipper Textual
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
 // @version      1.1
 // @description  Plaatst een copy-icoon in elk statusballetje op /returns en kopieert rij-gegevens als TSV-regel.
