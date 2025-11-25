@@ -6,8 +6,8 @@
 // @grant        none
 // @run-at       document-idle
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gennip-pdp-sparkle.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gennip-pdp-sparkle.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-gennip.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle-gennip.user.js
 // ==/UserScript==
 
 (function () {
