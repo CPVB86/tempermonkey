@@ -15,7 +15,7 @@
   'use strict';
 
   // Inclusief 0% als reset
-  const pctList = [0, 10, 20, 25, 30, 35, 40, 50, 60, 70];
+  const pctList = [0, 10, 12.5, 15, 20, 25, 30, 35, 40, 50, 60, 70];
   const EPS = 0.01;
   const $ = (s, r = document) => r.querySelector(s);
 
