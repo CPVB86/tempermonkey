@@ -96,7 +96,7 @@
     'triumph': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=221', payload: basePayload() },
     'sloggi': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=222', payload: basePayload() },
     'ringella': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=191', payload: basePayload() },
-    'pastunette': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=224', payload: basePayload() },
+    'zetex': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=224', payload: basePayload() },
     'charlie-choe': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=204', payload: basePayload() }
   };
 
@@ -150,7 +150,7 @@
     if (/^triumph/.test(key)) return 'triumph';
     if (/^sloggi/.test(key)) return 'sloggi';
     if (/^ringella/.test(key)) return 'ringella';
-    if (/^pastunette/.test(key)) return 'zetex';
+    if (/^zetex/.test(key)) return 'zetex';
     return null;
   }
   function getB2BUrlForKey(key){
