@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         🧙‍♂️ The Gallery Grabber – Lisca
+// @name         Gallery Grabber | Lisca
 // @version      2.1
 // @description  Vist 'full'-foto's uit originele HTML via fetch en gebruikt SKU als bestandsnaam
 // @match        https://b2b-eu.lisca.com/*
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-lisca.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-lisca.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-lisca.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-lisca.user.js
 // ==/UserScript==
 
 (function () {
