@@ -1,762 +1,662 @@
 // ==UserScript==
-// @name         VCP | Triumph
-// @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.3
-// @description  Vergelijk local stock met Triumph/Sloggi stock via grid-API (met bridge & auth-capture in page-context)
-// @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
+// @name         EAN Scraper | Triumph
+// @version      0.6
+// @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @match        https://b2b.triumph.com/*
-// @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_addValueChangeListener
-// @grant        GM_removeValueChangeListener
-// @run-at       document-start
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-triumph.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-triumph.user.js
+// @connect      b2b.triumph.com
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-triumph.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-triumph.user.js
 // ==/UserScript==
 
-(() => {
+(function () {
   'use strict';
 
-  const ON_TOOL    = location.hostname.includes('lingerieoutlet.nl');
-  const ON_TRIUMPH = location.hostname.includes('b2b.triumph.com');
+  const LOG_PREFIX = '[EAN Scraper | Triumph]';
 
-  const HEARTBEAT_KEY   = 'triumph_bridge_heartbeat';
-  const AUTH_HEADER_KEY = 'triumph_bridge_auth_header';
+  function log(...args) {
+    console.log(LOG_PREFIX, ...args);
+  }
+  function warn(...args) {
+    console.warn(LOG_PREFIX, ...args);
+  }
+  function error(...args) {
+    console.error(LOG_PREFIX, ...args);
+  }
 
-  const TIMEOUT_MS   = 20000;
-  const KEEPALIVE_MS = 300000;
+  const HOST = location.hostname;
 
-  // Uit jouw network-calls (Triumph + Sloggi op dezelfde webstore, andere cart)
-  const TRIUMPH_WEBSTORE_ID = 2442;
-  const CART_ID_TRIUMPH     = 2155706;
-  const CART_ID_SLOGGI      = 2383370;
+  // ---------------------------------------------------------------------------
+  //  MODE-DETECTIE
+  // ---------------------------------------------------------------------------
 
-  const TRIUMPH_API_BASE =
-    `https://b2b.triumph.com/api/shop/webstores/${TRIUMPH_WEBSTORE_ID}/carts/`;
+if (HOST === 'b2b.triumph.com') {
+  installTriumphTokenSniffer();
+  return;
+}
 
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
-  const uid   = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const norm  = (s = '') => String(s).toLowerCase().trim().replace(/\s+/g, ' ');
+if (HOST === 'www.dutchdesignersoutlet.com') {
+  initAdminSide();
+  return;
+}
 
-  // ========================================================================
-  // 1) BRIDGE OP TRIUMPH (in echte page-context via unsafeWindow)
-  // ========================================================================
-  if (ON_TRIUMPH) {
-    const w = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-    let pageFetch = null;
+// Andere hosts: niks doen
+return;
 
-    // Heartbeat
-    setInterval(() => {
-      try { GM_setValue(HEARTBEAT_KEY, Date.now()); } catch {}
-    }, 2500);
+  // ---------------------------------------------------------------------------
+  //  DEEL 1: TOKEN-SNIFFER OP B2B.TRIMUPH.COM
+  // ---------------------------------------------------------------------------
 
-    // --- helpers voor auth capture ---
-    function storeAuth(val, via) {
-      if (!val) return;
-      const auth = String(val).trim();
-      if (!auth.toLowerCase().startsWith('bearer ')) return;
-      try {
-        const prev = GM_getValue(AUTH_HEADER_KEY, null);
-        if (prev === auth) return;
-        GM_setValue(AUTH_HEADER_KEY, auth);
-        console.info('[Triumph-bridge][DEBUG]', via, 'Authorization captured:',
-          auth.slice(0, 22) + '…');
-      } catch (e) {
-        console.warn('[Triumph-bridge][DEBUG] kon AUTH niet opslaan:', e);
-      }
-    }
+  function installTriumphTokenSniffer() {
+    log('Token-sniffer actief op Triumph B2B...');
 
-    function extractAuthFromHeaders(headers) {
-      if (!headers) return null;
-
-      // Headers-obj
-      if (typeof Headers !== 'undefined' && headers instanceof Headers) {
-        return headers.get('Authorization') || headers.get('authorization') || null;
-      }
-
-      // Array [[k,v]]
-      if (Array.isArray(headers)) {
-        for (const [k, v] of headers) {
-          if (/^authorization$/i.test(k)) return v;
-        }
-      }
-
-      // plain object
-      if (typeof headers === 'object') {
-        for (const k of Object.keys(headers)) {
-          if (/^authorization$/i.test(k)) {
-            return headers[k];
-          }
-        }
-      }
-
-      return null;
-    }
-
-    // --- fetch-hook in page-context ---
-    (function hookFetchForAuth() {
-      try {
-        const orig = w.fetch;
-        if (!orig) {
-          console.warn('[Triumph-bridge][DEBUG] geen fetch gevonden om te hooken');
-          return;
-        }
-        pageFetch = orig.bind(w);
-
-        w.fetch = function patchedFetch(input, init = {}) {
+    // 1) fetch patchen
+    try {
+      const origFetch = window.fetch;
+      if (typeof origFetch === 'function') {
+        window.fetch = function (input, init = {}) {
           try {
-            const auth = extractAuthFromHeaders(init.headers);
-            if (auth) storeAuth(auth, 'via fetch');
-          } catch (e) {
-            console.debug('[Triumph-bridge][DEBUG] fetch-hook error:', e);
-          }
-          return pageFetch(input, init);
-        };
+            const headers = init && init.headers;
+            let auth = null;
 
-        console.info('[Triumph-bridge] fetch-hook actief in page-context');
-      } catch (e) {
-        console.warn('[Triumph-bridge] kon fetch niet hooken:', e);
-      }
-    })();
-
-    // --- XHR-hook in page-context ---
-    (function hookXHRForAuth() {
-      try {
-        const OrigXHR = w.XMLHttpRequest;
-        if (!OrigXHR) {
-          console.warn('[Triumph-bridge][DEBUG] geen XMLHttpRequest gevonden om te hooken');
-          return;
-        }
-
-        function XHRProxy() {
-          const xhr = new OrigXHR();
-          const origSetRequestHeader = xhr.setRequestHeader;
-          xhr.setRequestHeader = function (name, value) {
-            try {
-              if (/^authorization$/i.test(name)) {
-                storeAuth(value, 'via XHR');
+            if (headers) {
+              if (typeof headers.get === 'function') {
+                auth =
+                  headers.get('authorization') ||
+                  headers.get('Authorization') ||
+                  null;
+              } else if (Array.isArray(headers)) {
+                for (const [k, v] of headers) {
+                  if (/^authorization$/i.test(k) && String(v).startsWith('Bearer ')) {
+                    auth = v;
+                    break;
+                  }
+                }
+              } else if (typeof headers === 'object') {
+                for (const k of Object.keys(headers)) {
+                  if (/^authorization$/i.test(k) && String(headers[k]).startsWith('Bearer ')) {
+                    auth = headers[k];
+                    break;
+                  }
+                }
               }
-            } catch (e) {
-              console.debug('[Triumph-bridge][DEBUG] XHR-hook error:', e);
             }
-            return origSetRequestHeader.apply(this, arguments);
-          };
-          return xhr;
-        }
-        XHRProxy.prototype = OrigXHR.prototype;
-        w.XMLHttpRequest = XHRProxy;
 
-        console.info('[Triumph-bridge] XHR-hook actief in page-context');
-      } catch (e) {
-        console.warn('[Triumph-bridge] kon XHR niet hooken:', e);
+            if (auth && auth.startsWith('Bearer ')) {
+              GM_setValue('TriumphBearerToken', auth);
+              log('Bearer-token (fetch) opgeslagen in GM_setValue.');
+            }
+          } catch (e) {
+            warn('Fout in fetch-token-sniffer:', e);
+          }
+          return origFetch(input, init);
+        };
+        log('fetch-sniffer geïnstalleerd.');
       }
-    })();
-
-    // --- API-call met Authorization + dynamische cartId (Triumph/Sloggi) ---
-    async function fetchTriumphGrid(styleId, cartId, timeout = TIMEOUT_MS) {
-      const effectiveCartId = cartId || CART_ID_TRIUMPH;
-      const url  =
-        `${TRIUMPH_API_BASE}${encodeURIComponent(effectiveCartId)}` +
-        `/grid/${encodeURIComponent(styleId)}/products`;
-      const auth = GM_getValue(AUTH_HEADER_KEY, null);
-
-      console.debug('[Triumph-bridge][DEBUG] grid-call',
-        url, '| auth aanwezig?', !!auth);
-
-      const ctrl = new AbortController();
-      const to   = setTimeout(() => ctrl.abort(), timeout);
-
-      const headers = {
-        'Accept': 'application/json, text/plain, */*'
-      };
-      if (auth) headers['Authorization'] = auth;
-
-      const f = pageFetch || w.fetch.bind(w);
-
-      const res = await f(url, {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-        signal: ctrl.signal
-      });
-
-      clearTimeout(to);
-
-      if (!res.ok) {
-        console.warn('[Triumph-bridge][DEBUG] HTTP status', res.status, 'voor', url);
-        throw new Error(`HTTP ${res.status}`);
-      }
-      return await res.text();
+    } catch (e) {
+      warn('Kon fetch niet patchen:', e);
     }
 
-    // --- Bridge-listener: requests vanuit tool ---
-    GM_addValueChangeListener('triumph_bridge_req', (_name, _old, req) => {
-      if (!req || !req.id || !req.styleId) return;
+    // 2) XMLHttpRequest patchen
+    try {
+      const origOpen = XMLHttpRequest.prototype.open;
+      const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
 
-      (async () => {
+      XMLHttpRequest.prototype.open = function (method, url) {
         try {
-          const text = await fetchTriumphGrid(
-            req.styleId,
-            req.cartId,
-            req.timeout || TIMEOUT_MS
-          );
-          GM_setValue('triumph_bridge_resp', {
-            id: req.id,
-            ok: true,
-            text
-          });
+          this._isTriumphApi =
+            typeof url === 'string' && url.indexOf('/api/shop/webstores/') !== -1;
         } catch (e) {
-          GM_setValue('triumph_bridge_resp', {
-            id: req.id,
-            ok: false,
-            error: String(e)
-          });
+          this._isTriumphApi = false;
         }
-      })();
-    });
+        return origOpen.apply(this, arguments);
+      };
 
-    if (document.readyState !== 'loading') {
-      console.info('[Triumph-bridge] actief op', location.href);
-    } else {
-      document.addEventListener('DOMContentLoaded', () =>
-        console.info('[Triumph-bridge] actief op', location.href)
+      XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+        try {
+          if (
+            this._isTriumphApi &&
+            /^authorization$/i.test(name) &&
+            String(value).startsWith('Bearer ')
+          ) {
+            GM_setValue('TriumphBearerToken', String(value));
+            log('Bearer-token (XHR) opgeslagen in GM_setValue.');
+          }
+        } catch (e) {
+          warn('Fout in XHR-token-sniffer:', e);
+        }
+        return origSetHeader.apply(this, arguments);
+      };
+
+      log('XMLHttpRequest-sniffer geïnstalleerd.');
+    } catch (e) {
+      warn('Kon XMLHttpRequest niet patchen:', e);
+    }
+
+    log(
+      'Ga gewoon de B2B gebruiken (product openen etc.); ' +
+        'het script pikt het Authorization: Bearer token automatisch op.'
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  //  DEEL 2: ADMIN-SIDE EAN + STOCK SCRAPER
+  // ---------------------------------------------------------------------------
+
+  function initAdminSide() {
+    const BTN_ID = 'triumph-stock-ean-scraper-btn';
+    const TABLE_SELECTOR = '#tabs-3 table.options';
+    const PID_SELECTOR = '#tabs-1 input[name="supplier_pid"]';
+    const BRAND_TITLE_SELECTOR = '#tabs-1 #select2-brand-container';
+
+    const TRIUMPH_WEBSTORE_ID = '2442';
+    const TRIUMPH_CART_ID = '2155706';
+
+    const SLOGGI_WEBSTORE_ID = '2442';
+    const SLOGGI_CART_ID = '2383370';
+
+    const $ = (s, r = document) => r.querySelector(s);
+
+    const getBrandTitle = () =>
+      document.querySelector(BRAND_TITLE_SELECTOR)?.title?.trim() || '';
+
+    function isSupportedBrand() {
+      const title = getBrandTitle().toLowerCase();
+      if (!title) return true;
+      return title.includes('triumph') || title.includes('sloggi');
+    }
+
+    function getBrandConfig() {
+      const title = getBrandTitle().toLowerCase();
+
+      if (title.includes('sloggi')) {
+        return {
+          brand: 'sloggi',
+          webstoreId: SLOGGI_WEBSTORE_ID,
+          cartId: SLOGGI_CART_ID,
+        };
+      }
+
+      return {
+        brand: 'triumph',
+        webstoreId: TRIUMPH_WEBSTORE_ID,
+        cartId: TRIUMPH_CART_ID,
+      };
+    }
+
+    function hasTable() {
+      return !!document.querySelector(TABLE_SELECTOR);
+    }
+
+    function normalizeLocalSize(s) {
+      return String(s || '').trim().toUpperCase().replace(/\s+/g, '');
+    }
+
+    const SIZE_MAP_EU_TO_ALPHA = {
+      '3': 'XS',
+      '4': 'S',
+      '5': 'M',
+      '6': 'L',
+      '7': 'XL',
+      '8': 'XXL',
+    };
+
+    function normalizeTriumphSizeLabel(s) {
+      return String(s || '').trim().toUpperCase().replace(/\s+/g, '');
+    }
+
+    function mapQtyToStockLevel(qty) {
+      const n = Number(qty ?? 0) || 0;
+      if (n <= 2) return 1;
+      if (n === 3) return 2;
+      if (n === 4) return 3;
+      return 5;
+    }
+
+    function splitSupplierPid(rawPid) {
+      const pid = String(rawPid || '').trim();
+      if (!pid) return null;
+      const idx = pid.lastIndexOf('-');
+      if (idx === -1) return null;
+      return {
+        base: pid.slice(0, idx),
+        color: pid.slice(idx + 1),
+      };
+    }
+
+    function buildGridUrlFromPidBase(base) {
+      if (!base) return null;
+      const cfg = getBrandConfig();
+      return (
+        `https://b2b.triumph.com/api/shop/webstores/${cfg.webstoreId}` +
+        `/carts/${cfg.cartId}/grid/` +
+        encodeURIComponent(String(base)) +
+        '/products'
       );
     }
 
-    // Eventueel keep-alive (optioneel, nu uit)
-    // setInterval(() => { /* evt ping-call naar Triumph */ }, KEEPALIVE_MS);
-
-    return;
-  }
-
-  // ========================================================================
-  // 2) CLIENT OP LINGERIEOUTLET (Proxy-tool)
-  // ========================================================================
-  if (!ON_TOOL) return;
-
-  const Logger = {
-    lb() {
-      try {
-        return (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek)
-          ? unsafeWindow.logboek
-          : window.logboek;
-      } catch {
-        return window.logboek;
-      }
-    },
-    status(id, txt) {
-      const lb = this.lb();
-      if (lb && typeof lb.resultaat === 'function') {
-        lb.resultaat(String(id), txt);
-      } else {
-        console.info(`[Triumph][${id}] status: ${txt}`);
-      }
-    },
-    perMaat(id, report) {
-      console.groupCollapsed(`[Triumph][${id}] maatvergelijking`);
-      try {
-        console.table(report.map(r => ({
-          maat:   r.maat,
-          local:  r.local,
-          remote: Number.isFinite(r.remote) ? r.remote : '—',
-          stock:  Number.isFinite(r.stock)  ? r.stock  : '—',
-          status: r.actie
-        })));
-      } finally {
-        console.groupEnd();
-      }
-    }
-  };
-
-  function bridgeIsOnlineByHeartbeat(maxAge = 5000) {
-    try {
-      const t = GM_getValue(HEARTBEAT_KEY, 0);
-      return t && (Date.now() - t) < maxAge;
-    } catch {
-      return false;
-    }
-  }
-
-  // --- Bridge-client (tool-kant) met cartId ---
-  function bridgeGetGrid(styleId, cartId, timeout = TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      const id = uid();
-
-      let handle;
-      try {
-        handle = GM_addValueChangeListener('triumph_bridge_resp', (_name, _old, msg) => {
-          if (!msg || msg.id !== id) return;
-          try { GM_removeValueChangeListener(handle); } catch {}
-          if (msg.ok) {
-            resolve(msg.text);
-          } else {
-            reject(new Error(msg.error || 'bridge error'));
-          }
-        });
-      } catch (e) {
-        console.error('[Triumph][bridge] kon listener niet registreren:', e);
-        reject(e);
+    function gmGetTriumphGrid(gridUrl, cb) {
+      const bearer = GM_getValue('TriumphBearerToken', '');
+      if (!bearer) {
+        cb(
+          new Error(
+            'Geen Triumph Bearer-token gevonden. ' +
+              'Open eerst b2b.triumph.com (met dit script actief) zodat het token kan worden opgepikt.'
+          ),
+          null
+        );
         return;
       }
 
-      GM_setValue('triumph_bridge_req', { id, styleId, cartId, timeout });
+      log('GET grid via GM_xmlhttpRequest:', gridUrl);
 
-      setTimeout(() => {
-        try { GM_removeValueChangeListener(handle); } catch {}
-        reject(new Error('bridge timeout'));
-      }, timeout + 1500);
-    });
-  }
-
-  // --- p-limit ---
-  function pLimit(n) {
-    const queue = [];
-    let active = 0;
-
-    const next = () => {
-      if (active >= n || queue.length === 0) return;
-      active++;
-      const { fn, resolve, reject } = queue.shift();
-      fn().then(resolve, reject).finally(() => {
-        active--;
-        next();
-      });
-    };
-
-    return fn => new Promise((resolve, reject) => {
-      queue.push({ fn, resolve, reject });
-      next();
-    });
-  }
-
-  // --- Maat-aliases ---
-  // 1–8 voor Triumph/Sloggi one-size / alpha
-  const SIZE_ALIAS = {
-    // Triumph numeriek → alpha / beschrijvend
-    '1': 'ONE SIZE',
-    '2': 'TWO SIZE',
-    '3': 'XS',
-    '4': 'S',
-    '5': 'M',
-    '6': 'L',
-    '7': 'XL',
-    '8': 'XXL',
-
-    // Bestaande aliassen
-    '2XL':    'XXL',
-    'XXL':    '2XL',
-    '3XL':    'XXXL',
-    'XXXL':   '3XL',
-    '4XL':    'XXXXL',
-    'XXXXL':  '4XL',
-    'XS/S':   'XS',
-    'S/M':    'M',
-    'M/L':    'L',
-    'L/XL':   'XL',
-    'XL/2XL': '2XL'
-  };
-
-  function aliasCandidates(label) {
-    const raw = String(label || '').trim().toUpperCase();
-    const ns  = raw.replace(/\s+/g, '');
-    const set = new Set([raw, ns]);
-
-    if (SIZE_ALIAS[raw]) set.add(SIZE_ALIAS[raw]);
-    if (SIZE_ALIAS[ns])  set.add(SIZE_ALIAS[ns]);
-
-    if (raw.includes('/')) {
-      raw.split('/').map(s => s.trim()).forEach(x => {
-        if (!x) return;
-        set.add(x);
-        set.add(x.replace(/\s+/g, ''));
-        if (SIZE_ALIAS[x]) set.add(SIZE_ALIAS[x]);
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: gridUrl,
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          Authorization: bearer,
+        },
+        onload: resp => {
+          if (resp.status < 200 || resp.status >= 300) {
+            cb(new Error('HTTP ' + resp.status + ' bij ophalen grid'), null);
+            return;
+          }
+          let data;
+          try {
+            data = JSON.parse(resp.responseText);
+          } catch (e) {
+            cb(
+              new Error('JSON parse-fout op Triumph grid-respons: ' + e.message),
+              null
+            );
+            return;
+          }
+          cb(null, data);
+        },
+        onerror: err => {
+          cb(err || new Error('Netwerkfout Triumph grid'), null);
+        },
       });
     }
 
-    return Array.from(set);
-  }
+    /**
+     * Triumph grid-JSON → Map('75B' -> { qty, ean })
+     */
+    function buildSizesMapFromGridJson(json, colorCodeFromPid) {
+      const map = new Map();
+      if (!json) return map;
 
-  // --- Triumph stock → interne stock (Naturana-regels) ---
-  function mapTriumphStockLevel(stockNum) {
-    const n = Number(stockNum) || 0;
-    if (n < 3)  return 0;
-    if (n === 3) return 2;
-    if (n === 4) return 4;
-    if (n > 4)   return 5;
-    return 0;
-  }
+      let products;
+      if (Array.isArray(json)) {
+        products = json;
+      } else if (Array.isArray(json.products)) {
+        products = json.products;
+      } else {
+        warn('Onbekende grid-JSON structuur, verwacht array of { products: [] }');
+        return map;
+      }
 
-  // --- Triumph GRID JSON → statusMap voor één kleur ---
-  function buildStatusMapFromTriumphGrid(productsJson, wantedColorCode) {
-    const list = Array.isArray(productsJson)
-      ? productsJson
-      : (productsJson && Array.isArray(productsJson.products))
-        ? productsJson.products
-        : [];
+      if (!products || !products.length) {
+        warn('Geen producten in grid-JSON (lege products-array)');
+        return map;
+      }
 
-    const wanted = String(wantedColorCode || '').padStart(4, '0');
-    const map = {};
+      const colorNorm = String(colorCodeFromPid || '').trim().toUpperCase();
+      let product = null;
 
-    const products = list.filter(p =>
-      String(p.colorCode || '').padStart(4, '0') === wanted
-    );
+      if (colorNorm) {
+        product = products.find(p => {
+          const u1 = String(p.userDefinedField1 || '').trim().toUpperCase();
+          const cc = String(p.colorCode || '').trim().toUpperCase();
+          return u1 === colorNorm || cc === colorNorm;
+        });
+      }
 
-    if (!products.length) {
-      console.debug('[Triumph][DEBUG] Geen product gevonden voor kleurcode', wanted);
+      if (!product) {
+        if (products.length === 1) {
+          product = products[0];
+          warn(
+            'Geen exacte kleur-match voor',
+            colorNorm,
+            '→ val terug op enige product:',
+            {
+              userDefinedField1: product.userDefinedField1,
+              colorCode: product.colorCode,
+              simpleColor: product.simpleColor,
+            }
+          );
+        } else {
+          warn(
+            'Geen product-match voor kleur',
+            colorNorm,
+            'Beschikbare kleuren:',
+            products.map(p => ({
+              userDefinedField1: p.userDefinedField1,
+              colorCode: p.colorCode,
+              simpleColor: p.simpleColor,
+            }))
+          );
+          product = products[0];
+        }
+      }
+
+      const skus = Array.isArray(product.skus) ? product.skus : [];
+      log(
+        'Gekozen product voor kleur',
+        colorNorm,
+        '→ styleCode:',
+        product.styleCode,
+        'simpleColor:',
+        product.simpleColor,
+        'userDefinedField1:',
+        product.userDefinedField1,
+        'colorCode:',
+        product.colorCode,
+        'aantal skus:',
+        skus.length
+      );
+
+      for (const sku of skus) {
+        const rawBand = String(sku.sizeName || sku.sizeDisplayName || '').trim();
+        const rawCup  = String(sku.subSizeName || sku.subSizeDisplayName || '').trim();
+
+        let sizeLabel = '';
+
+        if (!rawBand && !rawCup) continue;
+
+        if (!rawCup) {
+          if (rawBand === '1') {
+            sizeLabel = 'One Size';
+          } else if (rawBand === '2') {
+            sizeLabel = 'Two Size';
+          } else if (SIZE_MAP_EU_TO_ALPHA[rawBand]) {
+            sizeLabel = SIZE_MAP_EU_TO_ALPHA[rawBand];
+          } else {
+            sizeLabel = rawBand;
+          }
+        } else {
+          sizeLabel = (rawBand + rawCup).trim();
+        }
+
+        if (!sizeLabel) continue;
+
+        const eanRaw = String(sku.eanCode || sku.gtin || '').replace(/\D/g, '');
+        if (!eanRaw) continue;
+
+        let qty = 0;
+        if (Array.isArray(sku.stockLevels) && sku.stockLevels.length) {
+          const lvl = sku.stockLevels[0];
+          qty =
+            Number(
+              lvl.quantity ??
+                lvl.available ??
+                lvl.qty ??
+                0
+            ) || 0;
+        }
+
+        const sizeNorm = normalizeTriumphSizeLabel(sizeLabel);
+        if (!sizeNorm) continue;
+
+        const existing = map.get(sizeNorm);
+        if (!existing || existing.qty < qty) {
+          map.set(sizeNorm, { qty, ean: eanRaw });
+        }
+      }
+
+      log('Uiteindelijke map-grootte:', map.size);
+      console.debug(LOG_PREFIX, 'Keys in map:', Array.from(map.keys()));
       return map;
     }
 
-    products.forEach(prod => {
-      (prod.skus || []).forEach(sku => {
-        let label = (sku.simpleSizeName || '').trim().toUpperCase();
-        if (!label) {
-          const base = String(sku.sizeName || '').trim().toUpperCase();
-          const cup  = String(sku.subSizeName || '').trim().toUpperCase();
-          label = (base + (cup || '')).trim();
-        }
-        if (!label) return;
+    // --- Button UI -----------------------------------------------------------
 
-        let totalQty = 0;
-        if (Array.isArray(sku.stockLevels)) {
-          for (const sl of sku.stockLevels) {
-            const q = Number(sl && sl.quantity);
-            if (Number.isFinite(q) && q > 0) totalQty += q;
-          }
-        }
+    function setBtnState(opts = {}) {
+      const btn = document.getElementById(BTN_ID);
+      if (!btn) return;
+      if (opts.text != null) btn.textContent = opts.text;
+      if (opts.bg != null) btn.style.backgroundColor = opts.bg;
+      if (opts.disabled != null) btn.disabled = !!opts.disabled;
+      if (opts.opacity != null) btn.style.opacity = String(opts.opacity);
+    }
 
-        const status = totalQty > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK';
-
-        for (const key of aliasCandidates(label)) {
-          const existing = map[key];
-          if (!existing) {
-            map[key] = { status, stock: totalQty };
-          } else {
-            existing.stock = Math.max(existing.stock || 0, totalQty);
-            if (existing.status !== 'IN_STOCK' && status === 'IN_STOCK') {
-              existing.status = 'IN_STOCK';
-            }
-          }
-        }
+    function resetBtn() {
+      const tableReady = hasTable() && isSupportedBrand();
+      setBtnState({
+        text: '📦 Triumph/Sloggi stock + EAN',
+        bg: '#c0392b',
+        disabled: !tableReady,
+        opacity: tableReady ? '1' : '.55',
       });
-    });
-
-    return map;
-  }
-
-  // --- Markering in tabel ---
-  const resolveRemote = (map, label) => {
-    for (const c of aliasCandidates(label)) {
-      if (map[c]) return map[c];
-    }
-    return undefined;
-  };
-
-  function jumpFlash(el) {
-    if (!el) return;
-    try {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const oldBox = el.style.boxShadow;
-      el.style.boxShadow =
-        '0 0 0 2px rgba(255,255,0,.9), 0 0 12px rgba(255,255,0,.9)';
-      setTimeout(() => { el.style.boxShadow = oldBox || ''; }, 650);
-    } catch {}
-  }
-
-  function applyRulesAndMark(localTable, statusMap) {
-    const rows = localTable.querySelectorAll('tbody tr');
-    const report = [];
-    let firstMut = null;
-
-    rows.forEach(row => {
-      const maat = (row.dataset.size ||
-        (row.children[0] && row.children[0].textContent) ||
-        '').trim().toUpperCase();
-
-      const local = parseInt(
-        (row.children[1] && row.children[1].textContent || '').trim(),
-        10
-      ) || 0;
-
-      const remoteEntry   = resolveRemote(statusMap, maat);
-      const supplierStock = Number(remoteEntry && remoteEntry.stock) || 0;
-      const st            = remoteEntry && remoteEntry.status;
-
-      let supVal;
-      if (st === 'IN_STOCK') {
-        supVal = mapTriumphStockLevel(supplierStock);
-      } else if (st) {
-        supVal = 0;
-      } else {
-        supVal = -1;
-      }
-
-      const effAvail = supVal > 0;
-
-      row.style.background = '';
-      row.style.transition = 'background-color .25s';
-      row.title = '';
-      row.classList.remove('status-green', 'status-red');
-      delete row.dataset.status;
-
-      let actie = 'none';
-
-      if (local > 0 && !effAvail) {
-        row.style.background = '#f8d7da';
-        row.title = st
-          ? 'Uitboeken (Triumph niet op voorraad)'
-          : 'Uitboeken of negeren (maat onbekend bij Triumph → 0)';
-        row.dataset.status = 'remove';
-        row.classList.add('status-red');
-        actie = 'uitboeken';
-        if (!firstMut) firstMut = row;
-
-      } else if (local === 0 && effAvail) {
-        row.style.background = '#d4edda';
-        row.title = `Bijboeken ${supVal} (Triumph op voorraad: ${supplierStock})`;
-        row.dataset.status = 'add';
-        row.classList.add('status-green');
-        actie = 'bijboeken_2';
-        if (!firstMut) firstMut = row;
-
-      } else if (local === 0 && !effAvail) {
-        row.title = st
-          ? 'Negeren (Triumph niet op voorraad)'
-          : 'Negeren (maat onbekend bij Triumph → 0)';
-        actie = 'negeren';
-      }
-
-      report.push({ maat, local, remote: supplierStock, stock: supVal, actie });
-    });
-
-    if (firstMut) jumpFlash(firstMut);
-    return report;
-  }
-
-  function bepaalLogStatus(report, statusMap) {
-    const counts = report.reduce((a, r) => {
-      a[r.actie] = (a[r.actie] || 0) + 1;
-      return a;
-    }, {});
-    const nUit = counts.uitboeken || 0;
-    const nBij = counts.bijboeken_2 || 0;
-    const leeg = !statusMap || Object.keys(statusMap).length === 0;
-
-    if (leeg) return 'niet-gevonden';
-    if (report.length > 0 && nUit === 0 && nBij === 0) return 'ok';
-    return 'afwijking';
-  }
-
-  // --- Grid-cache (per cartId + styleId) ---
-  const gridCache = new Map();
-  async function getGrid(styleId, cartId) {
-    const key = `${cartId || CART_ID_TRIUMPH}:${styleId}`;
-    if (gridCache.has(key)) return gridCache.get(key);
-    const p = bridgeGetGrid(styleId, cartId).then(text => {
-      let json;
-      try {
-        json = JSON.parse(text);
-      } catch (e) {
-        console.error('[Triumph][DEBUG] JSON parse error:', e);
-        json = [];
-      }
-      return json;
-    }).catch(err => {
-      gridCache.delete(key);
-      throw err;
-    });
-    gridCache.set(key, p);
-    return p;
-  }
-
-  // --- Huidige leverancier → juiste cartId (Triumph/Sloggi) ---
-  function getCartIdForCurrentSupplier() {
-    const sel = document.querySelector('#leverancier-keuze');
-    if (!sel) return CART_ID_TRIUMPH;
-    const val = norm(sel.value || '');
-    const txt = norm(sel.options[sel.selectedIndex] &&
-                     sel.options[sel.selectedIndex].text || '');
-    const blob = `${val} ${txt}`;
-    if (/\bsloggi\b/i.test(blob)) return CART_ID_SLOGGI;
-    return CART_ID_TRIUMPH;
-  }
-
-  // --- Hoofd-run ---
-  async function runTriumph(btn) {
-    if (!bridgeIsOnlineByHeartbeat()) {
-      alert(
-        'Triumph-bridge offline.\n' +
-        'Open een b2b.triumph.com-tab, log in, bezoek een product (zodat hun grid-call loopt),\n' +
-        'dan hier opnieuw proberen.'
-      );
-      return;
     }
 
-    const tables = Array.from(document.querySelectorAll('#output table'));
-    if (!tables.length) {
-      alert('Geen tabellen in #output.');
-      return;
+    function ensureButton() {
+      if (!document.body) return;
+
+      let btn = document.getElementById(BTN_ID);
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = BTN_ID;
+        btn.type = 'button';
+        btn.textContent = '📦 Triumph/Sloggi stock + EAN';
+        btn.style.cssText = `
+          position: fixed;
+          right: 10px;
+          top: 120px;
+          z-index: 999999;
+          padding: 10px 12px;
+          background: #c0392b;
+          color: #fff;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          box-shadow: 0 4px 12px rgba(0,0,0,.15);
+          font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        `;
+        document.body.appendChild(btn);
+        btn.addEventListener('click', onScrapeClick);
+      }
+
+      const okBrand = isSupportedBrand();
+      const tableReady = hasTable();
+
+      btn.style.display = okBrand ? '' : 'none';
+      btn.disabled = !tableReady;
+      btn.style.opacity = tableReady ? '1' : '.55';
+      btn.title = tableReady
+        ? 'Haal stock + EAN uit Triumph/Sloggi grid-API en plak in #tabs-3'
+        : 'Wachten tot #tabs-3 geladen is...';
     }
 
-    const cartId = getCartIdForCurrentSupplier();
+    // --- Hoofdactie ----------------------------------------------------------
 
-    const progress = StockKit.makeProgress(btn);
-    progress.start(tables.length);
+    function onScrapeClick() {
+      const btn = document.getElementById(BTN_ID);
+      if (!btn || btn.disabled) return;
 
-    const limit    = pLimit(3);
-    let idx        = 0;
-    let totalMut   = 0;
+      const supplierPid = $(PID_SELECTOR)?.value?.trim();
+      if (!supplierPid) {
+        setBtnState({
+          text: '❌ Geen Supplier PID',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
 
-    await Promise.all(
-      tables.map(table =>
-        limit(async () => {
-          const tableId = (table.id || '').trim();
+      const pidParts = splitSupplierPid(supplierPid);
+      if (!pidParts) {
+        warn('Onverwacht PID-formaat:', supplierPid);
+        setBtnState({
+          text: '❌ PID-formaat onbekend',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
 
-          // ✳ AANGEPASTE REGEX: stijl-kleur met ook V014 / 00ME / M013 etc.
-          const m = tableId.match(/^(\d+)-([0-9A-Z]{3,4})$/i); // bv 10162782-0003 / 10103326-V014
-          const anchorId = tableId || 'onbekend';
+      const gridUrl = buildGridUrlFromPidBase(pidParts.base);
+      if (!gridUrl) {
+        setBtnState({
+          text: '❌ Geen grid-URL',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
 
-          if (!m) {
-            Logger.status(anchorId, 'niet-gevonden (id niet in vorm STIJL-KLEUR)');
-            Logger.perMaat(anchorId, []);
-            progress.setDone(++idx);
-            return;
-          }
+      log('Supplier PID:', supplierPid, '→ grid URL:', gridUrl);
 
-          const styleId   = m[1];
-          const colorCode = m[2].toUpperCase();
+      setBtnState({
+        text: '⏳ Grid laden...',
+        bg: '#f1c40f',
+        disabled: true,
+        opacity: '.8',
+      });
 
+      gmGetTriumphGrid(gridUrl, (err, data) => {
+        if (err || !data) {
+          error('Fout bij ophalen grid:', err);
+          setBtnState({
+            text: '❌ Grid niet geladen',
+            bg: '#e06666',
+            disabled: false,
+            opacity: '1',
+          });
+          setTimeout(resetBtn, 2500);
+          return;
+        }
+
+        handleTriumphData(data, pidParts.color);
+      });
+    }
+
+    function handleTriumphData(json, colorCode) {
+      const sizesMap = buildSizesMapFromGridJson(json, colorCode);
+      if (!sizesMap || sizesMap.size === 0) {
+        setBtnState({
+          text: '❌ Geen maten in grid-data',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
+
+      const table = document.querySelector(TABLE_SELECTOR);
+      if (!table) {
+        setBtnState({
+          text: '❌ #tabs-3 niet klaar',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
+
+      const rows = table.querySelectorAll('tbody tr');
+      let matched = 0;
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 2) return;
+
+        const sizeInput = cells[0].querySelector('input.product_option_small');
+        const sizeRaw = sizeInput ? sizeInput.value : '';
+        const sizeNorm = normalizeLocalSize(sizeRaw);
+        if (!sizeNorm) return;
+
+        const entry = sizesMap.get(sizeNorm);
+        if (!entry) return;
+
+        const { qty, ean } = entry;
+        const stockMapped = mapQtyToStockLevel(qty);
+
+        const stockInput = row.querySelector(
+          'input[name^="options"][name$="[stock]"]'
+        );
+        const eanInput = row.querySelector(
+          'input[name^="options"][name$="[barcode]"]'
+        );
+
+        if (stockInput) {
+          stockInput.value = String(stockMapped);
+          stockInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        if (eanInput && ean) {
+          eanInput.value = String(ean);
+          eanInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        matched++;
+      });
+
+      log(`${matched} rijen ingevuld uit grid-API`);
+      setBtnState({
+        text: `📦 ${matched} rijen gevuld`,
+        bg: '#2ecc71',
+        disabled: false,
+        opacity: '1',
+      });
+      setTimeout(resetBtn, 2500);
+    }
+
+    // --- Observer + lifecycle -----------------------------------------------
+
+    const observer = new MutationObserver(() => {
+      scheduleEnsureButton();
+    });
+
+    let ensureScheduled = false;
+
+    function scheduleEnsureButton() {
+      if (ensureScheduled) return;
+      ensureScheduled = true;
+
+      setTimeout(() => {
+        ensureScheduled = false;
+        ensureButton();
+
+        const btn = document.getElementById(BTN_ID);
+        if (btn && hasTable()) {
           try {
-            const json      = await getGrid(styleId, cartId);
-            const statusMap = buildStatusMapFromTriumphGrid(json, colorCode);
-
-            if (!statusMap || Object.keys(statusMap).length === 0) {
-              Logger.status(anchorId, 'niet-gevonden');
-              Logger.perMaat(anchorId, []);
-            } else {
-              const report = applyRulesAndMark(table, statusMap);
-              totalMut += report.filter(r =>
-                r.actie === 'uitboeken' || r.actie === 'bijboeken_2'
-              ).length;
-              Logger.status(anchorId, bepaalLogStatus(report, statusMap));
-              Logger.perMaat(anchorId, report);
-            }
+            observer.disconnect();
+            log('Observer gestopt: button + tabel gevonden.');
           } catch (e) {
-            console.error('[Triumph] fout bij ophalen grid', e);
-            const msg = String(e.message || '');
-            if (msg.includes('HTTP 401')) {
-              Logger.status(anchorId, 'afwijking (401 – auth/token probleem op Triumph-tab)');
-            } else if (msg.includes('bridge timeout')) {
-              Logger.status(anchorId, 'afwijking (bridge timeout)');
-            } else {
-              Logger.status(anchorId, 'afwijking');
-            }
-            Logger.perMaat(anchorId, []);
-          } finally {
-            progress.setDone(++idx);
+            warn('Kon observer niet disconnecten:', e);
           }
-        })
-      )
-    );
-
-    progress.success(totalMut);
-  }
-
-  // --- UI-knop ---
-  function isTriumphSelected() {
-    const sel = document.querySelector('#leverancier-keuze');
-    if (!sel) return false;
-    const val = norm(sel.value || '');
-    const txt = norm(sel.options[sel.selectedIndex] &&
-                     sel.options[sel.selectedIndex].text || '');
-    const blob = `${val} ${txt}`;
-    // Zowel Triumph als Sloggi gebruiken deze proxy
-    return /\btriumph\b/i.test(blob) || /\bsloggi\b/i.test(blob);
-  }
-
-  function ensureButton() {
-    let btn = document.getElementById('adv-triumph-btn');
-    if (btn) return btn;
-
-    btn = document.createElement('button');
-    btn.id = 'adv-triumph-btn';
-    btn.className = 'sk-btn';
-    btn.type = 'button';
-    btn.textContent = 'Check Triumph/Sloggi Stock';
-
-    Object.assign(btn.style, {
-      position: 'fixed',
-      top: '8px',
-      right: '250px',
-      zIndex: '9999',
-      display: 'none',
-      paddingRight: '26px'
-    });
-
-    const badge = document.createElement('span');
-    Object.assign(badge.style, {
-      position: 'absolute',
-      top: '-6px',
-      right: '-7px',
-      minWidth: '18px',
-      height: '18px',
-      borderRadius: '50%',
-      color: '#fff',
-      fontSize: '10px',
-      fontWeight: '700',
-      lineHeight: '18px',
-      textAlign: 'center',
-      boxShadow: '0 0 0 2px #fff',
-      pointerEvents: 'none',
-      background: 'red'
-    });
-    badge.textContent = '';
-
-    btn.appendChild(badge);
-
-    const setBadge = (ok) => {
-      badge.style.background = ok ? '#24b300' : 'red';
-    };
-    setBadge(bridgeIsOnlineByHeartbeat());
-
-    GM_addValueChangeListener(HEARTBEAT_KEY, () => setBadge(true));
-
-    btn.addEventListener('click', () => runTriumph(btn));
-    document.body.appendChild(btn);
-    return btn;
-  }
-
-  function maybeMountOrRemove() {
-    const hasTables = !!document.querySelector('#output table');
-    const need      = isTriumphSelected();
-    const existing  = document.getElementById('adv-triumph-btn');
-
-    if (need) {
-      const btn = ensureButton();
-      btn.style.display = hasTables ? 'block' : 'none';
-    } else if (existing) {
-      try { existing.remove(); } catch {}
-    }
-  }
-
-  function bootUI() {
-    const sel = document.querySelector('#leverancier-keuze');
-    if (sel) sel.addEventListener('change', maybeMountOrRemove);
-
-    const out = document.querySelector('#output');
-    if (out) {
-      new MutationObserver(maybeMountOrRemove)
-        .observe(out, { childList: true, subtree: true });
+        }
+      }, 100);
     }
 
-    maybeMountOrRemove();
-  }
+    function startObserver() {
+      const root = document.documentElement || document.body;
+      if (!root) {
+        warn('Geen root-node voor MutationObserver');
+        return;
+      }
+      try {
+        observer.observe(root, {
+          childList: true,
+          subtree: true,
+        });
+      } catch (e) {
+        warn('MutationObserver fout:', e);
+      }
+    }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootUI);
-  } else {
-    bootUI();
-  }
+    window.addEventListener('pageshow', scheduleEnsureButton);
+    window.addEventListener('visibilitychange', () => {
+      if (!document.hidden) scheduleEnsureButton();
+    });
+    window.addEventListener('hashchange', scheduleEnsureButton);
+    window.addEventListener('popstate', scheduleEnsureButton);
 
+    ensureButton();
+    startObserver();
+  }
 })();
