@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         🧙‍♂️ The Gallery Grabber – Anita
+// @name         Gallery Grabber | Anita
 // @version      2.4
 // @description  wnload RGB Medium images from filtered gallery view, triggered by button or redirect if filters not active
 // @match        https://b2b.anita.com/nl/zoeken*
 // @grant        GM_download
 // @run-at       document-idle
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-anita.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber-anita.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-anita.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-anita.user.js
 // ==/UserScript==
 
 (function () {
