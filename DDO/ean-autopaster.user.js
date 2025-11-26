@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         EAN Autopaster
+// @name         DDO | EAN Autopaster
 // @version      1.8
 // @description  Plak EAN codes automatisch in #tabs-3 op basis van maat en Supplier PID
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-autopaster.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-autopaster.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/ean-autopaster.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/ean-autopaster.user.js
 // ==/UserScript==
 
 (function () {
