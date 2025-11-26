@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         🧙‍♂️ The Gallery Grabber - Wacoal
+// @name         Gallery Grabber | Wacoal
 // @version      2.1
 // @description  Download alle 1200px productfoto's van Wacoal los en netjes, met statusknop rechtsboven.
 // @match        https://b2b.wacoal-europe.com/*
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/the-gallery-grabber.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-wacoal.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-wacoal.user.js
 // ==/UserScript==
 
 (function () {
