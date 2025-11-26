@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Naturana PDP Sparkle
+// @name         Sparkle | Naturana
 // @version      1.0
 // @description  Klikbare ✨ bij het prijsblok om HTML voor DDO te genereren (Naturana)
 // @match        https://*/naturana/*
