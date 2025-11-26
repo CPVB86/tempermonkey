@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         EAN + Stock Scrape - Lisca
+// @name         EAN Scrape - Lisca
 // @version      1.5
 // @description  Scrape de EAN code én stock direct in de juiste inputfields
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-scrape-lisca.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/ean-scrape-lisca.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-lisca.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-lisca.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
