@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         EAN Scraper | Triumph
-// @version      0.6
+// @name         Scraper | Triumph
+// @version      0.7
 // @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @match        https://b2b.triumph.com/*
@@ -157,7 +157,7 @@ return;
     const TRIUMPH_CART_ID = '2155706';
 
     const SLOGGI_WEBSTORE_ID = '2442';
-    const SLOGGI_CART_ID = '2383370';
+    const SLOGGI_CART_ID = '2455614';
 
     const $ = (s, r = document) => r.querySelector(s);
 
