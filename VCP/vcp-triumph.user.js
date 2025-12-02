@@ -1,15 +1,13 @@
 // ==UserScript==
-// @name         VCP | Triumph
+// @name         VCP | Triumph (MV3 friendly)
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.3
-// @description  Vergelijk local stock met Triumph/Sloggi stock via grid-API (met bridge & auth-capture in page-context)
+// @version      1.4
+// @description  Vergelijk local stock met Triumph/Sloggi stock via grid-API (met bridge & auth-capture in page-context, MV3-vriendelijk polling-model)
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://b2b.triumph.com/*
 // @grant        unsafeWindow
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_addValueChangeListener
-// @grant        GM_removeValueChangeListener
 // @run-at       document-start
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-triumph.user.js
@@ -24,6 +22,8 @@
 
   const HEARTBEAT_KEY   = 'triumph_bridge_heartbeat';
   const AUTH_HEADER_KEY = 'triumph_bridge_auth_header';
+  const REQ_KEY         = 'triumph_bridge_req';
+  const RESP_KEY        = 'triumph_bridge_resp';
 
   const TIMEOUT_MS   = 20000;
   const KEEPALIVE_MS = 300000;
@@ -31,7 +31,7 @@
   // Uit jouw network-calls (Triumph + Sloggi op dezelfde webstore, andere cart)
   const TRIUMPH_WEBSTORE_ID = 2442;
   const CART_ID_TRIUMPH     = 2155706;
-  const CART_ID_SLOGGI      = 2383370;
+  const CART_ID_SLOGGI      = 2455614;
 
   const TRIUMPH_API_BASE =
     `https://b2b.triumph.com/api/shop/webstores/${TRIUMPH_WEBSTORE_ID}/carts/`;
@@ -42,15 +42,18 @@
 
   // ========================================================================
   // 1) BRIDGE OP TRIUMPH (in echte page-context via unsafeWindow)
+  //    - Captured Authorization header
+  //    - Heartbeat
+  //    - Polling op REQ_KEY → fetch grid → schrijf RESP_KEY
   // ========================================================================
   if (ON_TRIUMPH) {
     const w = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
     let pageFetch = null;
 
-    // Heartbeat
+    // Heartbeat - rustiger gemaakt (15s i.p.v. 2,5s)
     setInterval(() => {
       try { GM_setValue(HEARTBEAT_KEY, Date.now()); } catch {}
-    }, 2500);
+    }, 15000);
 
     // --- helpers voor auth capture ---
     function storeAuth(val, via) {
@@ -107,7 +110,7 @@
 
         w.fetch = function patchedFetch(input, init = {}) {
           try {
-            const auth = extractAuthFromHeaders(init.headers);
+            const auth = extractAuthFromHeaders(init && init.headers);
             if (auth) storeAuth(auth, 'via fetch');
           } catch (e) {
             console.debug('[Triumph-bridge][DEBUG] fetch-hook error:', e);
@@ -191,31 +194,45 @@
       return await res.text();
     }
 
-    // --- Bridge-listener: requests vanuit tool ---
-    GM_addValueChangeListener('triumph_bridge_req', (_name, _old, req) => {
-      if (!req || !req.id || !req.styleId) return;
+    // --- Polling-bridge: regelmatig kijken of er een request klaarstaat ---
+    (function startBridgePoller() {
+      let lastProcessedId = null;
 
-      (async () => {
+      const tick = async () => {
+        let req;
+        try {
+          req = GM_getValue(REQ_KEY, null);
+        } catch {
+          return;
+        }
+        if (!req || !req.id || !req.styleId) return;
+        if (req.id === lastProcessedId) return;
+
+        const { id, styleId, cartId, timeout } = req;
+        lastProcessedId = id;
+
         try {
           const text = await fetchTriumphGrid(
-            req.styleId,
-            req.cartId,
-            req.timeout || TIMEOUT_MS
+            styleId,
+            cartId,
+            timeout || TIMEOUT_MS
           );
-          GM_setValue('triumph_bridge_resp', {
-            id: req.id,
+          GM_setValue(RESP_KEY, {
+            id,
             ok: true,
             text
           });
         } catch (e) {
-          GM_setValue('triumph_bridge_resp', {
-            id: req.id,
+          GM_setValue(RESP_KEY, {
+            id,
             ok: false,
             error: String(e)
           });
         }
-      })();
-    });
+      };
+
+      setInterval(tick, 300); // 0,3s poll-interval
+    })();
 
     if (document.readyState !== 'loading') {
       console.info('[Triumph-bridge] actief op', location.href);
@@ -225,7 +242,7 @@
       );
     }
 
-    // Eventueel keep-alive (optioneel, nu uit)
+    // Eventueel keep-alive (optioneel, nu nog steeds uit)
     // setInterval(() => { /* evt ping-call naar Triumph */ }, KEEPALIVE_MS);
 
     return;
@@ -233,6 +250,9 @@
 
   // ========================================================================
   // 2) CLIENT OP LINGERIEOUTLET (Proxy-tool)
+  //    - Maakt requests via REQ_KEY
+  //    - Pollt zelf op RESP_KEY
+  //    - Serialiseert brug-calls zodat er nooit meerdere tegelijk lopen
   // ========================================================================
   if (!ON_TOOL) return;
 
@@ -270,7 +290,7 @@
     }
   };
 
-  function bridgeIsOnlineByHeartbeat(maxAge = 5000) {
+  function bridgeIsOnlineByHeartbeat(maxAge = 10000) {
     try {
       const t = GM_getValue(HEARTBEAT_KEY, 0);
       return t && (Date.now() - t) < maxAge;
@@ -279,38 +299,51 @@
     }
   }
 
-  // --- Bridge-client (tool-kant) met cartId ---
-  function bridgeGetGrid(styleId, cartId, timeout = TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      const id = uid();
+  // --- Brugclient (tool-kant) met polling en serialisatie ---
+  let lastBridgePromise = Promise.resolve();
 
-      let handle;
+  function bridgeGetGrid(styleId, cartId, timeout = TIMEOUT_MS) {
+    const exec = async () => {
+      const id = uid();
+      const deadline = Date.now() + timeout + 1500;
+
       try {
-        handle = GM_addValueChangeListener('triumph_bridge_resp', (_name, _old, msg) => {
-          if (!msg || msg.id !== id) return;
-          try { GM_removeValueChangeListener(handle); } catch {}
-          if (msg.ok) {
-            resolve(msg.text);
-          } else {
-            reject(new Error(msg.error || 'bridge error'));
-          }
-        });
+        GM_setValue(REQ_KEY, { id, styleId, cartId, timeout });
       } catch (e) {
-        console.error('[Triumph][bridge] kon listener niet registreren:', e);
-        reject(e);
-        return;
+        console.error('[Triumph][bridge] kon request niet schrijven:', e);
+        throw e;
       }
 
-      GM_setValue('triumph_bridge_req', { id, styleId, cartId, timeout });
+      while (Date.now() < deadline) {
+        let msg;
+        try {
+          msg = GM_getValue(RESP_KEY, null);
+        } catch (e) {
+          console.error('[Triumph][bridge] kon response niet lezen:', e);
+          throw e;
+        }
 
-      setTimeout(() => {
-        try { GM_removeValueChangeListener(handle); } catch {}
-        reject(new Error('bridge timeout'));
-      }, timeout + 1500);
-    });
+        if (msg && msg.id === id) {
+          // Optioneel: response leegmaken om mem-rotzooi te beperken
+          try { GM_setValue(RESP_KEY, null); } catch {}
+          if (msg.ok) {
+            return msg.text;
+          }
+          throw new Error(msg.error || 'bridge error');
+        }
+
+        await delay(200);
+      }
+
+      throw new Error('bridge timeout');
+    };
+
+    // Serialiseer alle brug-calls via één keten
+    lastBridgePromise = lastBridgePromise.then(() => exec(), () => exec());
+    return lastBridgePromise;
   }
 
-  // --- p-limit ---
+  // --- p-limit (beperkt lokale concurrency, brug zelf is al geserialiseerd) ---
   function pLimit(n) {
     const queue = [];
     let active = 0;
@@ -604,7 +637,7 @@
     const progress = StockKit.makeProgress(btn);
     progress.start(tables.length);
 
-    const limit    = pLimit(3);
+    const limit    = pLimit(3); // lokaal nog steeds max 3 tegelijk
     let idx        = 0;
     let totalMut   = 0;
 
@@ -720,7 +753,10 @@
     };
     setBadge(bridgeIsOnlineByHeartbeat());
 
-    GM_addValueChangeListener(HEARTBEAT_KEY, () => setBadge(true));
+    // Simpele poll i.p.v. GM_addValueChangeListener
+    setInterval(() => {
+      setBadge(bridgeIsOnlineByHeartbeat());
+    }, 12000);
 
     btn.addEventListener('click', () => runTriumph(btn));
     document.body.appendChild(btn);
