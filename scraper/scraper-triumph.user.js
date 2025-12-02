@@ -1,9 +1,8 @@
 // ==UserScript==
 // @name         EAN Scraper | Triumph
-// @version      0.5
+// @version      0.6
 // @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
-// @match        https://lingerieoutlet.nl/admin.php?section=products*
 // @match        https://b2b.triumph.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -35,23 +34,18 @@
   //  MODE-DETECTIE
   // ---------------------------------------------------------------------------
 
-  if (HOST === 'b2b.triumph.com') {
-    // We zitten op Triumph B2B → token-sniffer installeren
-    installTriumphTokenSniffer();
-    return;
-  }
-
-  if (
-    HOST === 'www.dutchdesignersoutlet.com' ||
-    HOST === 'lingerieoutlet.nl'
-  ) {
-    // We zitten in jouw admin → EAN/stock-scraper UI + logica
-    initAdminSide();
-    return;
-  }
-
-  // Andere hosts: niks doen
+if (HOST === 'b2b.triumph.com') {
+  installTriumphTokenSniffer();
   return;
+}
+
+if (HOST === 'www.dutchdesignersoutlet.com') {
+  initAdminSide();
+  return;
+}
+
+// Andere hosts: niks doen
+return;
 
   // ---------------------------------------------------------------------------
   //  DEEL 1: TOKEN-SNIFFER OP B2B.TRIMUPH.COM
@@ -115,8 +109,7 @@
       XMLHttpRequest.prototype.open = function (method, url) {
         try {
           this._isTriumphApi =
-            typeof url === 'string' &&
-            url.indexOf('/api/shop/webstores/') !== -1;
+            typeof url === 'string' && url.indexOf('/api/shop/webstores/') !== -1;
         } catch (e) {
           this._isTriumphApi = false;
         }
@@ -160,7 +153,6 @@
     const PID_SELECTOR = '#tabs-1 input[name="supplier_pid"]';
     const BRAND_TITLE_SELECTOR = '#tabs-1 #select2-brand-container';
 
-    // Triumph / Sloggi grid-API waardes
     const TRIUMPH_WEBSTORE_ID = '2442';
     const TRIUMPH_CART_ID = '2155706';
 
@@ -172,14 +164,12 @@
     const getBrandTitle = () =>
       document.querySelector(BRAND_TITLE_SELECTOR)?.title?.trim() || '';
 
-    // Button tonen voor zowel Triumph als Sloggi
     function isSupportedBrand() {
       const title = getBrandTitle().toLowerCase();
-      if (!title) return true; // liever tonen dan verstoppen
+      if (!title) return true;
       return title.includes('triumph') || title.includes('sloggi');
     }
 
-    // Bepaal welke cart/webstore er hoort bij de huidige brand
     function getBrandConfig() {
       const title = getBrandTitle().toLowerCase();
 
@@ -191,7 +181,6 @@
         };
       }
 
-      // default: Triumph
       return {
         brand: 'triumph',
         webstoreId: TRIUMPH_WEBSTORE_ID,
@@ -207,7 +196,6 @@
       return String(s || '').trim().toUpperCase().replace(/\s+/g, '');
     }
 
-    // Mapping van Triumph EU-codes naar alpha-maten
     const SIZE_MAP_EU_TO_ALPHA = {
       '3': 'XS',
       '4': 'S',
@@ -229,7 +217,6 @@
       return 5;
     }
 
-    // Supplier PID: "10162782-0004"
     function splitSupplierPid(rawPid) {
       const pid = String(rawPid || '').trim();
       if (!pid) return null;
@@ -241,7 +228,6 @@
       };
     }
 
-    // Grid-URL voor een stylecode, met juiste cart per merk
     function buildGridUrlFromPidBase(base) {
       if (!base) return null;
       const cfg = getBrandConfig();
@@ -252,8 +238,6 @@
         '/products'
       );
     }
-
-    // --- Triumph API call met Bearer ----------------------------------------
 
     function gmGetTriumphGrid(gridUrl, cb) {
       const bearer = GM_getValue('TriumphBearerToken', '');
@@ -277,7 +261,7 @@
           Accept: 'application/json, text/plain, */*',
           Authorization: bearer,
         },
-        onload: (resp) => {
+        onload: resp => {
           if (resp.status < 200 || resp.status >= 300) {
             cb(new Error('HTTP ' + resp.status + ' bij ophalen grid'), null);
             return;
@@ -294,143 +278,26 @@
           }
           cb(null, data);
         },
-        onerror: (err) => {
+        onerror: err => {
           cb(err || new Error('Netwerkfout Triumph grid'), null);
         },
       });
     }
 
-    // --- (optionele) kleurcode → kleurnaam mapping -------------------------
-
-    const TRIUMPH_COLOR_MAP_DEFAULT = {
-      '0004': 'BLACK',
-      '6106': 'SMOOTH SKIN',
-      '0003': 'WHITE',
-      '00GT': 'VANILLE',
-      '0034': 'BLACK COMBINATION',
-      '0080': 'NIGHT BLUE',
-      '1196': 'ORANGE HIGHLIGHT',
-      '00NZ': 'NUDE BEIGE',
-      '00CM': 'NOSTALGIC BROWN',
-      '00GZ': 'SILK WHITE',
-      '1141': 'CACAO',
-      '00EP': 'NEUTRAL BEIGE',
-      '00RA': 'NAVY',
-      '6720': 'CREAMY DREAM',
-      '1595': 'ECRU WHITE',
-      '00UD': 'ROSE BROWN',
-      '0026': 'SKIN',
-      '00ZE': 'CHOCOLATE MOUSSE',
-      '00VV': 'FIG PINK',
-      '2114': 'NAVY BLUE',
-      '00ED': 'PAPRIKA RED',
-      '7311': 'PROVINCIAL BLUE',
-      '6312': 'DEEP COBALT',
-      '3780': 'GREY',
-      '7539': 'PROVENCE',
-      '7731': 'TOPAZ',
-      '7080': 'NECTARINE',
-      '00DK': 'PEBBLE GREY',
-      '1786': 'RUSSIAN GREEN',
-      '6437': 'MYSTIC PLUM',
-      '0093': 'CHILI',
-      '7008': 'RED WOOD',
-      'M013': 'GREY COMBINATION',
-      '0038': 'CHRYSANTHEME',
-      '0032': 'BLUE COMBINATION',
-      'M017': 'ORANGE - LIGHT COMBINATION',
-      '00PQ': 'CORAL',
-      '7014': 'RUST',
-      '3811': 'VIOLET',
-      '7786': 'SILKY GREEN',
-      '6308': 'ANGORA',
-      '00ME': 'CAMEO BROWN',
-      '00FU': 'PLATINUM',
-      '3649': 'PEROLA',
-      '6315': 'CHAMBRAY',
-      '7574': 'LILA CLOVER',
-      '00FZ': 'SHANGHAI RED',
-    };
-
-    const TRIUMPH_COLOR_MAP_KEY = 'triumph_color_map_dynamic';
-
-    function loadColorMap() {
-      try {
-        const raw = GM_getValue(TRIUMPH_COLOR_MAP_KEY, '{}');
-        const obj = JSON.parse(raw);
-        return obj && typeof obj === 'object' ? obj : {};
-      } catch (e) {
-        console.warn(LOG_PREFIX, 'Kon kleurmap niet laden, fallback naar {}', e);
-        return {};
-      }
-    }
-
-    function saveColorMap(map) {
-      try {
-        GM_setValue(TRIUMPH_COLOR_MAP_KEY, JSON.stringify(map || {}));
-      } catch (e) {
-        console.warn(LOG_PREFIX, 'Kon kleurmap niet opslaan', e);
-      }
-    }
-
-    function resolveColorNameForCode(code) {
-      const codeNorm = String(code || '').trim().toUpperCase();
-      if (!codeNorm) return null;
-
-      const stored = loadColorMap();
-
-      // 1) Dynamisch (eerder ingevuld)
-      if (stored[codeNorm]) return stored[codeNorm];
-
-      // 2) Statisch default
-      if (TRIUMPH_COLOR_MAP_DEFAULT[codeNorm]) {
-        return TRIUMPH_COLOR_MAP_DEFAULT[codeNorm];
-      }
-
-      // 3) Onbekende kleurcode → vragen
-      const userVal = window.prompt(
-        `${LOG_PREFIX}\nOnbekende Triumph kleurcode: ${codeNorm}\n` +
-          'Voer de kleurnaam in zoals in de B2B-grid staat (bijv. WHITE / BLACK / GREY):',
-        ''
-      );
-
-      if (userVal && userVal.trim()) {
-        const val = userVal.trim().toUpperCase();
-        stored[codeNorm] = val;
-        saveColorMap(stored);
-        console.info(
-          LOG_PREFIX,
-          'Nieuwe kleurcode mapping opgeslagen:',
-          codeNorm,
-          '→',
-          val
-        );
-        return val;
-      }
-
-      console.warn(LOG_PREFIX, 'Geen mapping opgegeven voor kleurcode', codeNorm);
-      return null;
-    }
-
     /**
      * Triumph grid-JSON → Map('75B' -> { qty, ean })
-     * json: response van /grid/{styleCode}/products
-     * colorCodeFromPid: bv. '0004' uit Supplier PID 10162782-0004
      */
     function buildSizesMapFromGridJson(json, colorCodeFromPid) {
       const map = new Map();
       if (!json) return map;
 
-      // 1) Productenlijst bepalen
       let products;
       if (Array.isArray(json)) {
         products = json;
       } else if (Array.isArray(json.products)) {
         products = json.products;
       } else {
-        warn(
-          'Onbekende grid-JSON structuur, verwacht array of { products: [] }'
-        );
+        warn('Onbekende grid-JSON structuur, verwacht array of { products: [] }');
         return map;
       }
 
@@ -443,15 +310,10 @@
       let product = null;
 
       if (colorNorm) {
-        const colorName = resolveColorNameForCode(colorNorm);
-        product = products.find((p) => {
+        product = products.find(p => {
           const u1 = String(p.userDefinedField1 || '').trim().toUpperCase();
           const cc = String(p.colorCode || '').trim().toUpperCase();
-          const sc = String(p.simpleColor || '').trim().toUpperCase();
-
-          if (u1 === colorNorm || cc === colorNorm) return true;
-          if (colorName && sc === colorName) return true;
-          return false;
+          return u1 === colorNorm || cc === colorNorm;
         });
       }
 
@@ -473,13 +335,12 @@
             'Geen product-match voor kleur',
             colorNorm,
             'Beschikbare kleuren:',
-            products.map((p) => ({
+            products.map(p => ({
               userDefinedField1: p.userDefinedField1,
               colorCode: p.colorCode,
               simpleColor: p.simpleColor,
             }))
           );
-          // Als je hier NIET wilt vallen op eerste product, dan gewoon "return map;" doen.
           product = products[0];
         }
       }
@@ -500,70 +361,53 @@
         skus.length
       );
 
-// 3) Per SKU maat + EAN + voorraad mappen
-for (const sku of skus) {
-  const rawBand = String(
-    sku.sizeName || sku.sizeDisplayName || ''
-  ).trim();
-  const rawCup = String(
-    sku.subSizeName || sku.subSizeDisplayName || ''
-  ).trim();
+      for (const sku of skus) {
+        const rawBand = String(sku.sizeName || sku.sizeDisplayName || '').trim();
+        const rawCup  = String(sku.subSizeName || sku.subSizeDisplayName || '').trim();
 
-  // --- Maatmapping: Triumph → jouw systeem ---
-  // Cases:
-  // - Alleen band = "1"       → One Size
-  // - Alleen band = "2"       → Two Size
-  // - Alleen band = "3"–"8"   → XS–XXL
-  // - Anders: band + cup (75 + B → 75B)
-  let sizeLabel = '';
+        let sizeLabel = '';
 
-  if (!rawBand && !rawCup) continue;
+        if (!rawBand && !rawCup) continue;
 
-  if (!rawCup) {
-    // Eén-dimensionale maten (slips, tops, etc.)
-    if (rawBand === '1') {
-      // Triumph-code "1" is bij jou "One Size"
-      sizeLabel = 'One Size';
-    } else if (rawBand === '2') {
-      // Triumph-code "2" is bij jou "Two Size"
-      sizeLabel = 'Two Size';
-    } else if ( SIZE_MAP_EU_TO_ALPHA[rawBand] ) {
-      // EU-maatnummers 3–8 omzetten naar XS–XXL
-      sizeLabel = SIZE_MAP_EU_TO_ALPHA[rawBand];
-    } else {
-      // Onbekende / al alfabetische maat (bv. 'S', 'M', 'L')
-      sizeLabel = rawBand;
-    }
-  } else {
-    // Bh-maten of andere band+cup combinaties
-    sizeLabel = (rawBand + rawCup).trim();
-  }
+        if (!rawCup) {
+          if (rawBand === '1') {
+            sizeLabel = 'One Size';
+          } else if (rawBand === '2') {
+            sizeLabel = 'Two Size';
+          } else if (SIZE_MAP_EU_TO_ALPHA[rawBand]) {
+            sizeLabel = SIZE_MAP_EU_TO_ALPHA[rawBand];
+          } else {
+            sizeLabel = rawBand;
+          }
+        } else {
+          sizeLabel = (rawBand + rawCup).trim();
+        }
 
-  if (!sizeLabel) continue;
+        if (!sizeLabel) continue;
 
-  const eanRaw = String(sku.eanCode || sku.gtin || '').replace(/\D/g, '');
-  if (!eanRaw) continue;
+        const eanRaw = String(sku.eanCode || sku.gtin || '').replace(/\D/g, '');
+        if (!eanRaw) continue;
 
-  let qty = 0;
-  if (Array.isArray(sku.stockLevels) && sku.stockLevels.length) {
-    const lvl = sku.stockLevels[0];
-    qty =
-      Number(
-        lvl.quantity ??
-          lvl.available ??
-          lvl.qty ??
-          0
-      ) || 0;
-  }
+        let qty = 0;
+        if (Array.isArray(sku.stockLevels) && sku.stockLevels.length) {
+          const lvl = sku.stockLevels[0];
+          qty =
+            Number(
+              lvl.quantity ??
+                lvl.available ??
+                lvl.qty ??
+                0
+            ) || 0;
+        }
 
-  const sizeNorm = normalizeTriumphSizeLabel(sizeLabel);
-  if (!sizeNorm) continue;
+        const sizeNorm = normalizeTriumphSizeLabel(sizeLabel);
+        if (!sizeNorm) continue;
 
-  const existing = map.get(sizeNorm);
-  if (!existing || existing.qty < qty) {
-    map.set(sizeNorm, { qty, ean: eanRaw });
-  }
-}
+        const existing = map.get(sizeNorm);
+        if (!existing || existing.qty < qty) {
+          map.set(sizeNorm, { qty, ean: eanRaw });
+        }
+      }
 
       log('Uiteindelijke map-grootte:', map.size);
       console.debug(LOG_PREFIX, 'Keys in map:', Array.from(map.keys()));
@@ -716,7 +560,7 @@ for (const sku of skus) {
       const rows = table.querySelectorAll('tbody tr');
       let matched = 0;
 
-      rows.forEach((row) => {
+      rows.forEach(row => {
         const cells = row.querySelectorAll('td');
         if (cells.length < 2) return;
 
@@ -763,11 +607,40 @@ for (const sku of skus) {
 
     // --- Observer + lifecycle -----------------------------------------------
 
-    const observer = new MutationObserver(() => ensureButton());
+    const observer = new MutationObserver(() => {
+      scheduleEnsureButton();
+    });
+
+    let ensureScheduled = false;
+
+    function scheduleEnsureButton() {
+      if (ensureScheduled) return;
+      ensureScheduled = true;
+
+      setTimeout(() => {
+        ensureScheduled = false;
+        ensureButton();
+
+        const btn = document.getElementById(BTN_ID);
+        if (btn && hasTable()) {
+          try {
+            observer.disconnect();
+            log('Observer gestopt: button + tabel gevonden.');
+          } catch (e) {
+            warn('Kon observer niet disconnecten:', e);
+          }
+        }
+      }, 100);
+    }
 
     function startObserver() {
+      const root = document.documentElement || document.body;
+      if (!root) {
+        warn('Geen root-node voor MutationObserver');
+        return;
+      }
       try {
-        observer.observe(document.documentElement || document.body, {
+        observer.observe(root, {
           childList: true,
           subtree: true,
         });
@@ -776,12 +649,12 @@ for (const sku of skus) {
       }
     }
 
-    window.addEventListener('pageshow', ensureButton);
+    window.addEventListener('pageshow', scheduleEnsureButton);
     window.addEventListener('visibilitychange', () => {
-      if (!document.hidden) ensureButton();
+      if (!document.hidden) scheduleEnsureButton();
     });
-    window.addEventListener('hashchange', ensureButton);
-    window.addEventListener('popstate', ensureButton);
+    window.addEventListener('hashchange', scheduleEnsureButton);
+    window.addEventListener('popstate', scheduleEnsureButton);
 
     ensureButton();
     startObserver();
