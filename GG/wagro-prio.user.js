@@ -152,7 +152,7 @@
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.type = 'button';
-    btn.textContent = '⚡ WaGro → 1 (random rest)';
+    btn.textContent = '⚡ WaGro → 1';
     btn.className = 'btn btn-sm m-btn m-btn--pill btn-success';
     btn.style.marginLeft = '8px';
     btn.addEventListener('click', processTable);
