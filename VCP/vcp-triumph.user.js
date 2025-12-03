@@ -30,7 +30,7 @@
 
   // Uit jouw network-calls (Triumph + Sloggi op dezelfde webstore, andere cart)
   const TRIUMPH_WEBSTORE_ID = 2442;
-  const CART_ID_TRIUMPH     = 2155706;
+  const CART_ID_TRIUMPH     = 2460968;
   const CART_ID_SLOGGI      = 2455614;
 
   const TRIUMPH_API_BASE =
