@@ -154,7 +154,7 @@ return;
     const BRAND_TITLE_SELECTOR = '#tabs-1 #select2-brand-container';
 
     const TRIUMPH_WEBSTORE_ID = '2442';
-    const TRIUMPH_CART_ID = '2155706';
+    const TRIUMPH_CART_ID = '2460968';
 
     const SLOGGI_WEBSTORE_ID = '2442';
     const SLOGGI_CART_ID = '2455614';
