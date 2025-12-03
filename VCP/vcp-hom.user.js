@@ -215,7 +215,22 @@
   }
 
   // ---- Markeren + jump-flash ----
-  const resolveRemote=(map,label)=>{ for(const c of aliasCandidates(label)){ if(map[c]) return map[c]; } return undefined; };
+  const resolveRemote=(map,label)=>{
+    for(const c of aliasCandidates(label)){
+      if(map[c]) return map[c];
+    }
+    return undefined;
+  };
+
+  // nieuwe helper: map remote stock naar gewenste local stock
+  function mapRemoteToLocal(remoteStock){
+    if (remoteStock < 2) return 0;       // -1,0,1 → 0
+    if (remoteStock === 3) return 1;     // 3 → 1
+    if (remoteStock === 4) return 2;     // 4 → 2
+    if (remoteStock > 4) return 5;       // 5+ → 5
+    return null; // bijv. remote = 2 → geen rule, dus niets aanpassen
+  }
+
   function jumpFlash(el){
     if(!el) return;
     try{
@@ -225,36 +240,87 @@
       setTimeout(()=>{ el.style.boxShadow=oldBox||''; }, 650);
     }catch{}
   }
+
   function applyRulesAndMark(localTable, statusMap){
-    const rows=localTable.querySelectorAll('tbody tr'); const report=[]; let firstMut=null;
+    const rows=localTable.querySelectorAll('tbody tr');
+    const report=[];
+    let firstMut=null;
+
     rows.forEach(row=>{
       const maat=(row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
       const local=parseInt((row.children[1]?.textContent||'').trim(),10)||0;
-      const remote=resolveRemote(statusMap, maat);
-      const st=remote?.status; const stockNum=Number(remote?.stock ?? 0)||0;
-      const supVal=(st==='IN_STOCK') ? (stockNum||1) : (st ? 0 : -1);
-      const effAvail=supVal>0;
 
-      row.style.background=''; row.style.transition='background-color .25s'; row.title=''; row.classList.remove('status-green','status-red'); delete row.dataset.status;
-      let actie='none';
-      if(local>0 && (st==='OUT_OF_STOCK'||st==='LOW')){
-        row.style.background='#f8d7da'; row.title=(st==='LOW')?'Uitboeken (HOM backorder/laag)':'Uitboeken (HOM uitverkocht)'; row.dataset.status='remove'; row.classList.add('status-red'); actie='uitboeken';
-        if(!firstMut) firstMut=row;
-      } else if(local===0 && effAvail){
-        row.style.background='#d4edda'; row.title='Bijboeken 2 (HOM op voorraad)'; row.dataset.status='add'; row.classList.add('status-green'); actie='bijboeken_2';
-        if(!firstMut) firstMut=row;
-      } else if(local===0 && !effAvail){
-        row.title=(st ? 'Negeren (HOM niet op voorraad)' : 'Negeren (maat onbekend bij HOM → 0)'); actie='negeren';
+      const remote=resolveRemote(statusMap, maat);
+      const st=remote?.status;
+
+      // remote stock ophalen; als onbekend → -1
+      let remoteStock;
+      if (typeof remote?.stock === 'number'){
+        remoteStock = remote.stock;
+      } else if (st) {
+        // wel status maar geen getal → treat as 0
+        remoteStock = 0;
+      } else {
+        // maat onbekend bij HOM
+        remoteStock = -1;
       }
-      report.push({ maat, local, sup:supVal, actie });
+
+      const desired = mapRemoteToLocal(remoteStock);
+
+      // reset styling
+      row.style.background='';
+      row.style.transition='background-color .25s';
+      row.title='';
+      row.classList.remove('status-green','status-red');
+      delete row.dataset.status;
+
+      let actie='none';
+
+      if (desired === null){
+        // geen stockrule voor deze remote-waarde (bijv. remote = 2)
+        row.title = st
+          ? `Negeren (geen stockrule voor remote=${remoteStock})`
+          : 'Negeren (maat onbekend bij HOM)';
+        actie='negeren';
+      } else if (local > desired){
+        const diff = local - desired;
+        row.style.background='#f8d7da';
+        row.title=`Uitboeken ${diff} → naar ${desired} (HOM: ${remoteStock})`;
+        row.dataset.status='remove';
+        row.classList.add('status-red');
+        actie='uitboeken';
+        if(!firstMut) firstMut=row;
+      } else if (local < desired){
+        const diff = desired - local;
+        row.style.background='#d4edda';
+        row.title=`Bijboeken ${diff} → naar ${desired} (HOM: ${remoteStock})`;
+        row.dataset.status='add';
+        row.classList.add('status-green');
+        actie='bijboeken';
+        if(!firstMut) firstMut=row;
+      } else {
+        // local == desired → ok, niets doen
+        row.title=`OK (local=${local}, HOM=${remoteStock})`;
+        actie='ok';
+      }
+
+      report.push({ maat, local, sup:remoteStock, actie });
     });
+
     if(firstMut) jumpFlash(firstMut);
     return report;
   }
+
   const bepaalLogStatus=(report,statusMap)=>{
-    const counts=report.reduce((a,r)=> (a[r.actie]=(a[r.actie]||0)+1, a), {}); const nUit=counts.uitboeken||0, nBij=counts.bijboeken_2||0;
-    const leeg=!statusMap || Object.keys(statusMap).length===0; if(leeg) return 'niet-gevonden'; if(report.length>0 && nUit===0 && nBij===0) return 'ok'; return 'afwijking';
+    const leeg=!statusMap || Object.keys(statusMap).length===0;
+    if (leeg) return 'niet-gevonden';
+
+    const heeftMutaties = report.some(r => r.actie === 'uitboeken' || r.actie === 'bijboeken');
+
+    if (report.length>0 && !heeftMutaties) return 'ok';
+    return 'afwijking';
   };
+
 
   // ---- p-limit (client concurrency) ----
   function pLimit(n){
