@@ -56,13 +56,14 @@
     if (btn) return btn;
     btn = document.createElement("button");
     btn.id = BTN_ID;
-    btn.textContent = "🚛 Fetch Stock | Anita";
+    btn.textContent = "⛏️ SS&E | Anita/Rosa";
     btn.title = "Klik: uitvoeren • Alt-klik: DEBUG aan/uit • Ctrl-klik: Sheet refresh";
     Object.assign(btn.style, {
       position: "fixed", right: "10px", top: "10px", zIndex: 999999,
       padding: "10px 12px", background: "#007cba", color: "#fff",
       border: "none", borderRadius: "6px", cursor: "pointer",
-      boxShadow: "0 2px 8px rgba(0,0,0,.15)", fontFamily: "inherit"
+      boxShadow: "0 2px 8px rgba(0,0,0,.15)", fontFamily: "inherit",
+      font: "600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif"
     });
     document.body.appendChild(btn);
     return btn;
