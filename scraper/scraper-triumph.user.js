@@ -487,8 +487,8 @@
     function resetBtn() {
       const tableReady = hasTable() && isSupportedBrand();
       setBtnState({
-        text: '📦 Triumph/Sloggi stock + EAN',
-        bg: '#c0392b',
+        text: '⛏️ SS&E | Triumph/Sloggi',
+        bg: '#007cba',
         disabled: !tableReady,
         opacity: tableReady ? '1' : '.55',
       });
@@ -502,14 +502,14 @@
         btn = document.createElement('button');
         btn.id = BTN_ID;
         btn.type = 'button';
-        btn.textContent = '📦 Triumph/Sloggi stock + EAN';
+        btn.textContent = '⛏️ SS&E | Triumph/Sloggi';
         btn.style.cssText = `
           position: fixed;
           right: 10px;
-          top: 120px;
+          top: 60px;
           z-index: 999999;
           padding: 10px 12px;
-          background: #c0392b;
+          background: #007cba;
           color: #fff;
           border: none;
           border-radius: 8px;
