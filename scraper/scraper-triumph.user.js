@@ -562,7 +562,7 @@
         btn.style.cssText = `
           position: fixed;
           right: 10px;
-          top: 60px;
+          top: 10px;
           z-index: 999999;
           padding: 10px 12px;
           background: #007cba;
