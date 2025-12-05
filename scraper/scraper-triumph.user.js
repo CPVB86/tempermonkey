@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         EAN Scraper | Triumph
-// @version      0.8
+// @version      0.82
 // @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @match        https://b2b.triumph.com/*
@@ -219,15 +219,18 @@
 
     function getBrandTitle() {
       const c = document.querySelector(BRAND_TITLE_SELECTOR);
-      const title = c?.getAttribute('title') || c?.textContent || '';
+      const titleAttr = c?.getAttribute('title') || '';
+      const text = c?.textContent || '';
       const selectText =
         document.querySelector('#tabs-1 select[name="brand"] option:checked')
           ?.textContent || '';
-      return (title || selectText || '').replace(/\u00A0/g, ' ').trim();
+      const raw = (titleAttr || text || selectText || '').replace(/\u00A0/g, ' ');
+      return raw.trim();
     }
 
     function isSupportedBrand() {
       const title = getBrandTitle().toLowerCase();
+      // Alleen werken als we het merk kennen én het Triumph of Sloggi bevat
       if (!title) return false;
       return title.includes('triumph') || title.includes('sloggi');
     }
@@ -236,22 +239,24 @@
       return !!document.querySelector(TABLE_SELECTOR);
     }
 
-    // vergelijkbaar met Anita-script
+    // ⬇︎ check of tab 3 actief is (zelfde logica als Anita)
     function isTab3Active() {
+      // Probeer actieve tab via tab-header (jQuery UI / custom)
       const activeByHeader = document.querySelector(
         '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
-          '#tabs .active a[href="#tabs-3"], ' +
-          '#tabs li.current a[href="#tabs-3"]'
+        '#tabs .active a[href="#tabs-3"], ' +
+        '#tabs li.current a[href="#tabs-3"]'
       );
       if (activeByHeader) return true;
 
+      // Fallback: zichtbaarheid panel zelf
       const panel = document.querySelector('#tabs-3');
       if (!panel) return false;
       const style = getComputedStyle(panel);
       return (
-        style.display !== 'none' &&
-        style.visibility !== 'hidden' &&
-        style.height !== '0px'
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.height !== "0px"
       );
     }
 
@@ -513,6 +518,7 @@
 
     function updateButtonVisibility(btn) {
       if (!btn) return;
+
       const okBrand = isSupportedBrand();
       const tableReady = hasTable();
       const active = isTab3Active();
@@ -783,5 +789,13 @@
 
     ensureButton();
     startObserver();
+
+    // ⬇︎ Nieuw: elke 2s tab + merk her-evalueren (zoals Anita)
+    setInterval(() => {
+      const btn = document.getElementById(BTN_ID);
+      if (btn) {
+        updateButtonVisibility(btn);
+      }
+    }, 2000);
   }
 })();
