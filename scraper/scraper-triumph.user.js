@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         EAN Scraper | Triumph
-// @version      0.7
+// @version      0.8
 // @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
-// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @match        https://b2b.triumph.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -215,17 +215,44 @@
 
     const $ = (s, r = document) => r.querySelector(s);
 
-    const getBrandTitle = () =>
-      document.querySelector(BRAND_TITLE_SELECTOR)?.title?.trim() || '';
+    // --- helpers -------------------------------------------------------------
+
+    function getBrandTitle() {
+      const c = document.querySelector(BRAND_TITLE_SELECTOR);
+      const title = c?.getAttribute('title') || c?.textContent || '';
+      const selectText =
+        document.querySelector('#tabs-1 select[name="brand"] option:checked')
+          ?.textContent || '';
+      return (title || selectText || '').replace(/\u00A0/g, ' ').trim();
+    }
 
     function isSupportedBrand() {
       const title = getBrandTitle().toLowerCase();
-      if (!title) return true;
+      if (!title) return false;
       return title.includes('triumph') || title.includes('sloggi');
     }
 
     function hasTable() {
       return !!document.querySelector(TABLE_SELECTOR);
+    }
+
+    // vergelijkbaar met Anita-script
+    function isTab3Active() {
+      const activeByHeader = document.querySelector(
+        '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
+          '#tabs .active a[href="#tabs-3"], ' +
+          '#tabs li.current a[href="#tabs-3"]'
+      );
+      if (activeByHeader) return true;
+
+      const panel = document.querySelector('#tabs-3');
+      if (!panel) return false;
+      const style = getComputedStyle(panel);
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.height !== '0px'
+      );
     }
 
     function normalizeLocalSize(s) {
@@ -484,14 +511,43 @@
       if (opts.opacity != null) btn.style.opacity = String(opts.opacity);
     }
 
+    function updateButtonVisibility(btn) {
+      if (!btn) return;
+      const okBrand = isSupportedBrand();
+      const tableReady = hasTable();
+      const active = isTab3Active();
+
+      if (okBrand && active) {
+        btn.style.display = '';
+      } else {
+        btn.style.display = 'none';
+      }
+
+      btn.disabled = !tableReady;
+      btn.style.opacity = tableReady ? '1' : '.55';
+
+      if (!okBrand) {
+        btn.title = 'Selecteer een merk Triumph of Sloggi op tab 1.';
+      } else if (!active) {
+        btn.title = 'Ga naar het tabblad met de maten (#tabs-3).';
+      } else if (!tableReady) {
+        btn.title = 'Wachten tot #tabs-3 geladen is...';
+      } else {
+        btn.title =
+          'Haal stock + EAN uit Triumph/Sloggi grid-API en plak in #tabs-3';
+      }
+    }
+
     function resetBtn() {
-      const tableReady = hasTable() && isSupportedBrand();
+      const btn = document.getElementById(BTN_ID);
+      if (!btn) return;
       setBtnState({
         text: '⛏️ SS&E | Triumph/Sloggi',
         bg: '#007cba',
-        disabled: !tableReady,
-        opacity: tableReady ? '1' : '.55',
+        disabled: false,
+        opacity: '1',
       });
+      updateButtonVisibility(btn);
     }
 
     function ensureButton() {
@@ -521,15 +577,7 @@
         btn.addEventListener('click', onScrapeClick);
       }
 
-      const okBrand = isSupportedBrand();
-      const tableReady = hasTable();
-
-      btn.style.display = okBrand ? '' : 'none';
-      btn.disabled = !tableReady;
-      btn.style.opacity = tableReady ? '1' : '.55';
-      btn.title = tableReady
-        ? 'Haal stock + EAN uit Triumph/Sloggi grid-API en plak in #tabs-3'
-        : 'Wachten tot #tabs-3 geladen is...';
+      updateButtonVisibility(btn);
     }
 
     // --- Hoofdactie ----------------------------------------------------------
@@ -537,6 +585,24 @@
     function onScrapeClick() {
       const btn = document.getElementById(BTN_ID);
       if (!btn || btn.disabled) return;
+
+      if (!isSupportedBrand()) {
+        setBtnState({
+          text: '❌ Merk niet ondersteund',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
+
+      if (!isTab3Active()) {
+        setBtnState({
+          text: '❌ Open tab Maten/Opties',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return;
+      }
 
       const supplierPid = $(PID_SELECTOR)?.value?.trim();
       if (!supplierPid) {
