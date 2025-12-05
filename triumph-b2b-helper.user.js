@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Triumph B2B Helper
 // @match        https://b2b.triumph.com/*
-// @run-at       document-idle
+// @run-at       document-end
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/triumph-b2b-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/triumph-b2b-helper.user.js
@@ -56,9 +56,43 @@
     });
   }
 
-  // 1x direct
+  // 1x direct voor de huidige content
   enhance();
 
-  // Nog een keer na een kleine delay, voor het geval de grid later verschijnt
+  // MutationObserver om dynamisch geladen / vernieuwde grids ook te pakken
+  const observer = new MutationObserver(mutations => {
+    let shouldRun = false;
+
+    for (const m of mutations) {
+      if (!m.addedNodes || m.addedNodes.length === 0) continue;
+
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue; // geen element
+
+        // Als er direct of binnen dit node-subtree een card-wrapper zit, dan opnieuw enhancen
+        if (
+          node.matches?.('.product-card__title-wrapper') ||
+          node.querySelector?.('.product-card__title-wrapper')
+        ) {
+          shouldRun = true;
+          break;
+        }
+      }
+      if (shouldRun) break;
+    }
+
+    if (shouldRun) {
+      enhance();
+    }
+  });
+
+  if (document.body) {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  // Optioneel: fallback na kleine delay (kan je weglaten als observer genoeg is)
   setTimeout(() => enhance(), 1500);
 })();
