@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         EAN Scraper | Anita
-// @version      3.5
+// @version      3.6
 // @description  Haalt Anita B2B-voorraad op (data-in-stock) en vult DDO; daarna EANs uit Google Sheet. Alt-klik: DEBUG aan/uit. Ctrl-klik: Sheet refresh (cache-bypass). Ondersteunt Koll (M3/M4/M5) in Sheet kolom A (met heuristiek).
-// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @grant        GM_xmlhttpRequest
 // @connect      b2b.anita.com
 // @connect      docs.google.com
@@ -63,7 +63,8 @@
       padding: "10px 12px", background: "#007cba", color: "#fff",
       border: "none", borderRadius: "6px", cursor: "pointer",
       boxShadow: "0 2px 8px rgba(0,0,0,.15)", fontFamily: "inherit",
-      font: "600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif"
+      font: "600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+      display: "none" // ⬅ standaard verborgen
     });
     document.body.appendChild(btn);
     return btn;
@@ -93,6 +94,39 @@
   }
   function getSupplierPid() {
     return document.querySelector('#tabs-1 input[name="supplier_pid"]')?.value.trim() || "";
+  }
+
+  // ⬇︎ NIEUW: check of tab 3 actief is
+  function isTab3Active() {
+    // Probeer actieve tab via tab-header (jQuery UI / custom)
+    const activeByHeader = document.querySelector(
+      '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
+      '#tabs .active a[href="#tabs-3"], ' +
+      '#tabs li.current a[href="#tabs-3"]'
+    );
+    if (activeByHeader) return true;
+
+    // Fallback: zichtbaarheid panel zelf
+    const panel = document.querySelector('#tabs-3');
+    if (!panel) return false;
+    const style = getComputedStyle(panel);
+    return style.display !== "none" && style.visibility !== "hidden" && style.height !== "0px";
+  }
+
+  // ⬇︎ NIEUW: knop alleen tonen als tab-3 actief én merk Anita/Rosa Faia
+  function updateButtonVisibility(btn) {
+    if (!btn) return;
+    const active = isTab3Active();
+    const brand = getBrand();
+    const allowed = isAllowedBrand(brand);
+
+    if (active && allowed) {
+      btn.style.display = "";
+    } else {
+      btn.style.display = "none";
+    }
+
+    if (DEBUG) dbg("updateButtonVisibility:", { active, brand, allowed, display: btn.style.display });
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -448,7 +482,6 @@
     return filtered;
   }
 
-  // ★ MISTE FUNCTIE: fetchSheetRaw
   async function fetchSheetRaw({ force = false } = {}) {
     const candidates = getAuthuserCandidates();
     const cache = readCache();
@@ -747,6 +780,12 @@
       return;
     }
 
+    // extra safeguard: alleen werken als tab-3 actief is
+    if (!isTab3Active()) {
+      setBtnState(btn, "❌ Open tab Maten/Opties", "#E06666", "Ga naar het tabblad met de maten (tabs-3).");
+      return;
+    }
+
     let productId, colorCode, koll;
     try {
       ({ productId, colorCode, koll } = parseSupplierPid(getSupplierPid()));
@@ -762,8 +801,12 @@
     }
 
     try {
-      // FIX: geen backticks-in-backticks; gebruik geneste template literal correct
-      setBtnState(btn, "⏳ Stock ophalen…", "#6c757d", `Product ${productId}, kleur ${colorCode}${koll ? `, ${koll}` : ""}`);
+      setBtnState(
+        btn,
+        "⏳ Stock ophalen…",
+        "#6c757d",
+        `Product ${productId}, kleur ${colorCode}${koll ? `, ${koll}` : ""}`
+      );
       const html = await fetchAnitaHtml(productId, colorCode, koll);
       const supplierStatus = extractStockFromHtml(html, colorCode);
       const { updated: sUpd, missing: sMiss } = applyStockToDdo(supplierStatus);
@@ -804,15 +847,22 @@
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Bootstrapping (knop altijd zichtbaar)
+  // Bootstrapping – knop alleen tonen als voorwaarden kloppen
   function init() {
     const btn = ensureButton();
     if (!btn.dataset.bound) {
       btn.addEventListener("click", (e) => handleClick(btn, e));
       btn.dataset.bound = "1";
     }
+    updateButtonVisibility(btn);
   }
+
   window.addEventListener("load", init);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") init(); });
-  setInterval(() => { if (!document.getElementById(BTN_ID)) init(); }, 4000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") init();
+  });
+  setInterval(() => {
+    const btn = ensureButton();
+    updateButtonVisibility(btn);
+  }, 2000);
 })();
