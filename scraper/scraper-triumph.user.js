@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Scraper | Triumph
+// @name         EAN Scraper | Triumph
 // @version      0.7
 // @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
@@ -34,18 +34,77 @@
   //  MODE-DETECTIE
   // ---------------------------------------------------------------------------
 
-if (HOST === 'b2b.triumph.com') {
-  installTriumphTokenSniffer();
-  return;
-}
+  if (HOST === 'b2b.triumph.com') {
+    installTriumphTokenSniffer();
+    return;
+  }
 
-if (HOST === 'www.dutchdesignersoutlet.com') {
-  initAdminSide();
-  return;
-}
+  if (HOST === 'www.dutchdesignersoutlet.com') {
+    initAdminSide();
+    return;
+  }
 
-// Andere hosts: niks doen
-return;
+  // Andere hosts: niks doen
+  return;
+
+  // ---------------------------------------------------------------------------
+  //  Helpers voor webstore/cart extractie
+  // ---------------------------------------------------------------------------
+
+  function extractMetaFromUrl(url) {
+    if (!url) return {};
+    const m = String(url).match(/\/api\/shop\/webstores\/(\d+)\/carts\/(\d+)\//);
+    if (!m) return {};
+    return {
+      webstoreId: m[1],
+      cartId: m[2],
+    };
+  }
+
+  function storeTriumphSession(auth, via, meta) {
+    if (!auth) return;
+    const token = String(auth).trim();
+    if (!/^Bearer\s+/i.test(token)) return;
+
+    let prev = null;
+    try {
+      const raw = GM_getValue('TriumphBearerToken', null);
+      if (raw && typeof raw === 'object') {
+        prev = raw;
+      }
+    } catch (e) {
+      // negeren
+    }
+
+    const session = {
+      auth: token,
+      webstoreId: (meta && meta.webstoreId) || (prev && prev.webstoreId) || null,
+      cartId: (meta && meta.cartId) || (prev && prev.cartId) || null,
+    };
+
+    try {
+      GM_setValue('TriumphBearerToken', session);
+      log(
+        'Session opgeslagen via',
+        via,
+        '| webstoreId:',
+        session.webstoreId || '∅',
+        '| cartId:',
+        session.cartId || '∅'
+      );
+    } catch (e) {
+      warn('Kon Triumph-session niet opslaan:', e);
+    }
+  }
+
+  function getTriumphSession() {
+    const raw = GM_getValue('TriumphBearerToken', null);
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+
+    // Oude string-only waarde: alleen auth, geen IDs
+    return { auth: String(raw), webstoreId: null, cartId: null };
+  }
 
   // ---------------------------------------------------------------------------
   //  DEEL 1: TOKEN-SNIFFER OP B2B.TRIMUPH.COM
@@ -71,14 +130,14 @@ return;
                   null;
               } else if (Array.isArray(headers)) {
                 for (const [k, v] of headers) {
-                  if (/^authorization$/i.test(k) && String(v).startsWith('Bearer ')) {
+                  if (/^authorization$/i.test(k)) {
                     auth = v;
                     break;
                   }
                 }
               } else if (typeof headers === 'object') {
                 for (const k of Object.keys(headers)) {
-                  if (/^authorization$/i.test(k) && String(headers[k]).startsWith('Bearer ')) {
+                  if (/^authorization$/i.test(k)) {
                     auth = headers[k];
                     break;
                   }
@@ -86,9 +145,15 @@ return;
               }
             }
 
-            if (auth && auth.startsWith('Bearer ')) {
-              GM_setValue('TriumphBearerToken', auth);
-              log('Bearer-token (fetch) opgeslagen in GM_setValue.');
+            if (auth) {
+              let urlStr = '';
+              if (typeof input === 'string') {
+                urlStr = input;
+              } else if (input && typeof input.url === 'string') {
+                urlStr = input.url;
+              }
+              const meta = extractMetaFromUrl(urlStr);
+              storeTriumphSession(auth, 'fetch', meta);
             }
           } catch (e) {
             warn('Fout in fetch-token-sniffer:', e);
@@ -108,23 +173,18 @@ return;
 
       XMLHttpRequest.prototype.open = function (method, url) {
         try {
-          this._isTriumphApi =
-            typeof url === 'string' && url.indexOf('/api/shop/webstores/') !== -1;
+          this._triUrl = url;
         } catch (e) {
-          this._isTriumphApi = false;
+          this._triUrl = '';
         }
         return origOpen.apply(this, arguments);
       };
 
       XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
         try {
-          if (
-            this._isTriumphApi &&
-            /^authorization$/i.test(name) &&
-            String(value).startsWith('Bearer ')
-          ) {
-            GM_setValue('TriumphBearerToken', String(value));
-            log('Bearer-token (XHR) opgeslagen in GM_setValue.');
+          if (/^authorization$/i.test(name)) {
+            const meta = extractMetaFromUrl(this._triUrl);
+            storeTriumphSession(value, 'XHR', meta);
           }
         } catch (e) {
           warn('Fout in XHR-token-sniffer:', e);
@@ -139,7 +199,7 @@ return;
 
     log(
       'Ga gewoon de B2B gebruiken (product openen etc.); ' +
-        'het script pikt het Authorization: Bearer token automatisch op.'
+        'het script pikt token + webstoreId + cartId automatisch op.'
     );
   }
 
@@ -153,12 +213,6 @@ return;
     const PID_SELECTOR = '#tabs-1 input[name="supplier_pid"]';
     const BRAND_TITLE_SELECTOR = '#tabs-1 #select2-brand-container';
 
-    const TRIUMPH_WEBSTORE_ID = '2442';
-    const TRIUMPH_CART_ID = '2460968';
-
-    const SLOGGI_WEBSTORE_ID = '2442';
-    const SLOGGI_CART_ID = '2455614';
-
     const $ = (s, r = document) => r.querySelector(s);
 
     const getBrandTitle = () =>
@@ -168,24 +222,6 @@ return;
       const title = getBrandTitle().toLowerCase();
       if (!title) return true;
       return title.includes('triumph') || title.includes('sloggi');
-    }
-
-    function getBrandConfig() {
-      const title = getBrandTitle().toLowerCase();
-
-      if (title.includes('sloggi')) {
-        return {
-          brand: 'sloggi',
-          webstoreId: SLOGGI_WEBSTORE_ID,
-          cartId: SLOGGI_CART_ID,
-        };
-      }
-
-      return {
-        brand: 'triumph',
-        webstoreId: TRIUMPH_WEBSTORE_ID,
-        cartId: TRIUMPH_CART_ID,
-      };
     }
 
     function hasTable() {
@@ -230,27 +266,50 @@ return;
 
     function buildGridUrlFromPidBase(base) {
       if (!base) return null;
-      const cfg = getBrandConfig();
+
+      const session = getTriumphSession();
+      if (!session || !session.webstoreId || !session.cartId) {
+        warn(
+          'Geen geldige Triumph-session (webstoreId/cartId ontbreken). ' +
+            'Open b2b.triumph.com en laat een grid-call lopen.'
+        );
+        return null;
+      }
+
       return (
-        `https://b2b.triumph.com/api/shop/webstores/${cfg.webstoreId}` +
-        `/carts/${cfg.cartId}/grid/` +
+        `https://b2b.triumph.com/api/shop/webstores/${encodeURIComponent(
+          session.webstoreId
+        )}` +
+        `/carts/${encodeURIComponent(session.cartId)}/grid/` +
         encodeURIComponent(String(base)) +
         '/products'
       );
     }
 
     function gmGetTriumphGrid(gridUrl, cb) {
-      const bearer = GM_getValue('TriumphBearerToken', '');
-      if (!bearer) {
+      const session = getTriumphSession();
+      if (!session || !session.auth) {
         cb(
           new Error(
-            'Geen Triumph Bearer-token gevonden. ' +
-              'Open eerst b2b.triumph.com (met dit script actief) zodat het token kan worden opgepikt.'
+            'Geen Triumph-auth gevonden. ' +
+              'Open eerst b2b.triumph.com (met dit script actief) zodat token + IDs kunnen worden opgepikt.'
           ),
           null
         );
         return;
       }
+      if (!session.webstoreId || !session.cartId) {
+        cb(
+          new Error(
+            'Triumph-session mist webstoreId of cartId. ' +
+              'Open een product op b2b.triumph.com zodat een grid-call loopt.'
+          ),
+          null
+        );
+        return;
+      }
+
+      const bearer = session.auth;
 
       log('GET grid via GM_xmlhttpRequest:', gridUrl);
 
@@ -503,7 +562,7 @@ return;
       const gridUrl = buildGridUrlFromPidBase(pidParts.base);
       if (!gridUrl) {
         setBtnState({
-          text: '❌ Geen grid-URL',
+          text: '❌ Geen grid-URL (session mist IDs)',
           bg: '#e06666',
         });
         setTimeout(resetBtn, 2500);
