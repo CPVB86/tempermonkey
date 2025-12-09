@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EAN Scraper | Triumph
-// @version      0.82
-// @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge).
+// @version      0.84
+// @description  Haal stock + EAN uit Triumph/Sloggi B2B grid-API op basis van Supplier PID + maat en vul #tabs-3 in (zonder PHP-bridge). Hotkey: Ctrl+Shift+S (met autosave).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @match        https://b2b.triumph.com/*
 // @grant        GM_xmlhttpRequest
@@ -29,6 +29,25 @@
   }
 
   const HOST = location.hostname;
+
+  // Hotkey: Ctrl+Shift+S (alleen admin-side)
+  const HOTKEY = {
+    ctrl: true,
+    shift: true,
+    alt: false,
+    key: 's',
+  };
+
+  // Save helper (alleen relevant op DDO)
+  function clickUpdateProductButton() {
+    const saveBtn = document.querySelector('input[type="submit"][name="edit"]');
+    if (!saveBtn) {
+      log("Update product button niet gevonden");
+      return;
+    }
+    log("Autosave: klik op 'Update product'.");
+    saveBtn.click();
+  }
 
   // ---------------------------------------------------------------------------
   //  MODE-DETECTIE
@@ -102,7 +121,6 @@
     if (!raw) return null;
     if (typeof raw === 'object') return raw;
 
-    // Oude string-only waarde: alleen auth, geen IDs
     return { auth: String(raw), webstoreId: null, cartId: null };
   }
 
@@ -113,7 +131,6 @@
   function installTriumphTokenSniffer() {
     log('Token-sniffer actief op Triumph B2B...');
 
-    // 1) fetch patchen
     try {
       const origFetch = window.fetch;
       if (typeof origFetch === 'function') {
@@ -166,7 +183,6 @@
       warn('Kon fetch niet patchen:', e);
     }
 
-    // 2) XMLHttpRequest patchen
     try {
       const origOpen = XMLHttpRequest.prototype.open;
       const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
@@ -215,8 +231,6 @@
 
     const $ = (s, r = document) => r.querySelector(s);
 
-    // --- helpers -------------------------------------------------------------
-
     function getBrandTitle() {
       const c = document.querySelector(BRAND_TITLE_SELECTOR);
       const titleAttr = c?.getAttribute('title') || '';
@@ -230,7 +244,6 @@
 
     function isSupportedBrand() {
       const title = getBrandTitle().toLowerCase();
-      // Alleen werken als we het merk kennen én het Triumph of Sloggi bevat
       if (!title) return false;
       return title.includes('triumph') || title.includes('sloggi');
     }
@@ -239,9 +252,7 @@
       return !!document.querySelector(TABLE_SELECTOR);
     }
 
-    // ⬇︎ check of tab 3 actief is (zelfde logica als Anita)
     function isTab3Active() {
-      // Probeer actieve tab via tab-header (jQuery UI / custom)
       const activeByHeader = document.querySelector(
         '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
         '#tabs .active a[href="#tabs-3"], ' +
@@ -249,7 +260,6 @@
       );
       if (activeByHeader) return true;
 
-      // Fallback: zichtbaarheid panel zelf
       const panel = document.querySelector('#tabs-3');
       if (!panel) return false;
       const style = getComputedStyle(panel);
@@ -375,9 +385,6 @@
       });
     }
 
-    /**
-     * Triumph grid-JSON → Map('75B' -> { qty, ean })
-     */
     function buildSizesMapFromGridJson(json, colorCodeFromPid) {
       const map = new Map();
       if (!json) return map;
@@ -460,19 +467,14 @@
 
         if (!rawBand && !rawCup) continue;
 
-        if (!rawCup) {
-          if (rawBand === '1') {
-            sizeLabel = 'One Size';
-          } else if (rawBand === '2') {
-            sizeLabel = 'Two Size';
-          } else if (SIZE_MAP_EU_TO_ALPHA[rawBand]) {
-            sizeLabel = SIZE_MAP_EU_TO_ALPHA[rawBand];
-          } else {
-            sizeLabel = rawBand;
-          }
-        } else {
-          sizeLabel = (rawBand + rawCup).trim();
-        }
+if (!rawCup) {
+  // Geen cup → gebruik de Triumph size 1-op-1 (bijv. 1, 2, 3, 4, 5)
+  // Jij zorgt zelf dat #tabs-3 dezelfde labels gebruikt.
+  sizeLabel = rawBand;
+} else {
+  // Wel cup → bandmaat + cupmaat, zoals 75B, 80C, etc.
+  sizeLabel = (rawBand + rawCup).trim();
+}
 
         if (!sizeLabel) continue;
 
@@ -504,8 +506,6 @@
       console.debug(LOG_PREFIX, 'Keys in map:', Array.from(map.keys()));
       return map;
     }
-
-    // --- Button UI -----------------------------------------------------------
 
     function setBtnState(opts = {}) {
       const btn = document.getElementById(BTN_ID);
@@ -580,15 +580,85 @@
           font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
         `;
         document.body.appendChild(btn);
-        btn.addEventListener('click', onScrapeClick);
+        btn.addEventListener('click', () => onScrapeClick(false));
       }
 
       updateButtonVisibility(btn);
     }
 
-    // --- Hoofdactie ----------------------------------------------------------
+    function handleTriumphData(json, colorCode) {
+      const sizesMap = buildSizesMapFromGridJson(json, colorCode);
+      if (!sizesMap || sizesMap.size === 0) {
+        setBtnState({
+          text: '❌ Geen maten in grid-data',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return 0;
+      }
 
-    function onScrapeClick() {
+      const table = document.querySelector(TABLE_SELECTOR);
+      if (!table) {
+        setBtnState({
+          text: '❌ #tabs-3 niet klaar',
+          bg: '#e06666',
+        });
+        setTimeout(resetBtn, 2500);
+        return 0;
+      }
+
+      const rows = table.querySelectorAll('tbody tr');
+      let matched = 0;
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 2) return;
+
+        const sizeInput = cells[0].querySelector('input.product_option_small');
+        const sizeRaw = sizeInput ? sizeInput.value : '';
+        const sizeNorm = normalizeLocalSize(sizeRaw);
+        if (!sizeNorm) return;
+
+        const entry = sizesMap.get(sizeNorm);
+        if (!entry) return;
+
+        const { qty, ean } = entry;
+        const stockMapped = mapQtyToStockLevel(qty);
+
+        const stockInput = row.querySelector(
+          'input[name^="options"][name$="[stock]"]'
+        );
+        const eanInput = row.querySelector(
+          'input[name^="options"][name$="[barcode]"]'
+        );
+
+        if (stockInput) {
+          stockInput.value = String(stockMapped);
+          stockInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        if (eanInput && ean) {
+          eanInput.value = String(ean);
+          eanInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        matched++;
+      });
+
+      log(`${matched} rijen ingevuld uit grid-API`);
+      setBtnState({
+        text: `📦 ${matched} rijen gevuld`,
+        bg: '#2ecc71',
+        disabled: false,
+        opacity: '1',
+      });
+      setTimeout(resetBtn, 2500);
+
+      return matched;
+    }
+
+    // --- Hoofdactie ----------------------------------------------------------
+    function onScrapeClick(autoSaveThisRun) {
       const btn = document.getElementById(BTN_ID);
       if (!btn || btn.disabled) return;
 
@@ -663,81 +733,46 @@
           return;
         }
 
-        handleTriumphData(data, pidParts.color);
+        const matched = handleTriumphData(data, pidParts.color);
+
+        // Alleen autosave bij hotkey-run én als er rijen gevuld zijn
+        if (autoSaveThisRun && matched > 0) {
+          clickUpdateProductButton();
+        }
       });
     }
 
-    function handleTriumphData(json, colorCode) {
-      const sizesMap = buildSizesMapFromGridJson(json, colorCode);
-      if (!sizesMap || sizesMap.size === 0) {
-        setBtnState({
-          text: '❌ Geen maten in grid-data',
-          bg: '#e06666',
-        });
-        setTimeout(resetBtn, 2500);
+    // --- Keyboard shortcut: Ctrl+Shift+S ------------------------------------
+    function onScrapeHotkey(e) {
+      const target = e.target;
+      const tag = target && target.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        (target && target.isContentEditable)
+      ) {
         return;
       }
 
-      const table = document.querySelector(TABLE_SELECTOR);
-      if (!table) {
-        setBtnState({
-          text: '❌ #tabs-3 niet klaar',
-          bg: '#e06666',
-        });
-        setTimeout(resetBtn, 2500);
-        return;
-      }
+      const key = (e.key || '').toLowerCase();
+      const match =
+        key === HOTKEY.key &&
+        !!e.ctrlKey === HOTKEY.ctrl &&
+        !!e.shiftKey === HOTKEY.shift &&
+        !!e.altKey === HOTKEY.alt;
 
-      const rows = table.querySelectorAll('tbody tr');
-      let matched = 0;
+      if (!match) return;
+      if (!isTab3Active()) return;
 
-      rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length < 2) return;
+      const btn = document.getElementById(BTN_ID);
+      if (!btn || btn.style.display === "none" || btn.disabled) return;
 
-        const sizeInput = cells[0].querySelector('input.product_option_small');
-        const sizeRaw = sizeInput ? sizeInput.value : '';
-        const sizeNorm = normalizeLocalSize(sizeRaw);
-        if (!sizeNorm) return;
-
-        const entry = sizesMap.get(sizeNorm);
-        if (!entry) return;
-
-        const { qty, ean } = entry;
-        const stockMapped = mapQtyToStockLevel(qty);
-
-        const stockInput = row.querySelector(
-          'input[name^="options"][name$="[stock]"]'
-        );
-        const eanInput = row.querySelector(
-          'input[name^="options"][name$="[barcode]"]'
-        );
-
-        if (stockInput) {
-          stockInput.value = String(stockMapped);
-          stockInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        if (eanInput && ean) {
-          eanInput.value = String(ean);
-          eanInput.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        matched++;
-      });
-
-      log(`${matched} rijen ingevuld uit grid-API`);
-      setBtnState({
-        text: `📦 ${matched} rijen gevuld`,
-        bg: '#2ecc71',
-        disabled: false,
-        opacity: '1',
-      });
-      setTimeout(resetBtn, 2500);
+      e.preventDefault();
+      // via hotkey: run + autosave
+      onScrapeClick(true);
     }
 
     // --- Observer + lifecycle -----------------------------------------------
-
     const observer = new MutationObserver(() => {
       scheduleEnsureButton();
     });
@@ -790,12 +825,16 @@
     ensureButton();
     startObserver();
 
-    // ⬇︎ Nieuw: elke 2s tab + merk her-evalueren (zoals Anita)
     setInterval(() => {
       const btn = document.getElementById(BTN_ID);
       if (btn) {
         updateButtonVisibility(btn);
       }
     }, 2000);
+
+    if (!window.__triumphHotkeyBound) {
+      document.addEventListener('keydown', onScrapeHotkey);
+      window.__triumphHotkeyBound = true;
+    }
   }
 })();
