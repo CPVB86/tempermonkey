@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EAN Scraper | Anita
-// @version      3.6
-// @description  Haalt Anita B2B-voorraad op (data-in-stock) en vult DDO; daarna EANs uit Google Sheet. Alt-klik: DEBUG aan/uit. Ctrl-klik: Sheet refresh (cache-bypass). Ondersteunt Koll (M3/M4/M5) in Sheet kolom A (met heuristiek).
+// @version      3.8
+// @description  Haalt Anita B2B-voorraad op (data-in-stock) en vult DDO; daarna EANs uit Google Sheet. Alt-klik: DEBUG aan/uit. Ctrl-klik: Sheet refresh (cache-bypass). Ondersteunt Koll (M3/M4/M5) in Sheet kolom A (met heuristiek). Hotkey: Ctrl+Shift+S (met autosave).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @grant        GM_xmlhttpRequest
 // @connect      b2b.anita.com
@@ -21,6 +21,14 @@
   // Config
   let DEBUG = false; // Alt-klik op de knop togglet dit
   const BTN_ID = "add-stock-anita-btn";
+
+  // Hotkey: Ctrl+Shift+S
+  const HOTKEY = {
+    ctrl: true,
+    shift: true,
+    alt: false,
+    key: "s",
+  };
 
   // Anita B2B
   const BASE = "https://b2b.anita.com";
@@ -50,6 +58,18 @@
   };
 
   // ────────────────────────────────────────────────────────────────────────────
+  // Save helper
+  function clickUpdateProductButton() {
+    const saveBtn = document.querySelector('input[type="submit"][name="edit"]');
+    if (!saveBtn) {
+      dbg("Update product button niet gevonden");
+      return;
+    }
+    dbg("Autosave: klik op 'Update product'.");
+    saveBtn.click();
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
   // UI
   function ensureButton() {
     let btn = document.getElementById(BTN_ID);
@@ -64,7 +84,7 @@
       border: "none", borderRadius: "6px", cursor: "pointer",
       boxShadow: "0 2px 8px rgba(0,0,0,.15)", fontFamily: "inherit",
       font: "600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
-      display: "none" // ⬅ standaard verborgen
+      display: "none"
     });
     document.body.appendChild(btn);
     return btn;
@@ -96,9 +116,7 @@
     return document.querySelector('#tabs-1 input[name="supplier_pid"]')?.value.trim() || "";
   }
 
-  // ⬇︎ NIEUW: check of tab 3 actief is
   function isTab3Active() {
-    // Probeer actieve tab via tab-header (jQuery UI / custom)
     const activeByHeader = document.querySelector(
       '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
       '#tabs .active a[href="#tabs-3"], ' +
@@ -106,14 +124,12 @@
     );
     if (activeByHeader) return true;
 
-    // Fallback: zichtbaarheid panel zelf
     const panel = document.querySelector('#tabs-3');
     if (!panel) return false;
     const style = getComputedStyle(panel);
     return style.display !== "none" && style.visibility !== "hidden" && style.height !== "0px";
   }
 
-  // ⬇︎ NIEUW: knop alleen tonen als tab-3 actief én merk Anita/Rosa Faia
   function updateButtonVisibility(btn) {
     if (!btn) return;
     const active = isTab3Active();
@@ -130,14 +146,13 @@
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // supplier_pid parsing (M3/M4/M5 + pid met streepje + kleur verplicht)
+  // supplier_pid parsing
   function parseSupplierPid(input) {
     const raw = String(input || "").trim().toUpperCase();
     const normd = raw
       .replace(/[_\s]+/g, "-")
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "");
-    // vb: "5727X-181", "M4-5727X-181", "M4-8314-1-430"
     const m = normd.match(/^(?:(M[345])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)\-(\d{3})$/i);
 
     if (!m) {
@@ -150,9 +165,9 @@
       throw new Error(`Onbekend supplier_pid-format: "${raw}". Verwacht bv. "M4-8314-1-430" of "5727X-181".`);
     }
 
-    const koll = m[1] || "";      // M3/M4/M5 of leeg
-    const productId = m[2];       // mag streepje bevatten, bv. "8314-1"
-    const colorCode = m[3];       // 3 cijfers
+    const koll = m[1] || "";
+    const productId = m[2];
+    const colorCode = m[3];
 
     return { productId, colorCode, koll };
   }
@@ -167,10 +182,10 @@
       koll: koll || "",
       form: "",
       vacp: "",
-      arnr: productId,   // bv. "8314-1"
+      arnr: productId,
       vakn: "",
       sicht: "S",
-      fbnr: colorCode    // bv. "430"
+      fbnr: colorCode
     }).toString();
     return p.toString();
   }
@@ -204,13 +219,13 @@
   const looksCup  = s => /^(AA|BB|CC|DD|EE|FF|GG|HH|[A-Z]{1,3})$/.test(s) && !/\d/.test(s);
   function looksSplitCup(s) {
     const t = norm(s).replace(/\s+/g, "");
-    return /^[A-Z]{1,2}[\/-][A-Z]{1,2}$/.test(t); // A/B, AA/BB
+    return /^[A-Z]{1,2}[\/-][A-Z]{1,2}$/.test(t);
   }
   function looksComboSize(s) {
     const t = (s || "").toUpperCase().trim().replace(/\s+/g, "");
     const m = t.match(/^([A-Z0-9]+)[\/-]([A-Z0-9]+)$/);
     if (!m) return false;
-    return SIZE_WORDS.includes(m[1]) && SIZE_WORDS.includes(m[2]); // S/M, L/XL, 2XL/3XL
+    return SIZE_WORDS.includes(m[1]) && SIZE_WORDS.includes(m[2]);
   }
   function parseSizeAny(s) {
     const t = norm(s||"");
@@ -219,41 +234,34 @@
     if (SIZE_SINGLE_SET.has(t)) return {single:t};
     return null;
   }
-  // "36 A/B" -> "36AB", "S/M" -> "SM", "75B" -> "75B"
   function normalizeSize(s) {
     if (!s) return "";
     const t = String(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
     let m = t.match(/(\d{1,3})([A-Z]{1,3})/); if (m) return `${parseInt(m[1], 10)}${m[2]}`;
     m = t.match(/([A-Z]{1,3})(\d{1,3})/);     if (m) return `${parseInt(m[2], 10)}${m[1]}`;
-    return t; // S/M etc. -> SM
+    return t;
   }
 
   function composeSize(rowLbl, colLbl, td) {
     const r = norm(rowLbl), c = norm(colLbl);
 
-    // 2D: band + (enkele) cup
     if (looksBand(r) && looksCup(c)) return `${r}${c}`;
     if (looksCup(r) && looksBand(c)) return `${c}${r}`;
 
-    // 2D: band + split-cup (A/B e.d.)
     if (looksBand(r) && looksSplitCup(c)) return `${r}${c}`;
     if (looksSplitCup(r) && looksBand(c)) return `${c}${r}`;
 
-    // 1D: COMBI-SIZE (S/M, L/XL, …)
     if (looksComboSize(r) && (!looksBand(c) && !looksCup(c) && !looksSplitCup(c))) return r;
     if (looksComboSize(c) && (!looksBand(r) && !looksCup(r) && !looksSplitCup(r))) return c;
 
-    // 1D: alleen band of enkel S/M/L/XL
     if (looksBand(r) && (!c || (!looksBand(c) && !looksCup(c) && !looksSplitCup(c) && !looksComboSize(c)))) return r;
     if (looksBand(c) && (!r || (!looksBand(r) && !looksCup(r) && !looksSplitCup(r) && !looksComboSize(r)))) return c;
     if (SIZE_SINGLE_SET.has(r) && (!c || (!looksBand(c) && !looksCup(c) && !looksSplitCup(c) && !looksComboSize(c)))) return r;
     if (SIZE_SINGLE_SET.has(c) && (!r || (!looksBand(r) && !looksCup(r) && !looksSplitCup(r) && !looksComboSize(r)))) return c;
 
-    // Labels die al "75B" etc. bevatten
     const rp = parseSizeAny(r); if (rp?.single) return rp.single; if (rp?.band&&rp?.cup) return `${rp.band}${rp.cup}`;
     const cp = parseSizeAny(c); if (cp?.single) return cp.single; if (cp?.band&&cp?.cup) return `${cp.band}${cp.cup}`;
 
-    // TD-attrs
     const tdBand = td.getAttribute("data-band") || td.dataset?.band;
     const tdCup  = td.getAttribute("data-cup")  || td.dataset?.cup;
     if (tdBand && tdCup) return `${norm(tdBand)}${norm(tdCup)}`;
@@ -271,7 +279,6 @@
     if (looksSplitCup(tdSize)) return norm(tdSize);
     if (looksBand(tdSize)) return norm(tdSize);
 
-    // Element in cel
     const el = td.querySelector("input, select, [data-size]");
     if (el) {
       const eBand = el.getAttribute("data-band") || el.dataset?.band;
@@ -292,7 +299,6 @@
       if (looksBand(v)) return norm(v);
     }
 
-    // Tekst in de cel
     const text = (td.textContent || "").trim();
     const xp = parseSizeAny(text);
     if (xp?.single) return xp.single;
@@ -449,7 +455,7 @@
       const j = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
       if (!j) return null;
       if (Date.now() - j.ts > CACHE_TTL_MS) return null;
-      return j; // {kind,text,authuser,etag,lastModified,ts}
+      return j;
     } catch { return null; }
   }
   function writeCache(obj) {
@@ -511,7 +517,6 @@
       "If-Modified-Since": cache.lastModified || ""
     } : {};
 
-    // TSV eerst
     for (const au of candidates) {
       const url = makeTsvUrl(au);
       dbg("Try TSV", { au, url, cond: !!cache });
@@ -531,7 +536,6 @@
       dbgw("TSV miss", { au, status: res.status, looksHtml: isLikelyHtml(res.text) });
     }
 
-    // CSV fallback
     for (const au of candidates) {
       const url = makeCsvUrl(au);
       dbg("Try CSV", { au, url, cond: !!cache });
@@ -560,7 +564,7 @@
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Sheet header indices (met heuristiek voor Koll-kolom)
+  // Sheet header indices
   function isKollToken(v) {
     return /^M[345]$/i.test(String(v ?? "").trim());
   }
@@ -578,7 +582,6 @@
       ean:           has("ean","barcode"),
     };
 
-    // Heuristiek: als 'koll' header niet gevonden is, kijk of kolom A eruit ziet als M3/M4/M5 (of leeg)
     let kollDetected = idx.koll !== -1;
     if (!kollDetected && headerRow.length >= 8) {
       const sample = allRows.slice(1, 30).map(r => r?.[0]).filter(x => x !== undefined);
@@ -590,7 +593,6 @@
       }
     }
 
-    // Fallback posities afhankelijk van of Koll is gedetecteerd
     if (idx.artikelnummer === -1) idx.artikelnummer = kollDetected ? 1 : 0;
     if (idx.kleurcode     === -1) idx.kleurcode     = kollDetected ? 3 : 2;
     if (idx.cup           === -1) idx.cup           = kollDetected ? 5 : 4;
@@ -601,7 +603,6 @@
     return idx;
   }
 
-  // Artikelnummer uit kolom A/B ontleden (koll/pid/kleur in string A zelf)
   function splitArtikelnummer(aCell) {
     const A = (aCell || "").toString().trim().toUpperCase();
     const m = A.match(/^(?:(M[345])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*?)(?:\-(\d{3}))?$/);
@@ -612,15 +613,14 @@
     };
   }
 
-  // ★ Strikt: altijd kleur vereist; support Koll in aparte kolom óf in Artikelnummer
   function rowMatchesProductStrictWithSheetKoll(kollCell, artikelCell, kleurCell, pidWanted, colorWanted, kollWanted = "") {
-    const sheetKoll = (kollCell || "").toString().trim().toUpperCase(); // kan leeg zijn
+    const sheetKoll = (kollCell || "").toString().trim().toUpperCase();
     const { koll: kollInA, pid: pidInA, color: colorInA } = splitArtikelnummer(artikelCell);
     const colorInC = (kleurCell || "").toString().trim().toUpperCase();
 
-    const rowPid   = pidInA;                                 // PID uit A (zonder evt. Koll/Color)
-    const rowColor = /^\d{3}$/.test(colorInC) ? colorInC : colorInA; // kleur prefer C, anders uit A
-    const rowKoll  = sheetKoll || kollInA;                   // Koll prefer kolom A, anders uit A
+    const rowPid   = pidInA;
+    const rowColor = /^\d{3}$/.test(colorInC) ? colorInC : colorInA;
+    const rowKoll  = sheetKoll || kollInA;
 
     const P = (pidWanted   || "").toUpperCase();
     const K = (colorWanted || "").toUpperCase();
@@ -633,15 +633,13 @@
     if (KollWanted) {
       return rowKoll === KollWanted;
     }
-    return true; // als Koll niet verlangd is, accepteer beide
+    return true;
   }
 
-  // EAN map bouwen uit rows (2D en 1D maten) – met Koll in Sheet
   function buildEanMapFromRows(rows, productId, colorCode, kollWanted = "") {
     if (!rows.length) return new Map();
     const header = rows[0];
 
-    // geef alle rijen mee voor heuristiek (kolom A als Koll)
     const idx = detectHeaderIndices(header, rows);
 
     const pid   = (productId || "").toString().trim().toUpperCase();
@@ -657,8 +655,8 @@
       const kollCell = idx.koll !== -1 ? r[idx.koll] : "";
       const aCell    = r[idx.artikelnummer];
       const cCell    = r[idx.kleurcode];
-      const cupRaw   = (r[idx.cup]  || "").toString().trim().toUpperCase(); // mag leeg
-      const bandRaw  = (r[idx.band] || "").toString().trim().toUpperCase(); // kan 36 of S/M zijn
+      const cupRaw   = (r[idx.cup]  || "").toString().trim().toUpperCase();
+      const bandRaw  = (r[idx.band] || "").toString().trim().toUpperCase();
       const ean      = (r[idx.ean]  || "").toString().trim();
 
       if (!rowMatchesProductStrictWithSheetKoll(kollCell, aCell, cCell, pid, color, kollWanted)) continue;
@@ -666,9 +664,9 @@
       matched++;
 
       let sizeKey = "";
-      if (bandRaw && cupRaw) sizeKey = normalizeSize(`${bandRaw}${cupRaw}`); // bv. "36"+"A/B" → "36AB"
-      else if (bandRaw)      sizeKey = normalizeSize(bandRaw);               // 1D: "36" of "S/M"
-      else if (cupRaw)       sizeKey = normalizeSize(cupRaw);                // zeldzaam
+      if (bandRaw && cupRaw) sizeKey = normalizeSize(`${bandRaw}${cupRaw}`);
+      else if (bandRaw)      sizeKey = normalizeSize(bandRaw);
+      else if (cupRaw)       sizeKey = normalizeSize(cupRaw);
       else continue;
 
       if (!sizeKey) continue;
@@ -681,7 +679,6 @@
     return eanMap;
   }
 
-  // EANs toepassen in DDO
   function applyEansToDdo(eanMap) {
     const rowsDDO = [...document.querySelectorAll("#tabs-3 table.options tr")]
       .filter(row => row.querySelector("input[type='text']"));
@@ -698,9 +695,9 @@
 
       const eanInput =
         row.querySelector(
-          "input[name$='[barcode]'], input[name*='[barcode]'], input[name*='barcode']," + // eerst barcode
-          "input[name$='[ean]'], input[name*='[ean]'], input[name*='ean']," +             // dan ean
-          "input#ean"                                                                     // noodgreep
+          "input[name$='[barcode]'], input[name*='[barcode]'], input[name*='barcode']," +
+          "input[name$='[ean]'], input[name*='[ean]'], input[name*='ean']," +
+          "input#ean"
         );
 
       if (eanInput) {
@@ -718,7 +715,6 @@
     return { updated, missing };
   }
 
-  // Stock → DDO
   function applyStockToDdo(supplierStatus) {
     const rowsDDO = [...document.querySelectorAll("#tabs-3 table.options tr")]
       .filter(row => row.querySelector("input[type='text']"));
@@ -747,7 +743,6 @@
     return { updated, missing };
   }
 
-  // DDO size preview (debug)
   function debugPreviewDdoSizes() {
     if (!DEBUG) return;
     const sizes = [...document.querySelectorAll("#tabs-3 table.options tr")]
@@ -758,49 +753,46 @@
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Main flow (klik)
-  async function handleClick(btn, evt) {
-    // Alt = DEBUG toggle
-    if (evt && evt.altKey) {
-      DEBUG = !DEBUG;
-      setBtnState(btn, `🐞 Debug ${DEBUG ? "ON" : "OFF"}`, DEBUG ? "#8e44ad" : "#007cba",
-        "Klik: uitvoeren • Alt-klik: DEBUG aan/uit • Ctrl-klik: Sheet refresh");
-      dbg("DEBUG toggled →", DEBUG);
-      return;
-    }
-    // Ctrl = cache bypass
-    const forceSheetRefresh = !!(evt && evt.ctrlKey);
-    if (forceSheetRefresh) {
-      setBtnState(btn, "🔄 Sheet refresh…", "#6c757d", "Cache omzeilen & opnieuw downloaden");
-    }
-
-    const brand = getBrand();
-    if (!isAllowedBrand(brand)) {
-      setBtnState(btn, "❌ Merk niet ondersteund", "#E06666", "Selecteer Anita/Rosa Faia (of submerken).");
-      return;
-    }
-
-    // extra safeguard: alleen werken als tab-3 actief is
-    if (!isTab3Active()) {
-      setBtnState(btn, "❌ Open tab Maten/Opties", "#E06666", "Ga naar het tabblad met de maten (tabs-3).");
-      return;
-    }
-
-    let productId, colorCode, koll;
+  // Main flow (klik / hotkey)
+  async function handleClick(btn, evt, autoSaveThisRun = false) {
     try {
-      ({ productId, colorCode, koll } = parseSupplierPid(getSupplierPid()));
-      dbg("supplier_pid parse:", { productId, colorCode, koll });
-    } catch (e) {
-      setBtnState(btn, "❌ Ongeldige supplier_pid", "#E06666", e?.message || "Parse fout");
-      return;
-    }
+      if (evt && evt.altKey) {
+        DEBUG = !DEBUG;
+        setBtnState(btn, `🐞 Debug ${DEBUG ? "ON" : "OFF"}`, DEBUG ? "#8e44ad" : "#007cba",
+          "Klik: uitvoeren • Alt-klik: DEBUG aan/uit • Ctrl-klik: Sheet refresh");
+        dbg("DEBUG toggled →", DEBUG);
+        return;
+      }
+      const forceSheetRefresh = !!(evt && evt.ctrlKey);
+      if (forceSheetRefresh) {
+        setBtnState(btn, "🔄 Sheet refresh…", "#6c757d", "Cache omzeilen & opnieuw downloaden");
+      }
 
-    if (!document.querySelector("#tabs-3")) {
-      setBtnState(btn, "❌ Tab #tabs-3 ontbreekt", "#E06666", "Open het maten/opties tabblad.");
-      return;
-    }
+      const brand = getBrand();
+      if (!isAllowedBrand(brand)) {
+        setBtnState(btn, "❌ Merk niet ondersteund", "#E06666", "Selecteer Anita/Rosa Faia (of submerken).");
+        return;
+      }
 
-    try {
+      if (!isTab3Active()) {
+        setBtnState(btn, "❌ Open tab Maten/Opties", "#E06666", "Ga naar het tabblad met de maten (tabs-3).");
+        return;
+      }
+
+      let productId, colorCode, koll;
+      try {
+        ({ productId, colorCode, koll } = parseSupplierPid(getSupplierPid()));
+        dbg("supplier_pid parse:", { productId, colorCode, koll });
+      } catch (e) {
+        setBtnState(btn, "❌ Ongeldige supplier_pid", "#E06666", e?.message || "Parse fout");
+        return;
+      }
+
+      if (!document.querySelector("#tabs-3")) {
+        setBtnState(btn, "❌ Tab #tabs-3 ontbreekt", "#E06666", "Open het maten/opties tabblad.");
+        return;
+      }
+
       setBtnState(
         btn,
         "⏳ Stock ophalen…",
@@ -817,7 +809,6 @@
       }
       setBtnState(btn, `✅ Stock ${sUpd}× (miss: ${sMiss}) → EANs…`, "#2ecc71", "Vul EANs in");
 
-      // Sheet → EANs
       try {
         const raw = await fetchSheetRaw({ force: forceSheetRefresh });
         dbg("Using", raw.kind.toUpperCase(), "authuser", raw.authuser, raw.fromCache ? "(cache)" : "(fresh)");
@@ -840,6 +831,11 @@
         setBtnState(btn, `✅ Stock ${sUpd} | ❌ EAN-fetch`, "#E06666", e?.message || "Fout bij Sheet");
       }
 
+      // ⬇︎ Alleen bij hotkey-run automatisch opslaan
+      if (autoSaveThisRun) {
+        clickUpdateProductButton();
+      }
+
     } catch (err) {
       console.error("[Anita Scraper] Fout:", err);
       setBtnState(btn, "❌ Fout bij ophalen/verwerken", "#E06666", err?.message || "Onbekende fout");
@@ -847,14 +843,50 @@
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Bootstrapping – knop alleen tonen als voorwaarden kloppen
+  // Keyboard shortcut: Ctrl+Shift+S
+  function onHotkey(e) {
+    const target = e.target;
+    const tag = target && target.tagName;
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      (target && target.isContentEditable)
+    ) {
+      return;
+    }
+
+    const key = (e.key || "").toLowerCase();
+    const match =
+      key === HOTKEY.key &&
+      !!e.ctrlKey === HOTKEY.ctrl &&
+      !!e.shiftKey === HOTKEY.shift &&
+      !!e.altKey === HOTKEY.alt;
+
+    if (!match) return;
+    if (!isTab3Active()) return;
+
+    const btn = document.getElementById(BTN_ID);
+    if (!btn || btn.style.display === "none") return;
+
+    e.preventDefault();
+    // Hotkey: normale run, met autosave achteraf
+    handleClick(btn, { altKey: false, ctrlKey: false }, true);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Bootstrapping
   function init() {
     const btn = ensureButton();
     if (!btn.dataset.bound) {
-      btn.addEventListener("click", (e) => handleClick(btn, e));
+      btn.addEventListener("click", (e) => handleClick(btn, e, false));
       btn.dataset.bound = "1";
     }
     updateButtonVisibility(btn);
+
+    if (!window.__anitaHotkeyBound) {
+      document.addEventListener("keydown", onHotkey);
+      window.__anitaHotkeyBound = true;
+    }
   }
 
   window.addEventListener("load", init);
