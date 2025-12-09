@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EAN Scraper | Zetex
-// @version      0.3
-// @description  Haal stock + EAN uit Zetex B2B (Wicket JSON) obv Supplier PID + maat en plak ze in #tabs-3.
+// @version      0.6
+// @description  Haal stock + EAN uit Zetex B2B (Wicket JSON) obv Supplier PID + maat en plak ze in #tabs-3. Hotkey: Ctrl+Shift+S (met autosave).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -27,16 +27,35 @@
 
   const $ = (s, r = document) => r.querySelector(s);
 
-  // --- Stock mapping (jouw logica) -------------------------------------------
+  // Hotkey: Ctrl+Shift+S
+  const HOTKEY = {
+    ctrl: true,
+    shift: true,
+    alt: false,
+    key: 's'
+  };
+
+  // ——— autosave helper ———
+  function clickUpdateProductButton() {
+    const saveBtn = document.querySelector('input[type="submit"][name="edit"]');
+    if (!saveBtn) {
+      console.log(LOG_PREFIX, "Update product button niet gevonden");
+      return;
+    }
+    console.log(LOG_PREFIX, "Autosave: klik op 'Update product'.");
+    saveBtn.click();
+  }
+
+  // --- Stock mapping  ---------------------------------------------------------
 
   function mapQtyToStockLevel(qty) {
     const n = Number(qty ?? 0) || 0;
 
-    if (n <= 2) return 1;  // 0, 1 of 2 → 1 stuk
-    if (n === 3) return 2; // 2 stuks
-    if (n === 4) return 3; // 3 stuks
+    if (n <= 2) return 1;
+    if (n === 3) return 2;
+    if (n === 4) return 3;
 
-    return 5;              // 5 of meer
+    return 5;
   }
 
   // --- Brand / pagina helpers -------------------------------------------------
@@ -46,8 +65,7 @@
 
   function isZetexBrand() {
     const title = getBrandTitle().toLowerCase();
-    // Pas desnoods aan naar jouw merknaam in de admin
-    if (!title) return true; // eventueel altijd tonen
+    if (!title) return true; // als er niets staat → niet blokken
     return (
       title.includes('zetex') ||
       title.includes('pastunette') ||
@@ -58,6 +76,24 @@
 
   function hasTable() {
     return !!document.querySelector(TABLE_SELECTOR);
+  }
+
+  function isTab3Active() {
+    const activeByHeader = document.querySelector(
+      '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
+      '#tabs .active a[href="#tabs-3"], ' +
+      '#tabs li.current a[href="#tabs-3"]'
+    );
+    if (activeByHeader) return true;
+
+    const panel = document.querySelector('#tabs-3');
+    if (!panel) return false;
+    const style = getComputedStyle(panel);
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      style.height !== '0px'
+    );
   }
 
   // --- Supplier PID → product URL --------------------------------------------
@@ -89,12 +125,10 @@
 
   // --- Normalisatie maten -----------------------------------------------------
 
-  // DDO: S M L XL XXL 3XL 4XL ...
   function normalizeLocalSize(s) {
     return String(s || '').trim().toUpperCase().replace(/\s+/g, '');
   }
 
-  // Zetex → DDO (2XL moet XXL worden, rest laten we staan)
   const ZETEX_SIZE_MAP = {
     '2XL': 'XXL',
   };
@@ -155,7 +189,7 @@
     }
 
     let sizesStr = '{' + m[1] + '}';
-    sizesStr = sizesStr.replace(/\^/g, ''); // caretjes weg
+    sizesStr = sizesStr.replace(/\^/g, '');
 
     let sizesObj;
     try {
@@ -176,10 +210,8 @@
       const key = normalizeZetexSize(rawName);
       if (!key) return;
 
-      // EAN
       const eanDigits = String(item.eanCode || '').replace(/\D/g, '');
 
-      // Raw stock quantity → jouw mapping 1/2/3/5
       let qtyRaw = 0;
       const stockLevels = item.stockLevels && item.stockLevels.stockLevelList;
       if (Array.isArray(stockLevels) && stockLevels.length) {
@@ -211,11 +243,11 @@
       btn = document.createElement('button');
       btn.id = BTN_ID;
       btn.type = 'button';
-      btn.textContent = '📦 Zetex stock + EAN';
+      btn.textContent = '⛏️ SS&E | Zetex';
       btn.style.cssText = `
         position: fixed;
         right: 10px;
-        top: 130px;
+        top: 10px;
         z-index: 999999;
         padding: 10px 12px;
         background: #2980b9;
@@ -227,18 +259,26 @@
         font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       `;
       document.body.appendChild(btn);
-      btn.addEventListener('click', onScrapeClick);
+      btn.addEventListener('click', () => onScrapeClick(false));
     }
 
     const isZetex = isZetexBrand();
     const tableReady = hasTable();
+    const active = isTab3Active();
 
-    btn.style.display = isZetex ? '' : 'none';
+    btn.style.display = (isZetex && active) ? '' : 'none';
     btn.disabled = !tableReady;
     btn.style.opacity = tableReady ? '1' : '.55';
-    btn.title = tableReady
-      ? 'Haal stock + EAN uit Zetex B2B en plak in #tabs-3'
-      : 'Wachten tot #tabs-3 geladen is...';
+
+    if (!isZetex) {
+      btn.title = 'Selecteer een Zetex/Pastunette/Rebelle/Robson product op tab 1.';
+    } else if (!active) {
+      btn.title = 'Ga naar tab Maten/Opties (#tabs-3).';
+    } else if (!tableReady) {
+      btn.title = 'Wachten tot #tabs-3 geladen is...';
+    } else {
+      btn.title = 'Haal stock + EAN uit Zetex B2B en plak in #tabs-3';
+    }
   }
 
   function setBtnState(opts = {}) {
@@ -252,20 +292,55 @@
   }
 
   function resetBtn() {
-    const tableReady = hasTable() && isZetexBrand();
+    const isZetex = isZetexBrand();
+    const tableReady = hasTable();
+    const active = isTab3Active();
+
     setBtnState({
-      text: '📦 Zetex stock + EAN',
+      text: '⛏️ SS&E | Zetex',
       bg: '#2980b9',
       disabled: !tableReady,
       opacity: tableReady ? '1' : '.55',
     });
+
+    const btn = document.getElementById(BTN_ID);
+    if (!btn) return;
+
+    btn.style.display = (isZetex && active) ? '' : 'none';
   }
 
   // --- Hoofdactie ------------------------------------------------------------
 
-  function onScrapeClick() {
+  function onScrapeClick(autoSaveThisRun = false) {
     const btn = document.getElementById(BTN_ID);
     if (!btn || btn.disabled) return;
+
+    if (!isZetexBrand()) {
+      setBtnState({
+        text: '❌ Merk niet ondersteund',
+        bg: '#e06666',
+      });
+      setTimeout(resetBtn, 2500);
+      return;
+    }
+
+    if (!isTab3Active()) {
+      setBtnState({
+        text: '❌ Open tab Maten/Opties',
+        bg: '#e06666',
+      });
+      setTimeout(resetBtn, 2500);
+      return;
+    }
+
+    if (!hasTable()) {
+      setBtnState({
+        text: '❌ #tabs-3 niet klaar',
+        bg: '#e06666',
+      });
+      setTimeout(resetBtn, 2500);
+      return;
+    }
 
     const supplierPid = document.querySelector(PID_SELECTOR)?.value?.trim();
     if (!supplierPid) {
@@ -307,7 +382,6 @@
 
     console.info(LOG_PREFIX, 'Supplier PID:', supplierPid, '→', productUrl);
 
-    // 1) Productpagina ophalen
     gmGet(productUrl, (err, productHtml) => {
       if (err || !productHtml) {
         console.error(LOG_PREFIX, 'Fout bij laden productpagina:', err);
@@ -319,7 +393,6 @@
         return;
       }
 
-      // 2) Wicket data-URL zoeken (IBehaviorListener.3-)
       const dataUrl = extractDataUrlFromProductHtml(productHtml);
       if (!dataUrl) {
         console.warn(
@@ -341,7 +414,6 @@
         bg: '#f39c12',
       });
 
-      // 3) XML/JS payload ophalen
       gmGet(dataUrl, (err2, xmlText) => {
         if (err2 || !xmlText) {
           console.error(
@@ -357,7 +429,11 @@
           return;
         }
 
-        handleZetexData(xmlText);
+        const matched = handleZetexData(xmlText);
+
+        if (autoSaveThisRun && matched > 0) {
+          clickUpdateProductButton();
+        }
       });
     });
   }
@@ -370,7 +446,7 @@
         bg: '#e06666',
       });
       setTimeout(resetBtn, 2500);
-      return;
+      return 0;
     }
 
     const table = document.querySelector(TABLE_SELECTOR);
@@ -380,7 +456,7 @@
         bg: '#e06666',
       });
       setTimeout(resetBtn, 2500);
-      return;
+      return 0;
     }
 
     const rows = table.querySelectorAll('tr');
@@ -428,6 +504,40 @@
       opacity: '1',
     });
     setTimeout(resetBtn, 2500);
+
+    return matched;
+  }
+
+  // --- Hotkey: Ctrl+Shift+S ---------------------------------------------------
+
+  function onKeyDown(e) {
+    const target = e.target;
+    const tag = target && target.tagName;
+
+    if (
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      (target && target.isContentEditable)
+    ) {
+      return;
+    }
+
+    const key = (e.key || '').toLowerCase();
+    const match =
+      key === HOTKEY.key &&
+      !!e.ctrlKey === HOTKEY.ctrl &&
+      !!e.shiftKey === HOTKEY.shift &&
+      !!e.altKey === HOTKEY.alt;
+
+    if (!match) return;
+
+    if (!isZetexBrand() || !hasTable() || !isTab3Active()) return;
+
+    const btn = document.getElementById(BTN_ID);
+    if (!btn || btn.style.display === 'none' || btn.disabled) return;
+
+    e.preventDefault();
+    onScrapeClick(true);
   }
 
   // --- Observer + lifecycle ---------------------------------------------------
@@ -454,4 +564,12 @@
 
   ensureButton();
   startObserver();
+
+  // ⬇️ extra: elke 2s de zichtbaarheid even her-evalueren (voor tab-switches)
+  setInterval(ensureButton, 2000);
+
+  if (!window.__zetexHotkeyBound) {
+    document.addEventListener('keydown', onKeyDown);
+    window.__zetexHotkeyBound = true;
+  }
 })();
