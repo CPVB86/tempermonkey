@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DDO | Fix Stock
-// @version      1.3
-// @description  Zet alle stockwaarden van '1' in #tabs-3 naar '0' met één klik. Knop alleen zichtbaar als tab 3 actief is.
+// @name         DDO | Stock Fixer
+// @version      1.4
+// @description  Zet alle stockwaarden van '1' in #tabs-3 naar '0' met één klik of Ctrl+Shift+F. Knop alleen zichtbaar als tab 3 actief is. Hotkey-run doet daarna automatisch 'Update product'.
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
 // @author       C. P. v. Beek
@@ -19,10 +19,18 @@
 
   const BTN_ID = "fixstock-btn";
 
+  // Hotkey: Ctrl+Shift+F
+  const HOTKEY = {
+    ctrl: true,
+    shift: true,
+    alt: false,
+    key: "f"
+  };
+
   const btnStyles = (enabled) => `
     position: fixed;
     right: 10px;
-    top: 170px;
+    top: 50px;
     z-index: 9999;
     padding: 10px 12px;
     background: ${enabled ? "#007cba" : "#2ecc71"};
@@ -34,9 +42,19 @@
     box-shadow: 0 4px 10px rgba(0,0,0,.12);
   `;
 
+  // Save helper
+  function clickUpdateProductButton() {
+    const saveBtn = document.querySelector('input[type="submit"][name="edit"]');
+    if (!saveBtn) {
+      console.log("[Fix Stock] Update product button niet gevonden");
+      return;
+    }
+    console.log("[Fix Stock] Autosave: klik op 'Update product'.");
+    saveBtn.click();
+  }
+
   // ——— helpers ———
   function isTab3Active() {
-    // Zoek de tab-link naar #tabs-3 en check of die actief/selected is
     const link = document.querySelector('a[href="#tabs-3"]');
     if (!link) return false;
     const li = link.closest('li,[role="tab"]');
@@ -58,14 +76,14 @@
     btn.type = "button";
     btn.id = BTN_ID;
     btn.setAttribute("data-fixstock", "1");
-    btn.addEventListener("click", onClick);
+    btn.addEventListener("click", () => onClick(false));
     const attach = () => (document.body || document.documentElement).appendChild(btn);
     if (document.body) attach(); else document.addEventListener("DOMContentLoaded", attach, { once: true });
     return btn;
   }
 
   // ——— actions ———
-  function onClick() {
+  function onClick(autoSaveThisRun) {
     if (!isTab3Active()) return;
     const inputs = getStockInputs();
     let changed = 0;
@@ -85,6 +103,34 @@
     btn.disabled = true;
 
     requestUpdate();
+
+    // Alleen autosave bij hotkey-run
+    if (autoSaveThisRun && changed > 0) {
+      clickUpdateProductButton();
+    }
+  }
+
+  // ——— keyboard shortcut ———
+  function onKeyDown(e) {
+    const target = e.target;
+    const tag = target && target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || (target && target.isContentEditable)) {
+      return;
+    }
+
+    const key = (e.key || "").toLowerCase();
+
+    const match =
+      key === HOTKEY.key &&
+      !!e.ctrlKey === HOTKEY.ctrl &&
+      !!e.shiftKey === HOTKEY.shift &&
+      !!e.altKey === HOTKEY.alt;
+
+    if (!match) return;
+    if (!isTab3Active()) return;
+
+    e.preventDefault();
+    onClick(true);
   }
 
   // ——— UI ———
@@ -126,7 +172,6 @@
   // ——— observers ———
   function initObserver() {
     const observer = new MutationObserver((mutations) => {
-      // Sla mutaties over die alleen onze knop raken
       const relevant = mutations.some(m => {
         if (!m.target) return true;
         const node = m.target.nodeType === 1 ? m.target : null;
@@ -139,20 +184,19 @@
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true
-      // geen attributes -> voorkomt loops/flicker
     });
 
-    // Tab-wissels via UI of hash
     window.addEventListener("hashchange", requestUpdate);
     document.addEventListener("visibilitychange", requestUpdate);
 
-    // Fallback: elke 1000ms even syncen (mocht observer iets missen)
     setInterval(requestUpdate, 1000);
   }
 
   // ——— boot ———
   function boot() {
     initObserver();
+    document.addEventListener("keydown", onKeyDown);
+
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", requestUpdate, { once: true });
     } else {
