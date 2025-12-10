@@ -96,6 +96,9 @@
     'triumph': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=221', payload: basePayload() },
     'sloggi': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=222', payload: basePayload() },
     'ringella': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=191', payload: basePayload() },
+    naturana: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=225', payload: basePayload() },
+    'naturana-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=226', payload: basePayload() },
+    'mundo-unico': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=228', payload: basePayload() },
     'zetex': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=224', payload: basePayload() },
     'charlie-choe': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=204', payload: basePayload() }
   };
@@ -114,6 +117,8 @@
     sloggi:        'https://b2b.triumph.com/categories/NL_sloggiPROD',
     zetex:         'https://b2b.zetex.nl/',
     ringella:      'https://b2b.ringella.com/',
+    naturana:      'https://naturana-online.de/naturana/',
+    'mundo-unico': 'https://www.colomoda.eu/',
     // qlinn:      'https://…' // toevoegen zodra beschikbaar
   };
 
@@ -151,6 +156,8 @@
     if (/^sloggi/.test(key)) return 'sloggi';
     if (/^ringella/.test(key)) return 'ringella';
     if (/^zetex/.test(key)) return 'zetex';
+    if (/^(naturana|naturana-badmode)/.test(key)) return 'naturana';
+    if (/^mundo-unico/.test(key)) return 'mundo-unico';
     return null;
   }
   function getB2BUrlForKey(key){
