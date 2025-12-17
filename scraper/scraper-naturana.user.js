@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EAN Scraper | Naturana
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      0.30
+// @version      2
 // @description  Haal Naturana stock via bridge + EAN via Google Sheet en vul #tabs-3 in (DDO admin). Hotkey: Ctrl+Shift+S (met autosave).
 // @match        https://naturana-online.de/*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
@@ -25,8 +25,8 @@
 
   // ============ Shared ============
 
-  const MODELVIEW_URL   = 'https://naturana-online.de/naturana/ModellView';
-  const ARTICLEVIEW_URL = 'https://naturana-online.de/naturana/ArticleView';
+  const MODELVIEW_URL    = 'https://naturana-online.de/naturana/ModellView';
+  const ARTICLEVIEW_URL  = 'https://naturana-online.de/naturana/ArticleView';
 
   const TIMEOUT_MS   = 20000;
   const KEEPALIVE_MS = 300000; // 5 min
@@ -45,10 +45,7 @@
   const ON_NATURANA = location.hostname.includes('naturana-online.de');
   const ON_ADMIN    = location.hostname.includes('dutchdesignersoutlet.com');
 
-  const delay=(ms)=>new Promise(r=>setTimeout(r,ms));
   const uid  = ()=>Math.random().toString(36).slice(2)+Date.now().toString(36);
-  const forEachChannel=(fn)=>CHANNELS.forEach(fn);
-  const norm=(s='')=>String(s).toLowerCase().trim().replace(/\s+/g,' ');
 
   const parseHTML=(html)=>new DOMParser().parseFromString(html,'text/html');
   const isLoginPage=(html)=>{
@@ -61,7 +58,7 @@
   if (ON_NATURANA){
     setInterval(()=>{ GM_setValue(HEARTBEAT_KEY, Date.now()); }, HB_INTERVAL);
 
-    forEachChannel(ch=>{
+    CHANNELS.forEach(ch=>{
       GM_addValueChangeListener(ch.ping, (_n,_o,msg)=>{
         if (msg==='ping') GM_setValue(ch.pong, 'pong:'+Date.now());
       });
@@ -97,7 +94,7 @@
       }
     }
 
-    forEachChannel(ch=>{
+    CHANNELS.forEach(ch=>{
       GM_addValueChangeListener(ch.req, (_n,_o,req)=>{
         if(!req || !req.id || !req.url) return;
         q.push({ ...req, _resp: ch.resp });
@@ -105,11 +102,6 @@
       });
     });
 
-    if (document.readyState!=='loading') {
-      console.info('[Naturana Bridge] actief op', location.href);
-    } else {
-      document.addEventListener('DOMContentLoaded', ()=>console.info('[Naturana Bridge] actief op', location.href));
-    }
     return;
   }
 
@@ -121,9 +113,11 @@
 
   function bridgeSend({url, method='GET', headers={}, body=null, timeout=TIMEOUT_MS}){
     return new Promise((resolve,reject)=>{
-      const id=uid(), handles=[], off=()=>handles.forEach(h=>{ try{ GM_removeValueChangeListener(h); }catch{}; });
+      const id=uid(), handles=[];
+      const off=()=>handles.forEach(h=>{ try{ GM_removeValueChangeListener(h); }catch{}; });
       let settled=false;
-      forEachChannel(ch=>{
+
+      CHANNELS.forEach(ch=>{
         const h=GM_addValueChangeListener(ch.resp, (_n,_o,msg)=>{
           if (settled || !msg || msg.id!==id) return;
           settled=true; off();
@@ -131,7 +125,9 @@
         });
         handles.push(h);
       });
-      forEachChannel(ch=>{ GM_setValue(ch.req, { id, url, method, headers, body, timeout }); });
+
+      CHANNELS.forEach(ch=>{ GM_setValue(ch.req, { id, url, method, headers, body, timeout }); });
+
       setTimeout(()=>{ if(!settled){ off(); reject(new Error('bridge timeout')); } }, timeout+1500);
     });
   }
@@ -166,153 +162,219 @@
     };
   }
 
-  function findModelItem(doc, pidColor){
-    const raw=String(pidColor||'').trim();
-    const m=raw.match(/^(.+?)-(.*)$/);
-    const pid=(m?m[1]:raw).trim().toUpperCase();
-    const color=(m?m[2]:'').trim().toUpperCase();
-    const links=Array.from(doc.querySelectorAll('a[href*="__doPostBack"]'));
-    let best=null, bestScore=-1;
-    for(const a of links){
-      const href=a.getAttribute('href')||''; const mm=href.match(/__doPostBack\('([^']+)'/); if(!mm) continue;
-      const eventTarget=mm[1];
-      const cont=a.closest('tr,div,li')||a.parentElement;
-      const txt=((a.textContent||'')+' '+(cont?.textContent||'')).toUpperCase().replace(/\s+/g,' ');
-      let s=0; if(pid && txt.includes(pid)) s+=4; if(color && color.length>=2 && txt.includes(color)) s+=2;
-      if(/NATURANA|ART\.|ARTICLE|MODELL|MODEL/i.test(txt)) s+=0.5;
-      if(s>bestScore){ best={eventTarget}; bestScore=s; }
+  function getFormAction(doc, fallbackUrl){
+    const form = doc.querySelector('form');
+    const act  = (form?.getAttribute('action') || '').trim();
+    const base = fallbackUrl;
+    try{
+      return new URL(act || '', base).toString();
+    }catch{
+      return base;
     }
-    return (best && bestScore>=3) ? best : null;
   }
 
-  // ---- Size helpers + stock mapping ----
+  // ✅ NIEUW: serialize complete ASP.NET form-state (incl. ScriptManager fields etc.)
+  function serializeForm(form){
+    const payload = {};
+    if (!form || !form.elements) return payload;
 
-  // Remote → Local (zoals opgegeven)
-  const NATURANA_REMOTE_TO_LOCAL = {
-    '65':'S',
-    '70':'M',
-    '75':'L',
-    '80':'XL',
-    '85':'XXL',
-    '90':'XXXL',
-    '95':'4XL',
-    '100':'5XL',
-    '36':'XS',
-    '38':'S',
-    '40':'M',
-    '42':'L',
-    '44':'XL',
-    '46':'XXL',
-    '48':'3XL', // bij twijfel: 3XL; evt. omzetten naar 3L in SIZE_ALIAS
-    '50':'4XL',
+    const els = Array.from(form.elements);
+    for (const el of els){
+      if (!el || !el.name) continue;
+
+      const name = el.name;
+      const tag  = (el.tagName || '').toLowerCase();
+      const type = (el.type || '').toLowerCase();
+
+      if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
+
+      if (tag === 'select' && el.multiple){
+        const sel = Array.from(el.options).filter(o=>o.selected).map(o=>o.value);
+        if (sel.length){
+          payload[name] = sel[0]; // meestal niet relevant hier; keep simple
+        }
+        continue;
+      }
+
+      payload[name] = el.value ?? '';
+    }
+    return payload;
+  }
+
+  function addImageSubmit(payload, imageName){
+    payload[`${imageName}.x`] = '1';
+    payload[`${imageName}.y`] = '1';
+  }
+
+  // ==========================
+  // findModelItem: EXACT model ONLY (kleur pas op ArticleView)
+  // ==========================
+  function findModelItem(doc, pidColor){
+    const raw = String(pidColor||'').trim().toUpperCase();
+    const m = raw.match(/^(.+?)-(.*)$/);
+    const pid   = (m ? m[1] : raw).trim();
+    const color = (m ? m[2] : '').trim();
+
+    const colorDigits = color.replace(/\D/g,'');
+    if (!pid || !colorDigits) return null;
+
+    const spans = Array.from(doc.querySelectorAll('span[id*="lblArticleNo"]'));
+    const exactSpans = spans.filter(sp => (sp.textContent||'').trim() === pid);
+
+    console.log('[findModelItem] exactSpans', { pidColor: raw, pid, color: colorDigits, count: exactSpans.length });
+
+    if (!exactSpans.length){
+      console.warn('[findModelItem EXACT] NO MODEL SPAN MATCH', { pidColor: raw, pid, color: colorDigits });
+      return null;
+    }
+
+    for (const sp of exactSpans){
+      const col = sp.closest('.mod-container-col');
+      if (!col) continue;
+
+      const a = col.querySelector('a[id*="linkArticleNo"][href*="__doPostBack"]');
+      const href = a?.getAttribute('href') || '';
+      const mm = href.match(/__doPostBack\('([^']+)'\s*,\s*'([^']*)'\)/i);
+      if (!mm) continue;
+
+      return { pid, colorDigits, postType:'event', eventTarget:mm[1], eventArg:(mm[2]||'') };
+    }
+
+    console.warn('[findModelItem EXACT] NO POSTBACK LINK FOUND', { pidColor: raw, pid, color: colorDigits });
+    return null;
+  }
+
+  // ==========================
+  // ArticleView: select EXACT color via .art-color-no
+  // ==========================
+  async function ensureArticleViewColor(html, colorDigits, fallbackUrl){
+    const doc = parseHTML(html);
+
+    const current =
+      (doc.querySelector('.div-art-color .art-color-text')?.textContent || '').trim() ||
+      (doc.querySelector('[id*="lblColorNr"]')?.textContent || '').trim() ||
+      '';
+
+    if (String(current).replace(/\D/g,'') === String(colorDigits)){
+      console.log('[ensureArticleViewColor] already on color', { current, colorDigits });
+      return html;
+    }
+
+    const colorBlocks = Array.from(doc.querySelectorAll('.art-color'));
+    const wantedBlock = colorBlocks.find(b=>{
+      const n = (b.querySelector('.art-color-no')?.textContent || '').trim();
+      return String(n).replace(/\D/g,'') === String(colorDigits);
+    });
+
+    if (!wantedBlock){
+      console.warn('[ensureArticleViewColor] COLOR NOT FOUND ON ARTICLEVIEW', { colorDigits, blocks: colorBlocks.length });
+      throw new Error('TARGET_NOT_FOUND');
+    }
+
+    const img = wantedBlock.querySelector('input[type="image"][name*="btnSelectColor"]');
+    const imgName = img?.getAttribute('name') || '';
+    if (!imgName){
+      console.warn('[ensureArticleViewColor] btnSelectColor not found', { colorDigits });
+      throw new Error('TARGET_NOT_FOUND');
+    }
+
+    const form = doc.querySelector('form');
+    if (!form){
+      console.warn('[ensureArticleViewColor] NO FORM');
+      throw new Error('TARGET_NOT_FOUND');
+    }
+
+    // ✅ cruciaal: post naar ArticleView, en stuur ALLE form fields mee
+    const actionUrl = getFormAction(doc, fallbackUrl);
+
+    const payload = serializeForm(form);
+
+    // ASP.NET verwacht deze vaak; als ze ontbreken: toevoegen
+    if (!('__EVENTTARGET' in payload)) payload.__EVENTTARGET = '';
+    if (!('__EVENTARGUMENT' in payload)) payload.__EVENTARGUMENT = '';
+
+    // ✅ simulate imagebutton click
+    addImageSubmit(payload, imgName);
+
+    console.log('[ensureArticleViewColor] POST', { actionUrl, imgName, colorDigits, keys: Object.keys(payload).length });
+
+    const resp = await httpPOST(actionUrl, payload);
+    if (isLoginPage(resp)) throw new Error('LOGIN_REQUIRED');
+
+    const checkDoc = parseHTML(resp);
+    const after =
+      (checkDoc.querySelector('.div-art-color .art-color-text')?.textContent || '').trim() ||
+      (checkDoc.querySelector('[id*="lblColorNr"]')?.textContent || '').trim() ||
+      '';
+
+    console.log('[ensureArticleViewColor] AFTER', { after, want: colorDigits });
+
+    if (!/gridSize|gridAmount|color-size-grid/i.test(resp)) {
+      throw new Error('TARGET_NOT_FOUND');
+    }
+
+    return resp;
+  }
+
+  // ---- Size helpers ----
+
+  const SIZE_ALIAS = {
+    '2XL':'XXL','XXL':'2XL',
+    '3XL':'XXXL','XXXL':'3XL',
+    '4XL':'XXXXL','XXXXL':'4XL',
+    '3L':'3XL'
   };
-
-const SIZE_ALIAS = {
-  '2XL':'XXL','XXL':'2XL',
-  '3XL':'XXXL','XXXL':'3XL',
-  '4XL':'XXXXL','XXXXL':'4XL',
-  'XS/S':'XS','S/M':'M','M/L':'L','L/XL':'XL','XL/2XL':'2XL',
-  // extra voor mogelijke 3L-variant
-  '3L':'3XL'
-};
-
 
   function normalizeLocalSize(s){
     return String(s||'').trim().toUpperCase().replace(/\s+/g,'');
   }
 
-  function aliasCandidates(label){
-    const raw=String(label||'').trim().toUpperCase();
-    const ns =raw.replace(/\s+/g,'');
-    const set=new Set([raw,ns]);
-
-    if(SIZE_ALIAS[raw]) set.add(SIZE_ALIAS[raw]);
-    if(SIZE_ALIAS[ns])  set.add(SIZE_ALIAS[ns]);
-
-    if(raw.includes('/')) raw.split('/').map(s=>s.trim()).forEach(x=>{
-      set.add(x);
-      set.add(x.replace(/\s+/g,''));
-      if(SIZE_ALIAS[x]) set.add(SIZE_ALIAS[x]);
-    });
-
-    // Remote numeriek → lokale maat toevoegen
-    const numericRaw = ns;
-    if (/^\d+$/.test(numericRaw) && NATURANA_REMOTE_TO_LOCAL[numericRaw]){
-      const loc = NATURANA_REMOTE_TO_LOCAL[numericRaw];
-      set.add(loc);
-      set.add(loc.replace(/\s+/g,''));
-      if (SIZE_ALIAS[loc]) set.add(SIZE_ALIAS[loc]);
-    }
-
-    return Array.from(set);
-  }
-
-  // mapping: remote → local stock
   function mapNaturanaStockLevel(remoteQty){
     const n = Number(remoteQty) || 0;
     if (n <= 0) return 0;
-    if (n <= 2) return 1;  // <2
-    if (n === 3) return 2; // =3
-    if (n === 4) return 3; // =4
-    if (n > 4)  return 5;  // >4
+    if (n <= 2) return 1;
+    if (n === 3) return 2;
+    if (n === 4) return 3;
+    if (n > 4)  return 5;
     return 0;
   }
 
-  // ---- ArticleView → Map(size → remote qty) ----
+  // ---- ArticleView → stockMap ----
 
   function buildStockMapFromArticleView(html){
     const map = new Map();
     const doc = parseHTML(html);
 
-    const t=(doc.body?.textContent||'').toLowerCase();
-    if(t.includes('login') && (t.includes('password')||t.includes('passwort'))) return map;
+    const tiles = Array.from(doc.querySelectorAll('.color-size-grid .p-2.text-center, .color-size-grid [id*="_divOID_"]'));
+    for (const tile of tiles){
+      const sizeEl = tile.querySelector('.gridSize');
+      const inp    = tile.querySelector('input.gridAmount');
+      if (!sizeEl || !inp) continue;
 
-    const inputs=doc.querySelectorAll('.color-size-grid input.gridAmount');
-    inputs.forEach(inp=>{
-      const wrap=inp.closest('.p-2.text-center, [id*="_divOID_"]')||inp.parentElement; if(!wrap) return;
-      const sizeEl=wrap.querySelector('.gridSize');
-      if(!sizeEl) return;
+      const rawSize = (sizeEl.textContent || '').trim().toUpperCase();
+      if (!rawSize) continue;
 
-      const size=sizeEl.textContent.trim().toUpperCase();
-      let stockNum=parseInt(inp.getAttribute('max') || '0',10);
-      if(!Number.isFinite(stockNum) || stockNum<0) stockNum=0;
+      const sizeKey = normalizeLocalSize(rawSize);
 
-      for(const key of aliasCandidates(size)){
-        const normKey = key.replace(/\s+/g,'');
-        const prev = map.get(normKey);
-        if(!prev || prev < stockNum){
-          map.set(normKey, stockNum);
-        }
-      }
-    });
+      const rawMax =
+        inp.getAttribute('max') ??
+        inp.getAttribute('data-max') ??
+        inp.dataset?.max ??
+        inp.getAttribute('value') ??
+        inp.value ??
+        '0';
 
-    // Fallback: regex (zoals in VCP)
-    if (map.size === 0){
-      let m;
-      const sizeRe   = /class="gridSize"[^>]*>([^<]+)/gi;
-      const amountRe = /class="gridAmount"[^>]*max="(\d+)"/gi;
-      const sz=[], av=[];
-      while((m=sizeRe.exec(html))!==null)   sz.push(m[1].trim().toUpperCase());
-      while((m=amountRe.exec(html))!==null) av.push(m[1].trim());
-      const n=Math.min(sz.length,av.length);
-      for(let i=0;i<n;i++){
-        const s   = sz[i];
-        const num = parseInt(av[i],10) || 0;
-        for(const key of aliasCandidates(s)){
-          const normKey = key.replace(/\s+/g,'');
-          const prev = map.get(normKey);
-          if(!prev || prev < num){
-            map.set(normKey, num);
-          }
-        }
-      }
+      let stockNum = parseInt(String(rawMax).trim(), 10);
+      if (!Number.isFinite(stockNum) || stockNum < 0) stockNum = 0;
+
+      map.set(sizeKey, stockNum);
     }
 
-    console.log('[Naturana SS&E] stockMap keys:', Array.from(map.keys()));
+    console.log('[Naturana SS&E] stockMap size:', map.size);
     return map;
   }
 
-  // ---- ArticleView ophalen via ModelView POSTBACK ----
+  // ---- ArticleView ophalen via ModelView POST ----
 
   async function openArticleViewViaPostback_cached(pidColor, state){
     const ensureFreshMV = async ()=>{
@@ -328,38 +390,45 @@ const SIZE_ALIAS = {
     if (!state.doc || !state.vs) await ensureFreshMV();
 
     let item = findModelItem(state.doc, pidColor);
+    console.log('[findModelItem]', { supplierPid: pidColor, item });
+
     if (!item) {
       await ensureFreshMV();
       item = findModelItem(state.doc, pidColor);
+      console.log('[findModelItem retry]', { supplierPid: pidColor, item });
       if (!item) throw new Error('TARGET_NOT_FOUND');
     }
 
+    // 1) open model => ArticleView
     const payload = {
-      __EVENTTARGET: item.eventTarget,
-      __EVENTARGUMENT: '',
+      __EVENTTARGET: item.eventTarget || '',
+      __EVENTARGUMENT: item.eventArg || '',
       __VIEWSTATE: state.vs.__VIEWSTATE,
       __VIEWSTATEGENERATOR: state.vs.__VIEWSTATEGENERATOR||'',
       __EVENTVALIDATION: state.vs.__EVENTVALIDATION||''
     };
 
-    let resp = await httpPOST(MODELVIEW_URL, payload);
-    if (isLoginPage(resp)) throw new Error('LOGIN_REQUIRED');
+    const resp1 = await httpPOST(MODELVIEW_URL, payload);
+    if (isLoginPage(resp1)) throw new Error('LOGIN_REQUIRED');
 
-    if (!/gridSize|gridAmount|color-size-grid/i.test(resp)) {
-      await ensureFreshMV();
-      const item2 = findModelItem(state.doc, pidColor);
-      if (!item2) throw new Error('TARGET_NOT_FOUND');
-      const payload2 = {
-        __EVENTTARGET: item2.eventTarget,
-        __EVENTARGUMENT: '',
-        __VIEWSTATE: state.vs.__VIEWSTATE,
-        __VIEWSTATEGENERATOR: state.vs.__VIEWSTATEGENERATOR||'',
-        __EVENTVALIDATION: state.vs.__EVENTVALIDATION||''
-      };
-      resp = await httpPOST(MODELVIEW_URL, payload2);
+    if (!/art-color|color-size-grid|gridSize|gridAmount/i.test(resp1)) {
+      throw new Error('TARGET_NOT_FOUND');
     }
 
-    return resp;
+    // 2) ensure exact color on ArticleView
+    const resp2 = await ensureArticleViewColor(resp1, item.colorDigits, ARTICLEVIEW_URL);
+
+    const d2 = parseHTML(resp2);
+    const after =
+      (d2.querySelector('.div-art-color .art-color-text')?.textContent || '').trim() ||
+      (d2.querySelector('[id*="lblColorNr"]')?.textContent || '').trim() ||
+      '';
+    if (String(after).replace(/\D/g,'') !== String(item.colorDigits)){
+      console.warn('[ColorGuard] wrong color after selection', { want:item.colorDigits, got:after });
+      throw new Error('TARGET_NOT_FOUND');
+    }
+
+    return resp2;
   }
 
   // ============ Google Sheet (EAN) ============
@@ -369,7 +438,7 @@ const SIZE_ALIAS = {
 
   const SHEET_CACHE_KEY    = `naturanaSheetCache:${SHEET_ID}:${SHEET_GID}`;
   const SHEET_AUTHUSER_KEY = 'naturanaSheetAuthUser';
-  const SHEET_CACHE_TTL_MS = 60*60*1000; // 1 uur
+  const SHEET_CACHE_TTL_MS = 60*60*1000;
 
   function getAuthuserCandidates(){
     const saved = localStorage.getItem(SHEET_AUTHUSER_KEY);
@@ -393,9 +462,7 @@ const SIZE_ALIAS = {
   }
 
   function writeSheetCache(obj){
-    try{
-      localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify(obj));
-    }catch{}
+    try{ localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify(obj)); }catch{}
   }
 
   function makeTsvUrl(authuser){
@@ -428,14 +495,12 @@ const SIZE_ALIAS = {
   async function fetchSheetRaw({force=false}={}){
     const cache = readSheetCache();
     if (!force && cache){
-      console.log('[Naturana SS&E] Sheet cache HIT', {authuser:cache.authuser});
       return {text:cache.text, authuser:cache.authuser, fromCache:true};
     }
 
     const candidates = getAuthuserCandidates();
     for (const au of candidates){
       const url = makeTsvUrl(au);
-      console.log('[Naturana SS&E] Sheet try authuser', au, url);
       const res = await gmGet(url, {
         'Accept':'*/*',
         'Referer':`https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#gid=${SHEET_GID}`,
@@ -443,146 +508,65 @@ const SIZE_ALIAS = {
       if (res.status>=200 && res.status<300 && res.responseText && !isLikelyHtml(res.responseText)){
         writeSheetCache({text:res.responseText, authuser:au, ts:Date.now()});
         localStorage.setItem(SHEET_AUTHUSER_KEY, String(au));
-        console.log('[Naturana SS&E] Sheet OK via authuser', au);
         return {text:res.responseText, authuser:au, fromCache:false};
       }
     }
 
     if (cache){
-      console.warn('[Naturana SS&E] Sheet netwerk faalde → gebruik verlopen cache');
       return {text:cache.text, authuser:cache.authuser, fromCache:true};
     }
 
     throw new Error('Sheets: geen toegang. Log in met juiste Google-account of publiceer tabblad.');
   }
 
-  /**
-   * EAN-map uit rows voor een bepaalde supplier_pid.
-   *
-   * Kolommen (0-based):
-   *  A(0) = sup-deel 1
-   *  B(1) = cup / maat-deel (bh)
-   *  C(2) = sup-deel 2
-   *  E(4) = bandmaat (bh)
-   *  G(6) = maat broekje
-   *  I(8) = EAN
-   *
-   * supId = A + "-" + C
-   * maat:
-   *   - als band+cup: E+B
-   *   - anders: G
-   * daarna evt. remote→local mapping en normaliseren
-   */
-function buildEanMapFromRows(rows, supplierPid){
-  const eanMap = new Map();
-  if (!rows.length) return eanMap;
+  function buildEanMapFromRows(rows, supplierPid){
+    const eanMap = new Map();
+    if (!rows.length) return eanMap;
 
-  const wanted = String(supplierPid || '').trim().toUpperCase()
-    .replace(/\s+/g,'')
-    .replace(/-+/g,'-');
-
-  for (let i=1;i<rows.length;i++){
-    const r = rows[i]; if (!r) continue;
-    const A = (r[0] || '').toString().trim(); // kolom A
-    const B = (r[1] || '').toString().trim(); // kolom B
-    const C = (r[2] || '').toString().trim(); // kolom C
-    const E = (r[4] || '').toString().trim(); // kolom E
-    const G = (r[6] || '').toString().trim(); // kolom G
-    const I = (r[8] || '').toString().trim(); // kolom I (EAN)
-
-    if (!A && !C) continue;
-    if (!I) continue;
-
-    const supIdRow = (A + '-' + C).toUpperCase()
+    const wanted = String(supplierPid || '').trim().toUpperCase()
       .replace(/\s+/g,'')
       .replace(/-+/g,'-');
 
-    if (supIdRow !== wanted) continue;
+    for (let i=1;i<rows.length;i++){
+      const r = rows[i]; if (!r) continue;
 
-    let maatLabel = '';
+      const A = (r[0] || '').toString().trim();
+      const C = (r[2] || '').toString().trim();
+      const E = (r[4] || '').toString().trim();
+      const G = (r[6] || '').toString().trim();
+      const I = (r[8] || '').toString().trim();
 
-    const band = E.toUpperCase().replace(/\s+/g,'');
-    const cup  = B.toUpperCase().replace(/\s+/g,'');
+      if (!A && !C) continue;
+      if (!I) continue;
 
-    const isBand = /^\d{2,3}$/.test(band);
-    const isCup  = /^[A-Z]+$/.test(cup);
+      const supIdRow = (A + '-' + C).toUpperCase()
+        .replace(/\s+/g,'')
+        .replace(/-+/g,'-');
 
-    if (band && cup && isBand && isCup){
-      // BH: band + cup
-      maatLabel = band + cup;
-    } else {
-      // Broekje: kolom G gebruiken
-      maatLabel = G.toUpperCase();
+      if (supIdRow !== wanted) continue;
+
+      const maatLabel = (E || G || '').toUpperCase().trim();
+      if (!maatLabel) continue;
+
+      const sizeKey = normalizeLocalSize(maatLabel);
+      if (!sizeKey) continue;
+
+      const ean = I.replace(/\D/g,'');
+      if (!ean) continue;
+
+      eanMap.set(sizeKey, ean);
+
+      const alias = SIZE_ALIAS[sizeKey];
+      if (alias){
+        eanMap.set(normalizeLocalSize(alias), ean);
+      }
     }
 
-    if (!maatLabel) continue;
-
-    // Remote broekmaat → lokale alpha als nodig
-    const plain = maatLabel.replace(/\s+/g,'');
-    if (/^\d+$/.test(plain) && NATURANA_REMOTE_TO_LOCAL[plain]){
-      maatLabel = NATURANA_REMOTE_TO_LOCAL[plain];
-    }
-
-    const sizeKey = normalizeLocalSize(maatLabel);
-    if (!sizeKey) continue;
-
-    const ean = I.replace(/\D/g,'');
-    if (!ean) continue;
-
-    // Hoofdkey
-    eanMap.set(sizeKey, ean);
-
-    // Alias-key, zodat 3XL ↔ XXXL / 3L werkt
-    const alias = SIZE_ALIAS[sizeKey];
-    if (alias){
-      const aliasKey = normalizeLocalSize(alias);
-      eanMap.set(aliasKey, ean);
-    }
+    console.log('[Naturana SS&E] EAN map size:', eanMap.size, 'sample:', [...eanMap.entries()].slice(0,10));
+    return eanMap;
   }
 
-  console.log('[Naturana SS&E] EAN map size:', eanMap.size, 'sample:', [...eanMap.entries()].slice(0,10));
-  return eanMap;
-}
-
-
-function applyEansToDdo(eanMap){
-  const rows = document.querySelectorAll('#tabs-3 table.options tbody tr');
-  let updated=0, missing=0;
-
-  rows.forEach(row=>{
-    const sizeInput = row.querySelector('td input.product_option_small');
-    if (!sizeInput) return;
-    const sizeRaw  = sizeInput.value || '';
-    const sizeNorm = normalizeLocalSize(sizeRaw);
-    if (!sizeNorm) return;
-
-    const ean = eanMap.get(sizeNorm);
-    if (!ean){
-      missing++;
-      return;
-    }
-
-    const eanInput = row.querySelector(
-      'input[name^="options"][name$="[barcode]"], '+
-      'input[name*="[ean]"], input[name*="ean"]'
-    );
-    if (!eanInput){
-      missing++;
-      return;
-    }
-
-    const newEan = String(ean);
-    // Altijd overschrijven
-    eanInput.value = newEan;
-    eanInput.dispatchEvent(new Event('input',{bubbles:true}));
-    updated++;
-  });
-
-  console.log('[Naturana SS&E] EAN resultaat:', {updated, missing});
-  return {updated, missing};
-}
-
-  // ============ Admin UI / knop + hotkey ============
+  // ============ Admin UI / apply ============
 
   const BTN_ID              = 'naturana-ssne-btn';
   const TABLE_SELECTOR      = '#tabs-3 table.options';
@@ -607,9 +591,7 @@ function applyEansToDdo(eanMap){
     return !!t && t.includes('naturana');
   }
 
-  function hasTable(){
-    return !!$(TABLE_SELECTOR);
-  }
+  function hasTable(){ return !!$(TABLE_SELECTOR); }
 
   function isTab3Active(){
     const activeByHeader = document.querySelector(
@@ -622,11 +604,7 @@ function applyEansToDdo(eanMap){
     const panel = $('#tabs-3');
     if (!panel) return false;
     const style = getComputedStyle(panel);
-    return (
-      style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      style.height !== '0px'
-    );
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.height !== '0px';
   }
 
   function setBtnState(opts = {}){
@@ -644,33 +622,13 @@ function applyEansToDdo(eanMap){
     const tableOkay = hasTable();
     const active    = isTab3Active();
 
-    if (okBrand && active){
-      btn.style.display = '';
-    } else {
-      btn.style.display = 'none';
-    }
-
+    btn.style.display = (okBrand && active) ? '' : 'none';
     btn.disabled      = !tableOkay;
     btn.style.opacity = tableOkay ? '1' : '.55';
-
-    if (!okBrand){
-      btn.title = 'Selecteer een merk dat "Naturana" bevat op tab 1.';
-    } else if (!active){
-      btn.title = 'Ga naar tab Maten/Opties (#tabs-3).';
-    } else if (!tableOkay){
-      btn.title = 'Wachten tot #tabs-3 geladen is...';
-    } else {
-      btn.title = 'Haal Naturana stock + EAN op en vul #tabs-3.';
-    }
   }
 
   function resetBtn(){
-    setBtnState({
-      text: '⛏️ SS&E | Naturana',
-      bg:   '#007cba',
-      disabled: false,
-      opacity: '1'
-    });
+    setBtnState({ text:'⛏️ SS&E | Naturana', bg:'#007cba', disabled:false, opacity:'1' });
     const btn = document.getElementById(BTN_ID);
     if (btn) updateButtonVisibility(btn);
   }
@@ -684,16 +642,9 @@ function applyEansToDdo(eanMap){
       btn.type = 'button';
       btn.textContent = '⛏️ SS&E | Naturana';
       btn.style.cssText = `
-        position: fixed;
-        right: 10px;
-        top: 10px;
-        z-index: 999999;
-        padding: 10px 12px;
-        background: #007cba;
-        color: #fff;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
+        position: fixed; right: 10px; top: 10px; z-index: 999999;
+        padding: 10px 12px; background: #007cba; color: #fff;
+        border: none; border-radius: 8px; cursor: pointer;
         box-shadow: 0 4px 12px rgba(0,0,0,.15);
         font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       `;
@@ -707,91 +658,70 @@ function applyEansToDdo(eanMap){
     const saveBtn =
       document.querySelector('input[type="submit"][name="edit"]') ||
       document.querySelector('button[name="edit"]');
-    if (!saveBtn){
-      console.warn('[Naturana SS&E] Update product button niet gevonden');
-      return false;
-    }
-    console.log('[Naturana SS&E] Autosave: klik op "Update product".');
+    if (!saveBtn) return false;
     saveBtn.click();
     return true;
   }
 
-  // ---- Stock + EAN toepassen + console.table ----
+  function applyNaturanaToTable(stockMap, eanMap){
+    const table = document.querySelector(TABLE_SELECTOR);
+    if (!table) return 0;
 
-function applyNaturanaToTable(stockMap, eanMap){
-  const table = document.querySelector(TABLE_SELECTOR);
-  if (!table) return 0;
+    const rows = table.querySelectorAll('tbody tr');
+    let matched = 0;
+    const report = [];
 
-  const rows = table.querySelectorAll('tbody tr');
-  let matched = 0;
-  const report = [];
+    rows.forEach(row=>{
+      const sizeInput = row.querySelector('input.product_option_small');
+      const sizeRaw   = sizeInput ? sizeInput.value : '';
+      const sizeNorm  = normalizeLocalSize(sizeRaw);
 
-  rows.forEach(row=>{
-    const cells = row.querySelectorAll('td');
-    if (cells.length < 2) return;
+      const stockInput = row.querySelector('input[name^="options"][name$="[stock]"]');
+      const eanInput   = row.querySelector(
+        'input[name^="options"][name$="[barcode]"], '+
+        'input[name*="[ean]"], input[name*="ean"]'
+      );
 
-    const sizeInput = cells[0].querySelector('input.product_option_small');
-    const sizeRaw   = sizeInput ? sizeInput.value : '';
-    const sizeNorm  = normalizeLocalSize(sizeRaw);
+      const localBefore = stockInput ? Number(stockInput.value || 0) : 0;
 
-    const stockInput = row.querySelector('input[name^="options"][name$="[stock]"]');
-    const eanInput   = row.querySelector(
-      'input[name^="options"][name$="[barcode]"], '+
-      'input[name*="[ean]"], input[name*="ean"]'
-    );
+      const remoteQty   = sizeNorm ? (stockMap.get(sizeNorm) || 0) : 0;
+      const mappedStock = remoteQty ? mapNaturanaStockLevel(remoteQty) : localBefore;
+      const remoteEan   = sizeNorm ? (eanMap.get(sizeNorm) || '') : '';
 
-    const localBefore = stockInput ? Number(stockInput.value || 0) : 0;
+      let changed = false;
 
-    const remoteQty   = sizeNorm ? (stockMap.get(sizeNorm) || 0) : 0;
-    const mappedStock = remoteQty ? mapNaturanaStockLevel(remoteQty) : localBefore;
-    const remoteEan   = sizeNorm ? (eanMap.get(sizeNorm) || '') : '';
+      if (stockInput && remoteQty > 0){
+        const newStock = String(mappedStock);
+        if (stockInput.value !== newStock){
+          stockInput.value = newStock;
+          stockInput.dispatchEvent(new Event('input', {bubbles:true}));
+          changed = true;
+        }
+      }
 
-    let changed = false;
-
-    if (stockInput && remoteQty){
-      const newStock = String(mappedStock);
-      if (stockInput.value !== newStock){
-        stockInput.value = newStock;
-        stockInput.dispatchEvent(new Event('input', {bubbles:true}));
+      if (eanInput && remoteEan){
+        eanInput.value = String(remoteEan);
+        eanInput.dispatchEvent(new Event('input',{bubbles:true}));
         changed = true;
       }
-    }
 
-    if (eanInput && remoteEan){
-      const newEan = String(remoteEan);
-      // Altijd zetten, ook als hij hetzelfde is
-      eanInput.value = newEan;
-      eanInput.dispatchEvent(new Event('input',{bubbles:true}));
-      changed = true;
-    }
+      if (changed) matched++;
 
-    if (changed){
-      matched++;
-      const oldBg = row.style.backgroundColor;
-      row.style.transition = 'background-color .4s';
-      row.style.backgroundColor = '#d4edda';
-      setTimeout(()=>{ row.style.backgroundColor = oldBg || ''; }, 1500);
-    }
-
-    report.push({
-      size:   sizeRaw || sizeNorm || '(leeg)',
-      local:  localBefore,
-      remote: remoteQty || 0,
-      mapped: remoteQty ? mappedStock : '(geen remote)',
-      ean:    remoteEan || ''
+      report.push({
+        size:   sizeRaw || sizeNorm || '(leeg)',
+        local:  localBefore,
+        remote: remoteQty || 0,
+        mapped: remoteQty ? mappedStock : '(geen remote)',
+        ean:    remoteEan || ''
+      });
     });
-  });
 
-  console.groupCollapsed('[Naturana SS&E] Overzicht per maat');
-  console.table(report);
-  console.groupEnd();
+    console.groupCollapsed('[Naturana SS&E] Overzicht per maat');
+    console.table(report);
+    console.groupEnd();
 
-  console.log('[Naturana SS&E] totaal gewijzigde rijen:', matched);
-  return matched;
-}
-
-
-  // ---- Hoofdactie ----
+    return matched;
+  }
 
   async function onScrapeClick(autoSaveThisRun){
     const btn = document.getElementById(BTN_ID);
@@ -823,76 +753,38 @@ function applyNaturanaToTable(stockMap, eanMap){
       return;
     }
 
-    setBtnState({
-      text: '⏳ Naturana ArticleView laden...',
-      bg: '#f1c40f',
-      disabled: true,
-      opacity: '.8'
-    });
+    setBtnState({ text:'⏳ Naturana ArticleView laden...', bg:'#f1c40f', disabled:true, opacity:'.8' });
 
     try{
-      // 1) ModelView / ArticleView ophalen
       const mvHtml = await httpGET(MODELVIEW_URL);
-      if (isLoginPage(mvHtml)){
-        throw new Error('LOGIN_REQUIRED');
-      }
+      if (isLoginPage(mvHtml)) throw new Error('LOGIN_REQUIRED');
+
       const mvDoc  = parseHTML(mvHtml);
       const state  = { doc: mvDoc, vs: pickViewState(mvDoc) };
 
       const html = await openArticleViewViaPostback_cached(supplierPid, state);
       const stockMap = buildStockMapFromArticleView(html);
 
-      if (!stockMap || stockMap.size === 0){
-        setBtnState({ text:'❌ Geen maten/stock gevonden', bg:'#e06666' });
-        setTimeout(resetBtn, 2500);
-        return;
-      }
+      setBtnState({ text:'⏳ Sheet (EAN) laden...', bg:'#6c757d', disabled:true, opacity:'.8' });
 
-      setBtnState({
-        text: '⏳ Sheet (EAN) laden...',
-        bg: '#6c757d',
-        disabled: true,
-        opacity: '.8'
-      });
-
-      // 2) Sheet ophalen & EAN-map bouwen
       const raw = await fetchSheetRaw({});
       const rows = parseTsv(raw.text);
       const eanMap = buildEanMapFromRows(rows, supplierPid);
 
-      // 3) Toepassen in DDO + tabel loggen
       const matched = applyNaturanaToTable(stockMap, eanMap);
 
-      if (matched === 0){
-        setBtnState({ text:'⚠️ 0 rijen gematcht', bg:'#f39c12' });
-      } else {
-        setBtnState({ text:`📦 ${matched} rijen gevuld`, bg:'#2ecc71' });
-      }
+      setBtnState({ text: matched ? `📦 ${matched} rijen gevuld` : '⚠️ 0 rijen gevuld', bg: matched ? '#2ecc71' : '#f39c12' });
       setTimeout(resetBtn, 2500);
 
-      if (autoSaveThisRun){
-        if (matched > 0){
-          const ok = clickUpdateProductButton();
-          if (!ok){
-            console.warn('[Naturana SS&E] Autosave mislukt: geen Save-knop gevonden');
-          }
-        } else {
-          console.log('[Naturana SS&E] Autosave overgeslagen: 0 rijen gewijzigd');
-        }
+      if (autoSaveThisRun && matched > 0){
+        clickUpdateProductButton();
       }
-
     }catch(e){
       console.error('[Naturana SS&E]', e);
-      const msg = String(e && e.message || e);
-      if (msg === 'LOGIN_REQUIRED'){
-        alert('Naturana vraagt opnieuw om in te loggen. Log in in het Naturana-tabblad en probeer opnieuw.');
-      }
       setBtnState({ text:'❌ Fout bij ophalen', bg:'#e06666' });
       setTimeout(resetBtn, 2500);
     }
   }
-
-  // ---- Hotkey Ctrl+Shift+S ----
 
   function onScrapeHotkey(e){
     const target = e.target;
@@ -913,10 +805,8 @@ function applyNaturanaToTable(stockMap, eanMap){
     if (!btn || btn.style.display === 'none' || btn.disabled) return;
 
     e.preventDefault();
-    onScrapeClick(true); // met autosave
+    onScrapeClick(true);
   }
-
-  // ---- Observer / boot ----
 
   const observer = new MutationObserver(()=> scheduleEnsureButton());
   let ensureScheduled = false;
@@ -929,9 +819,7 @@ function applyNaturanaToTable(stockMap, eanMap){
       ensureButton();
       const btn = document.getElementById(BTN_ID);
       if (btn && hasTable()){
-        try{
-          observer.disconnect();
-        }catch{}
+        try{ observer.disconnect(); }catch{}
       }
     }, 100);
   }
@@ -939,9 +827,7 @@ function applyNaturanaToTable(stockMap, eanMap){
   function startObserver(){
     const root = document.documentElement || document.body;
     if (!root) return;
-    try{
-      observer.observe(root,{ childList:true, subtree:true });
-    }catch{}
+    try{ observer.observe(root,{ childList:true, subtree:true }); }catch{}
   }
 
   function bootAdmin(){
@@ -965,7 +851,6 @@ function applyNaturanaToTable(stockMap, eanMap){
     bootAdmin();
   }
 
-  // Bridge "warm" houden
   setInterval(()=>{
     if (bridgeIsOnlineByHeartbeat()){
       httpGET(MODELVIEW_URL).catch(()=>{});
