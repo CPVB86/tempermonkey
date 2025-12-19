@@ -18,6 +18,9 @@
 
   const table = $('table.control');
   if (!table) return;
+    const hasProductCheckboxes = table.querySelector('input[type="checkbox"][name="products[]"]');
+if (!hasProductCheckboxes) return; // niet op edit-product pagina's (tabs-3 etc.)
+
 
   const headerToggle = $('#toggle');
 
@@ -66,6 +69,8 @@
   }
 
   if (headerToggle) {
+      const headerToggle = table.querySelector('thead #toggle');
+
     headerToggle.addEventListener('click', stopRowNav, true);
     headerToggle.addEventListener('mousedown', stopRowNav, true);
     headerToggle.addEventListener('change', () => {
