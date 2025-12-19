@@ -6,8 +6,8 @@
 // @grant        none
 // @run-at       document-idle
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-mundo-unico.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-mundo-unico.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-colomoda-mundo-unico.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-colomoda-mundo-unico.user.js
 // ==/UserScript==
 
 (function () {
@@ -45,6 +45,12 @@
     t = t.replace(/\s{2,}/g, ' ').trim();
     return t;
   }
+    const capitalizeFirst = (str = '') => {
+  const s = (str || '').trim();
+  if (!s) return '';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
 
   // Model afleiden uit de titel (stuk vóór “boxers”, “brief”, etc.)
   function deriveModelFromTitle(strippedTitle) {
@@ -231,7 +237,7 @@ ${priceHtml}${modelHtml}${articleHtml}${eanHtml}${skuHtml}  <div class="pdp-deta
         return;
       }
 
-      const strippedTitle = stripBrandFromTitle(rawTitle);
+      const strippedTitle = capitalizeFirst(stripBrandFromTitle(rawTitle));
       const model         = deriveModelFromTitle(strippedTitle);
       const price         = getPriceText();
       const specs         = getSpecs();
