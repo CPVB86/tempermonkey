@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Sparkle 2 | DDO
-// @version      1.0
-// @description  Leest één SPARKLE payload uit het klembord en vult DDO backend velden. Klik ✨ of gebruik Ctrl+Shift+Z / Cmd+Shift+Z (ook Ctrl+Shift+V).
+// @version      3.2
+// @description  Leest één SPARKLE payload uit het klembord en vult DDO backend velden. Klik ✨ of gebruik Ctrl+Shift+V / Cmd+Shift+V (vult + Update product).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle2/sparkle2-ddo.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle2/sparkle2-ddo.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-ddo.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-ddo.user.js
 // ==/UserScript==
 
 (function () {
@@ -31,33 +31,6 @@
     priceVip: '0.00'
   };
 
-  // --- UI injectie ---
-  const observer = new MutationObserver(() => {
-    if (document.querySelector('#tabs-1') && !document.querySelector('#magicMsg')) addMagicMessage();
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  function addMagicMessage() {
-    const h2 = document.querySelector('#tabs-1 h2');
-    if (!h2) return;
-
-    const msg = document.createElement('div');
-    msg.id = 'magicMsg';
-    msg.textContent = '✨';
-    Object.assign(msg.style, {
-      fontSize: '1.2em',
-      fontWeight: 'bold',
-      color: '#d35400',
-      marginTop: '10px',
-      marginBottom: '10px',
-      cursor: 'pointer',
-      userSelect: 'none'
-    });
-
-    h2.insertAdjacentElement('afterend', msg);
-  }
-
-  // --- Helpers ---
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   function normalizePrice(v) {
@@ -79,13 +52,15 @@
       .replace(/>/g, '&gt;');
   }
 
-  // NOTE: dispatching input/change often triggers autosave/dirty state in admin (expected).
   function setValue(selector, value) {
     const el = document.querySelector(selector);
     if (!el) return false;
     el.value = value;
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (typeof window.$ === 'function') {
+      try { window.$(el).trigger('input').trigger('change'); } catch (_) {}
+    }
     return true;
   }
 
@@ -94,6 +69,9 @@
     if (!el) return false;
     el.checked = checked;
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (typeof window.$ === 'function') {
+      try { window.$(el).trigger('change'); } catch (_) {}
+    }
     return true;
   }
 
@@ -128,6 +106,9 @@
     if (deliverySelect) {
       deliverySelect.value = DEFAULTS.delivery;
       deliverySelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof window.$ === 'function') {
+        try { window.$(deliverySelect).trigger('change'); } catch (_) {}
+      }
     }
 
     const tagInput = document.querySelector('input[name="tags_csv"]');
@@ -135,6 +116,9 @@
       tagInput.value = DEFAULTS.tagsCsv;
       tagInput.dispatchEvent(new Event('input', { bubbles: true }));
       tagInput.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof window.$ === 'function') {
+        try { window.$(tagInput).trigger('input').trigger('change'); } catch (_) {}
+      }
     }
 
     setValue('input[name="price_vip"]', DEFAULTS.priceVip);
@@ -151,6 +135,9 @@
     if (match) {
       brandSelect.value = match.value;
       brandSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof window.$ === 'function') {
+        try { window.$(brandSelect).trigger('change'); } catch (_) {}
+      }
     }
   }
 
@@ -187,6 +174,34 @@
     if (data.modelName) selectModel(data.modelName);
   }
 
+  function triggerUpdateProduct() {
+    const btn =
+      document.querySelector('input[type="submit"][name="edit"][value="Update product"]') ||
+      document.querySelector('input[type="submit"][name="edit"]');
+
+    if (!btn) {
+      console.warn('⚠️ Update-knop niet gevonden (input[name="edit"]).');
+      return false;
+    }
+
+    // Run wired handlers
+    try {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      btn.click();
+    } catch (_) {}
+
+    const form = btn.form || btn.closest('form');
+    if (form) {
+      try {
+        if (typeof form.requestSubmit === 'function') form.requestSubmit(btn);
+        else form.submit();
+      } catch (_) {}
+    }
+
+    console.log('💾 Update product getriggerd');
+    return true;
+  }
+
   function logContract(data) {
     console.log('📦 Sparkle payload data (normalized):');
     for (const spec of DATA_CONTRACT) {
@@ -194,9 +209,34 @@
     }
   }
 
+  // --- UI injectie ---
+  const observer = new MutationObserver(() => {
+    if (document.querySelector('#tabs-1') && !document.querySelector('#magicMsg')) addMagicMessage();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  function addMagicMessage() {
+    const h2 = document.querySelector('#tabs-1 h2');
+    if (!h2) return;
+
+    const msg = document.createElement('div');
+    msg.id = 'magicMsg';
+    msg.textContent = '✨';
+    Object.assign(msg.style, {
+      fontSize: '1.2em',
+      fontWeight: 'bold',
+      color: '#d35400',
+      marginTop: '10px',
+      marginBottom: '10px',
+      cursor: 'pointer',
+      userSelect: 'none'
+    });
+
+    h2.insertAdjacentElement('afterend', msg);
+  }
+
   // --- Hard hijack Ctrl+Shift+V (stop paste, always run Sparkle) ---
   let blockPasteUntil = 0;
-
   function hijackEvent(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -211,10 +251,9 @@
   document.addEventListener('click', (e) => {
     if (e.target.id !== 'magicMsg') return;
     e.preventDefault();
-    runSparkle('click');
+    runSparkle('click', { doUpdate: false });
   });
 
-  // Capture-phase keydown so we beat native paste handlers.
   document.addEventListener('keydown', (e) => {
     const modOK = (e.ctrlKey || e.metaKey) && e.shiftKey;
     if (!modOK) return;
@@ -225,15 +264,17 @@
     if (!isV) return;
 
     hijackEvent(e);
-
-    // also block the upcoming paste event (some browsers fire it anyway)
     blockPasteUntil = Date.now() + 400;
 
-    runSparkle('hotkey-v');
+    (async () => {
+      await runSparkle('hotkey-v', { doUpdate: true });
+      await sleep(200);
+      triggerUpdateProduct();
+    })();
   }, true);
 
   // --- Hoofdflow ---
-  async function runSparkle(trigger) {
+  async function runSparkle(trigger, { doUpdate } = { doUpdate: false }) {
     console.clear();
     console.log(`▶️ Sparkle start (${trigger})`);
 
@@ -247,7 +288,7 @@
       if (!payload) {
         console.error('❌ Geen SPARKLE payload gevonden in klembord.');
         console.info('➡️ Verwacht formaat: <!--SPARKLE:{...json...}-->');
-        return;
+        return false;
       }
 
       const { data, missing } = validateAndNormalizePayload(payload);
@@ -255,7 +296,7 @@
       if (missing.length) {
         console.error('❌ Payload mist verplichte velden:', missing.join(', '));
         logContract(data);
-        return;
+        return false;
       }
 
       logContract(data);
@@ -271,12 +312,13 @@
       }
 
       console.log('✅ Klaar!');
+      return true;
     } catch (err) {
       console.error('❌ Fout:', err);
+      return false;
     }
   }
 
-  // Modelselectie (best match)
   function selectModel(name) {
     const maxWaitTime = 5000;
     const intervalTime = 200;
