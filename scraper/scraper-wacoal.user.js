@@ -24,9 +24,12 @@
 
   // ========= Config =========
   const SHEET_ID = '1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68';
+
+  // ✅ uitbreidbaar
   const SHEET_GID_BY_BRAND = {
     wacoal: '890980427',
     freya:  '62174747',
+    // voeg later merken toe
   };
 
   const STOCK_URL = (supplierPidBase) =>
@@ -37,7 +40,9 @@
   const BRAND_TITLE_SELECTOR = '#tabs-1 #select2-brand-container';
 
   const BTN_ID = 'wacoalgroup-sse-btn';
-  const HOTKEY = { ctrl: true, shift: true, alt: false, key: 'w' };
+
+  // ✅ Ctrl+Shift+S = autosave (géén cache reset)
+  const HOTKEY = { ctrl: true, shift: true, alt: false, key: 's' };
 
   const SHEET_CACHE_TTL_MS = 60 * 60 * 1000;
   const SHEET_AUTHUSER_KEY = 'wacoalgroupSheetAuthUser';
@@ -76,11 +81,6 @@
       .replace(/–|—/g, '-');
   }
 
-  function normalizeBandDigits(s) {
-    const d = String(s || '').replace(/\D/g, '');
-    return d.replace(/^0+/, '') || d;
-  }
-
   function baseSupplierPid(raw) {
     const s = String(raw || '').trim().toUpperCase();
     if (!s) return '';
@@ -92,7 +92,7 @@
   // Naturana mapping
   function mapNaturanaStockLevel(remoteQty) {
     const n = Number(remoteQty) || 0;
-    if (n <= 0) return 1;
+    if (n <= 0) return 0;
     if (n <= 2) return 1;
     if (n === 3) return 2;
     if (n === 4) return 3;
@@ -109,12 +109,12 @@
     return String(node?.stock?.wacoalstockStatus || '').toUpperCase().trim();
   }
 
-  // ✅ JOUW PRAKTISCHE REGEL (nu bandMap vult ook bij level=0):
-  // - Als stage ontbreekt en level<=0 => 0
-  // - Als stage === IN_STOCK:
+  // ✅ Rule:
+  // - stage ontbreekt + level<=0 => 0
+  // - stage === IN_STOCK:
   //     - level>0 => Naturana mapping
-  //     - level<=0 => 1   (want "in stock" maar level soms 0 / niet bruikbaar)
-  // - Anders (WITHIN_STAGE1/2/...) => 1
+  //     - level<=0 => 1
+  // - anders (WITHIN_STAGE1/2/...) => 1
   function mapWacoalStock(node) {
     const lvl = getStockLevel(node);
     const st  = getStage(node);
@@ -126,14 +126,10 @@
       return 1;
     }
 
-    // alles met stage maar niet IN_STOCK => standaard 1
     if (st) return 1;
-
-    // fallback
     return lvl > 0 ? mapNaturanaStockLevel(lvl) : 0;
   }
 
-  // Stage “sterkte” voor keuze bij conflicten (optioneel)
   function stageRank(stage) {
     const s = String(stage || '').toUpperCase();
     if (s === 'IN_STOCK') return 4;
@@ -229,12 +225,25 @@
         font: 600 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       `;
       document.body.appendChild(btn);
-      btn.addEventListener('click', () => onScrapeClick(false));
+
+      // ✅ button click: cache reset + force refresh, no autosave
+      btn.addEventListener('click', () => onScrapeClick(false, true));
     }
     updateButtonVisibility(btn);
   }
 
-  // ========= Sheet fetch =========
+  // ========= Sheet cache reset =========
+  function resetSheetCacheForAllGids() {
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith(`wacoalgroupSheetCache:${SHEET_ID}:`))
+        .forEach(k => localStorage.removeItem(k));
+      console.log('[SS&E] Sheet cache cleared (button click)');
+    } catch (e) {
+      console.warn('[SS&E] Sheet cache clear failed', e);
+    }
+  }
+
   function sheetCacheKeyForGid(gid) {
     return `wacoalgroupSheetCache:${SHEET_ID}:${gid}`;
   }
@@ -289,13 +298,14 @@
   }
 
   // ========= EAN map (A/E/F) =========
+  // Sheet columns:
+  // A = SKU Code
+  // E = BarCode (EAN)
+  // F = EU Size (maat)
   function buildEanMapFromRows_FixedCols(rows, supplierPidBase) {
     const eanMap = new Map();
     const pid1 = baseSupplierPid(supplierPidBase);
     const pid2 = pid1.replace(/^WA/, '');
-
-    let hits = 0;
-    const sampleMatches = [];
 
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i]; if (!r) continue;
@@ -311,16 +321,14 @@
         (pid2 && skuNorm.startsWith(pid2));
       if (!starts) continue;
 
-      const sizeKey = normalizeLocalSize(colF_size); // band-only kan
+      const sizeKey = normalizeLocalSize(colF_size);
       const ean = colE_ean.replace(/\D/g, '');
       if (!sizeKey || !ean) continue;
 
       eanMap.set(sizeKey, ean);
-      hits++;
-      if (sampleMatches.length < 5) sampleMatches.push({ sku: colA_sku, sizeKey, ean });
     }
 
-    console.log('[SS&E] EAN map size:', eanMap.size, 'hits:', hits, 'pid:', pid1, 'samples:', sampleMatches);
+    console.log('[SS&E] EAN map size:', eanMap.size, 'pid:', baseSupplierPid(supplierPidBase));
     return eanMap;
   }
 
@@ -344,78 +352,97 @@
     }
   }
 
-  // ========= Stock parsing =========
-  function buildStockMapsFromWacoalJson(json) {
-    const bandMap  = new Map(); // band -> {mapped, stockLevel, stage}
-    const exactMap = new Map(); // 70D -> {mapped, stockLevel, stage} (als cup data bestaat)
-    const variantRows = [];
+  // ========= Stock parsing (STRICT) =========
+  // 1D: sizeData nodes have countrySizeMap.EU directly (band-only or S/M/L)
+  // 2D: sizeData nodes have countrySizeMap=null and variants are inside sizeFitData[]
+  function buildStockMapsFromWacoalJson_Strict(json) {
+    const bandMap  = new Map(); // "70" or "S" -> best {mapped, stockLevel, stage}
+    const exactMap = new Map(); // "70D" -> best {mapped, stockLevel, stage}
 
     const sizeData = Array.isArray(json?.sizeData) ? json.sizeData : [];
+    const is2D = !!json?.is2DSizing;
+
+    console.log('[SS&E] Stock JSON root keys:', json && typeof json === 'object' ? Object.keys(json) : '(not object)');
+    console.log('[SS&E] is2DSizing:', is2D, 'sizeData len:', sizeData.length);
+
+    const variantRows = [];
     let bandSeen = 0, cupSeen = 0;
 
-    for (const bandNode of sizeData) {
-      const eu = bandNode?.countrySizeMap?.EU;
-      const band = eu ? normalizeBandDigits(eu) : '';
-      if (!band) continue;
-
-      bandSeen++;
-
-      const mapped = mapWacoalStock(bandNode);
-      const lvl = getStockLevel(bandNode);
-      const st = getStage(bandNode);
-
-      // ✅ vul bandMap ALTIJD (zolang er een band bestaat)
-      // kies "beste" op mapped, en bij gelijk: sterkere stage
-      const prev = bandMap.get(band);
-      if (!prev ||
-          mapped > prev.mapped ||
-          (mapped === prev.mapped && stageRank(st) > stageRank(prev.stage))) {
-        bandMap.set(band, { mapped, stockLevel: lvl, stage: st });
-      }
-
-      variantRows.push({
-        type: 'BAND',
-        size: band,
-        stockLevel: lvl,
-        mapped,
-        stage: st,
-        sku: bandNode?.sku || bandNode?.code || ''
-      });
-
-      const fits = Array.isArray(bandNode?.sizeFitData) ? bandNode.sizeFitData : [];
-      if (fits.length) {
+    if (is2D) {
+      // ✅ STRICT 2D: ignore bandNode.countrySizeMap (it is null). Only parse variants.
+      for (const bandNode of sizeData) {
+        const fits = Array.isArray(bandNode?.sizeFitData) ? bandNode.sizeFitData : [];
         for (const v of fits) {
-          const cup = String(v?.globalFit || '').toUpperCase().trim();
-          const vBandEU = v?.countrySizeMap?.EU || eu;
-          const vBand = vBandEU ? normalizeBandDigits(vBandEU) : band;
-          if (!vBand || !cup) continue;
+          // skip empty placeholders where maps are null
+          const euBandRaw = v?.countrySizeMap?.EU;
+          const euCupRaw  = v?.countryFitMap?.EU;
 
-          const key = normalizeLocalSize(`${vBand}${cup}`);
+          const band = normalizeLocalSize(euBandRaw);
+          const cup  = normalizeLocalSize(euCupRaw);
 
-          const vm = mapWacoalStock(v);
-          const vl = getStockLevel(v);
-          const vs = getStage(v);
+          if (!band || !cup) continue; // <- this will drop the "available:false countrySizeMap:null" entries
+
+          const key = normalizeLocalSize(`${band}${cup}`); // "70D"
+
+          const mapped = mapWacoalStock(v);
+          const lvl    = getStockLevel(v);
+          const st     = getStage(v);
 
           cupSeen++;
 
+          // exactMap (70D)
           const p = exactMap.get(key);
-          if (!p || vm > p.mapped || (vm === p.mapped && stageRank(vs) > stageRank(p.stage))) {
-            exactMap.set(key, { mapped: vm, stockLevel: vl, stage: vs });
+          if (!p || mapped > p.mapped || (mapped === p.mapped && stageRank(st) > stageRank(p.stage))) {
+            exactMap.set(key, { mapped, stockLevel: lvl, stage: st });
+          }
+
+          // bandMap best-of-band (70)
+          const bp = bandMap.get(band);
+          if (!bp || mapped > bp.mapped || (mapped === bp.mapped && stageRank(st) > stageRank(bp.stage))) {
+            bandMap.set(band, { mapped, stockLevel: lvl, stage: st });
           }
 
           variantRows.push({
-            type: 'CUP',
+            type: '2D',
             size: key,
-            stockLevel: vl,
-            mapped: vm,
-            stage: vs,
+            band,
+            cup,
+            stockLevel: lvl,
+            mapped,
+            stage: st,
             sku: v?.sku || v?.code || ''
           });
         }
       }
+    } else {
+      // ✅ 1D: band-only or S/M/L on bandNode itself
+      for (const bandNode of sizeData) {
+        const band = normalizeLocalSize(bandNode?.countrySizeMap?.EU);
+        if (!band) continue;
+
+        bandSeen++;
+
+        const mapped = mapWacoalStock(bandNode);
+        const lvl = getStockLevel(bandNode);
+        const st = getStage(bandNode);
+
+        const prev = bandMap.get(band);
+        if (!prev || mapped > prev.mapped || (mapped === prev.mapped && stageRank(st) > stageRank(prev.stage))) {
+          bandMap.set(band, { mapped, stockLevel: lvl, stage: st });
+        }
+
+        variantRows.push({
+          type: '1D',
+          size: band,
+          stockLevel: lvl,
+          mapped,
+          stage: st,
+          sku: bandNode?.sku || bandNode?.code || ''
+        });
+      }
     }
 
-    console.log('[SS&E] sizeData bandSeen:', bandSeen, 'cupSeen:', cupSeen);
+    console.log('[SS&E] parsed bandSeen:', bandSeen, 'cupSeen:', cupSeen);
     console.groupCollapsed('[SS&E] Remote variants (incl stage)');
     console.table(variantRows);
     console.groupEnd();
@@ -427,7 +454,6 @@
 
   // ========= Apply =========
   function extractRowSizeKey(row) {
-    // jouw HTML: eerste input.product_option_small in de row is bandmaat
     const sizeInput = row.querySelector('input.product_option_small');
     return normalizeLocalSize(sizeInput?.value || '');
   }
@@ -442,7 +468,7 @@
     const report = [];
 
     rows.forEach(row => {
-      const sizeKey = extractRowSizeKey(row); // "70"
+      const sizeKey = extractRowSizeKey(row); // "70" / "S" / "70D"
       const stockInput = row.querySelector('input[name^="options"][name$="[stock]"]');
       const eanInput   = row.querySelector('input[name^="options"][name$="[barcode]"]');
 
@@ -498,7 +524,7 @@
   }
 
   // ========= Runner =========
-  async function onScrapeClick(autoSaveThisRun) {
+  async function onScrapeClick(autoSaveThisRun, resetCacheThisRun) {
     const btn = document.getElementById(BTN_ID);
     if (!btn || btn.disabled) return;
 
@@ -526,18 +552,17 @@
 
     console.log('[SS&E] supplierPidRaw:', supplierPidRaw, 'supplierPidBase:', supplierPidBase);
 
+    if (resetCacheThisRun) resetSheetCacheForAllGids();
+
     setBtnState({ text: `⏳ Stock laden (${brandKey})...`, bg: '#f1c40f', disabled: true, opacity: '.8' });
 
     try {
       const stockJson = await fetchStockJson(supplierPidBase);
-      console.log('[SS&E] Stock JSON keys:', Object.keys(stockJson || {}));
-      console.log('[SS&E] sizeData length:', Array.isArray(stockJson?.sizeData) ? stockJson.sizeData.length : 'NO sizeData');
-
-      const { bandMap, exactMap } = buildStockMapsFromWacoalJson(stockJson);
+      const { bandMap, exactMap } = buildStockMapsFromWacoalJson_Strict(stockJson);
 
       setBtnState({ text: `⏳ Sheet (EAN) laden (gid ${gid})...`, bg: '#6c757d', disabled: true, opacity: '.8' });
 
-      const raw  = await fetchSheetRawByGid(gid, {});
+      const raw  = await fetchSheetRawByGid(gid, { force: !!resetCacheThisRun });
       const rows = parseTsv(raw.text);
       console.log('[SS&E] Sheet rows:', rows.length, 'firstRow:', rows[0]);
 
@@ -563,6 +588,7 @@
     }
   }
 
+  // ========= Hotkey =========
   function onScrapeHotkey(e) {
     const target = e.target;
     const tag = target && target.tagName;
@@ -582,12 +608,14 @@
     if (!btn || btn.style.display === 'none' || btn.disabled) return;
 
     e.preventDefault();
-    onScrapeClick(true);
+    // ✅ hotkey = autosave, GEEN cache reset
+    onScrapeClick(true, false);
   }
 
   // ========= Boot =========
   function bootAdmin() {
     ensureButton();
+
     const observer = new MutationObserver(() => setTimeout(ensureButton, 100));
     try { observer.observe(document.documentElement || document.body, { childList: true, subtree: true }); } catch {}
 
