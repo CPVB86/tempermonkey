@@ -407,28 +407,20 @@
   }
 
   // --- Maat-aliases ---
-  const SIZE_ALIAS = {
-    '1': 'ONE SIZE',
-    '2': 'TWO SIZE',
-    '3': 'XS',
-    '4': 'S',
-    '5': 'M',
-    '6': 'L',
-    '7': 'XL',
-    '8': 'XXL',
-
-    '2XL':    'XXL',
-    'XXL':    '2XL',
-    '3XL':    'XXXL',
-    'XXXL':   '3XL',
-    '4XL':    'XXXXL',
-    'XXXXL':  '4XL',
-    'XS/S':   'XS',
-    'S/M':    'M',
-    'M/L':    'L',
-    'L/XL':   'XL',
-    'XL/2XL': '2XL'
-  };
+const SIZE_ALIAS = {
+  // Alleen nog letter-/combi-aliases, géén 1→ONE SIZE / 3→XS meer
+  '2XL':    'XXL',
+  'XXL':    '2XL',
+  '3XL':    'XXXL',
+  'XXXL':   '3XL',
+  '4XL':    'XXXXL',
+  'XXXXL':  '4XL',
+  'XS/S':   'XS',
+  'S/M':    'M',
+  'M/L':    'L',
+  'L/XL':   'XL',
+  'XL/2XL': '2XL'
+};
 
   function aliasCandidates(label) {
     const raw = String(label || '').trim().toUpperCase();
