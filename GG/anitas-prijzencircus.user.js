@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG | Anita's Prijzencircus
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.5
-// @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern
+// @version      1.7
+// @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-prefix support
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders/view/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
@@ -17,18 +17,20 @@
 
     const VAKN_LIST = ['SVCO70', 'SVCO50', 'SVCO30', 'SVBA50', 'SVBA30'];
 
-    function buildSaleUrl(arnr, fbnr, vakn) {
-        // Sale-URL voor specifieke vakn
-        return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=&form=&vacp=&arnr=${encodeURIComponent(
+    function buildSaleUrl(arnr, fbnr, vakn, koll) {
+        return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=${encodeURIComponent(
+            koll || ''
+        )}&form=&vacp=&arnr=${encodeURIComponent(
             arnr
         )}&vakn=${encodeURIComponent(vakn)}&sicht=V&fbnr=${encodeURIComponent(fbnr)}`;
     }
 
-    function buildNormalUrl(arnr, fbnr) {
-        // Niet-sale productoverzicht
-        return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=&form=&vacp=&arnr=${encodeURIComponent(
+    function buildNormalUrl(arnr, fbnr, koll) {
+        return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=${encodeURIComponent(
+            koll || ''
+        )}&form=&vacp=&arnr=${encodeURIComponent(
             arnr
-        )}&vakn=&sicht=A&fbnr=${encodeURIComponent(fbnr)}`;
+        )}&vakn=&sicht=A&fbnr=${encodeURIComponent(fbnr || '')}`;
     }
 
     function injectStyles() {
@@ -90,25 +92,45 @@
             });
             if (!hasExtern00) return;
 
-            // Haal artikelnummer en kleurnummer uit titel: 1627-186
-            const match = titleText.match(/(\d{4})-(\d{3})/);
             const marker = createMarker(titleLink);
 
-            if (!match) {
-                // Geen arnr/fbnr herkenbaar → zwarte ⬛ zonder link (we weten niet waarheen)
-                setMarkerPlain(marker, '⬛');
+            // 1) Probeer prefix + artikelnummer: M5 7811-186 of M5-7811-186
+            let koll = '';
+            let arnr = '';
+            let fbnr = '';
+
+            let m = titleText.match(/([A-Za-z0-9]{2})\s*[- ]?(\d{4})-(\d{3})/);
+            if (m) {
+                koll = m[1].toUpperCase();
+                arnr = m[2];
+                fbnr = m[3];
+            } else {
+                // 2) Fallback: alleen artikel + kleur: 1627-186
+                const matchSimple = titleText.match(/(\d{4})-(\d{3})/);
+                if (matchSimple) {
+                    arnr = matchSimple[1];
+                    fbnr = matchSimple[2];
+                }
+            }
+
+            if (!arnr) {
+                // Geen bruikbaar artikelnummer → probeer nog een generieke 4-digit match voor normale URL
+                const artMatch = titleText.match(/(\d{4})/);
+                if (artMatch) {
+                    const arnrOnly = artMatch[1];
+                    const normalUrl = buildNormalUrl(arnrOnly, '', koll);
+                    setMarkerLink(marker, '⬛', normalUrl);
+                } else {
+                    setMarkerPlain(marker, '⬛');
+                }
                 row.dataset.anitaSaleChecked = '1';
                 return;
             }
 
-            const arnr = match[1];
-            const fbnr = match[2];
-
-            // Laat alvast zien dat we bezig zijn
-            setMarkerPlain(marker, '…');
+            setMarkerPlain(marker, '…'); // bezig met checken
             row.dataset.anitaSaleChecked = '1';
 
-            checkSaleStatus(arnr, fbnr, marker);
+            checkSaleStatus(arnr, fbnr, koll, marker);
         });
     }
 
@@ -151,14 +173,24 @@
     }
 
     function hasVariantForColor(doc, arnr, fbnr, fullText) {
-        // 1) Directe ID-match
+        // 1) Afbeelding met kleurnummer, zoals .../color/186.jpg
+        const colorImgs = doc.querySelectorAll('img[src*="/color/"]');
+        for (const img of colorImgs) {
+            const src = img.getAttribute('src') || '';
+            if (src.includes(`/${fbnr}.`)) {
+                return true;
+            }
+        }
+
+        // 2) Directe ID-match
         const variantId = `article-variant-${arnr}-${fbnr}-accordion-heading`;
         if (doc.getElementById(variantId)) {
             return true;
         }
 
-        // 2) In accordion headers / buttons
+        // 3) Headers / knoppen met kleurcode
         const headers = doc.querySelectorAll('h2.accordion-header, .accordion-button, [id*="article-variant-"]');
+        const wordRegex = new RegExp(`\\b${fbnr}\\b`);
         for (const el of headers) {
             const id = el.id || '';
             const txt = (el.textContent || '').trim();
@@ -166,40 +198,32 @@
             if (id.includes(`-${fbnr}-`)) {
                 return true;
             }
-
-            // bv. "186 red/blue iris"
-            if (txt.startsWith(fbnr + ' ') || txt === fbnr) {
-                return true;
-            }
-
-            const wordRegex = new RegExp(`\\b${fbnr}\\b`);
-            if (wordRegex.test(txt)) {
+            if (txt.startsWith(fbnr + ' ') || txt === fbnr || wordRegex.test(txt)) {
                 return true;
             }
         }
 
-        // 3) Laatste redmiddel: hele tekst
-        const globalWordRegex = new RegExp(`\\b${fbnr}\\b`);
-        if (globalWordRegex.test(fullText)) {
+        // 4) Laatste redmiddel: volledige tekst
+        if (wordRegex.test(fullText)) {
             return true;
         }
 
         return false;
     }
 
-    function checkSaleStatus(arnr, fbnr, marker) {
+    function checkSaleStatus(arnr, fbnr, koll, marker) {
         let index = 0;
 
         function tryNextVakn() {
             if (index >= VAKN_LIST.length) {
-                // Geen enkele sale-pagina bevat deze kleurvariant → zwarte ⬛, klikbaar naar normale productpagina
-                const normalUrl = buildNormalUrl(arnr, fbnr);
+                // Geen sale-variant gevonden → zwarte ⬛, klikbaar naar normale productpagina
+                const normalUrl = buildNormalUrl(arnr, fbnr, koll);
                 setMarkerLink(marker, '⬛', normalUrl);
                 return;
             }
 
             const vakn = VAKN_LIST[index++];
-            const url = buildSaleUrl(arnr, fbnr, vakn);
+            const url = buildSaleUrl(arnr, fbnr, vakn, koll);
 
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -208,7 +232,6 @@
                     const status = response.status;
                     const text = response.responseText || '';
 
-                    // Login-detectie: status 401/403 of een password-veld
                     const looksLikeLogin =
                         status === 401 ||
                         status === 403 ||
@@ -229,15 +252,14 @@
                     }
 
                     if (hasVariant) {
-                        // Deze vakn-pagina bevat precies onze kleurvariant → groene klikbare blok
+                        // Exacte kleurvariant in deze sale-categorie → groene klikbare blok
                         setMarkerLink(marker, '🟩', url);
                     } else {
-                        // Variant niet gevonden in deze sale-categorie → volgende vakn proberen
+                        // Volgende vakn proberen
                         tryNextVakn();
                     }
                 },
                 onerror: function () {
-                    // Bij fout naar volgende vakn
                     tryNextVakn();
                 }
             });
@@ -246,10 +268,8 @@
         tryNextVakn();
     }
 
-    // Eerste run
     processRows();
 
-    // Observer voor dynamische updates
     const observerTarget = document.getElementById('local_data') || document.body;
     const observer = new MutationObserver(() => {
         processRows();
