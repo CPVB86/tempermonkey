@@ -103,7 +103,7 @@
     const besteldatum = getBesteldatumDateOnly(tr);
     const land        = getCellText(tr, 5);
     const productenM1 = getProductCountMinusOne(tr);
-    const retailFlag  = hasB2BTag(tr) ? 'Retail' : 'Wholesale';
+    const retailFlag  = hasB2BTag(tr) ? 'Wholesale' : 'Retail';
     return [webshop, bestelnummer, klant, besteldatum, land, productenM1, retailFlag];
   }
 
