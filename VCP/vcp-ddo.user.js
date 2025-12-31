@@ -93,6 +93,7 @@
     'rosa-faia-badmode': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=194', payload: basePayload() },
     'lingadore': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=213', payload: basePayload() },
     'lingadore-beach': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=223', payload: basePayload() },
+    'lingadore-consignatie': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=231', payload: basePayload() },
     'triumph': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=221', payload: basePayload() },
     'sloggi': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=222', payload: basePayload() },
     'ringella': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=191', payload: basePayload() },
@@ -151,7 +152,7 @@
     if (/^charlie-choe/.test(key)) return 'charlie-choe';
     if (/^hom/.test(key)) return 'hom';
     if (/^q-linn/.test(key)) return 'qlinn';
-    if (/^(lingadore|lingadore-beach)/.test(key)) return 'lingadore';
+    if (/^(lingadore|lingadore-beach|lingadore-consignatie)/.test(key)) return 'lingadore';
     if (/^triumph/.test(key)) return 'triumph';
     if (/^sloggi/.test(key)) return 'sloggi';
     if (/^ringella/.test(key)) return 'ringella';
