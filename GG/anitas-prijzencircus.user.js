@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG | Anita's Prijzencircus
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.7
-// @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-prefix support
+// @version      1.9
+// @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-prefix support (M5, enz.)
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders/view/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
@@ -22,7 +22,7 @@
             koll || ''
         )}&form=&vacp=&arnr=${encodeURIComponent(
             arnr
-        )}&vakn=${encodeURIComponent(vakn)}&sicht=V&fbnr=${encodeURIComponent(fbnr)}`;
+        )}&vakn=${encodeURIComponent(vakn)}&sicht=V&fbnr=${encodeURIComponent(fbnr || '')}`;
     }
 
     function buildNormalUrl(arnr, fbnr, koll) {
@@ -94,27 +94,44 @@
 
             const marker = createMarker(titleLink);
 
-            // 1) Probeer prefix + artikelnummer: M5 7811-186 of M5-7811-186
+            // --- Parsing van koll / arnr / fbnr ---
             let koll = '';
             let arnr = '';
             let fbnr = '';
+            let m;
 
-            let m = titleText.match(/([A-Za-z0-9]{2})\s*[- ]?(\d{4})-(\d{3})/);
+            // 1) Met koll + subvariant (M5-8890-1-765 of M5 8890-1-765)
+            m = titleText.match(/([A-Za-z0-9]{2})\s*[- ]?(\d{4}-\d)-(\d{3})/);
             if (m) {
                 koll = m[1].toUpperCase();
                 arnr = m[2];
                 fbnr = m[3];
             } else {
-                // 2) Fallback: alleen artikel + kleur: 1627-186
-                const matchSimple = titleText.match(/(\d{4})-(\d{3})/);
-                if (matchSimple) {
-                    arnr = matchSimple[1];
-                    fbnr = matchSimple[2];
+                // 2) Met koll, zonder subvariant (M5 7811-186 of M5-7811-186)
+                m = titleText.match(/([A-Za-z0-9]{2})\s*[- ]?(\d{4})-(\d{3})/);
+                if (m) {
+                    koll = m[1].toUpperCase();
+                    arnr = m[2];
+                    fbnr = m[3];
+                } else {
+                    // 3) Zonder koll, met subvariant (8890-1-765)
+                    m = titleText.match(/(\d{4}-\d)-(\d{3})/);
+                    if (m) {
+                        arnr = m[1];
+                        fbnr = m[2];
+                    } else {
+                        // 4) Zonder koll, zonder subvariant (7811-186)
+                        m = titleText.match(/(\d{4})-(\d{3})/);
+                        if (m) {
+                            arnr = m[1];
+                            fbnr = m[2];
+                        }
+                    }
                 }
             }
 
             if (!arnr) {
-                // Geen bruikbaar artikelnummer → probeer nog een generieke 4-digit match voor normale URL
+                // laatste fallback: alleen een 4-cijferig artikelnummer gebruiken
                 const artMatch = titleText.match(/(\d{4})/);
                 if (artMatch) {
                     const arnrOnly = artMatch[1];
@@ -155,6 +172,7 @@
         a.target = '_blank';
         a.className = 'anita-sale-link';
         a.textContent = ' ' + symbol;
+        a.rel = 'noopener noreferrer';
         marker.appendChild(a);
     }
 
@@ -169,6 +187,7 @@
         link.target = '_blank';
         link.textContent = 'Inloggen bij b2b';
         link.className = 'anita-login-pill';
+        link.rel = 'noopener noreferrer';
         parent.appendChild(link);
     }
 
@@ -177,34 +196,36 @@
         const colorImgs = doc.querySelectorAll('img[src*="/color/"]');
         for (const img of colorImgs) {
             const src = img.getAttribute('src') || '';
-            if (src.includes(`/${fbnr}.`)) {
+            if (fbnr && src.includes(`/${fbnr}.`)) {
                 return true;
             }
         }
 
         // 2) Directe ID-match
-        const variantId = `article-variant-${arnr}-${fbnr}-accordion-heading`;
-        if (doc.getElementById(variantId)) {
-            return true;
+        if (arnr && fbnr) {
+            const variantId = `article-variant-${arnr}-${fbnr}-accordion-heading`;
+            if (doc.getElementById(variantId)) {
+                return true;
+            }
         }
 
         // 3) Headers / knoppen met kleurcode
         const headers = doc.querySelectorAll('h2.accordion-header, .accordion-button, [id*="article-variant-"]');
-        const wordRegex = new RegExp(`\\b${fbnr}\\b`);
+        const wordRegex = fbnr ? new RegExp(`\\b${fbnr}\\b`) : null;
         for (const el of headers) {
             const id = el.id || '';
             const txt = (el.textContent || '').trim();
 
-            if (id.includes(`-${fbnr}-`)) {
+            if (fbnr && id.includes(`-${fbnr}-`)) {
                 return true;
             }
-            if (txt.startsWith(fbnr + ' ') || txt === fbnr || wordRegex.test(txt)) {
+            if (fbnr && (txt.startsWith(fbnr + ' ') || txt === fbnr || (wordRegex && wordRegex.test(txt)))) {
                 return true;
             }
         }
 
         // 4) Laatste redmiddel: volledige tekst
-        if (wordRegex.test(fullText)) {
+        if (fbnr && wordRegex && wordRegex.test(fullText || '')) {
             return true;
         }
 
@@ -232,10 +253,11 @@
                     const status = response.status;
                     const text = response.responseText || '';
 
+                    // 🔧 Terug naar "oude" login-detectie
                     const looksLikeLogin =
                         status === 401 ||
                         status === 403 ||
-                        /type=["']password["']/i.test(text);
+                        /type=["']password["']/i.test(text || '');
 
                     if (looksLikeLogin) {
                         replaceWithLoginPill(marker);
