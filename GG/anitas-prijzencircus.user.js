@@ -1,21 +1,17 @@
 // ==UserScript==
 // @name         GG | Anita's Prijzencircus
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.9
-// @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-prefix support (M5, enz.)
+// @version      2.1
+// @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-support en badmode-voorkeur.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders/view/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @connect      b2b.anita.com
 // @author       Chantor van Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/anitas-prijzencircus.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/anitas-prijzencircus.user.js
 // ==/UserScript==
 
 (function () {
     'use strict';
-
-    const VAKN_LIST = ['SVCO70', 'SVCO50', 'SVCO30', 'SVBA50', 'SVBA30'];
 
     function buildSaleUrl(arnr, fbnr, vakn, koll) {
         return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=${encodeURIComponent(
@@ -67,6 +63,44 @@
         document.head.appendChild(style);
     }
 
+    // Parseert koll / artikel / kleur uit de titel
+    // Voorbeelden die werken:
+    // - "M5-8890-1-765"   -> koll=M5,   arnr=8890-1, fbnr=765
+    // - "M5 7811-186"     -> koll=M5,   arnr=7811,   fbnr=186
+    // - "4761X-408"       -> koll='',   arnr=4761X,  fbnr=408
+    // - "8890-1-765"      -> koll='',   arnr=8890-1, fbnr=765
+    // - "7811-186"        -> koll='',   arnr=7811,   fbnr=186
+    function parseAnitaCode(titleText) {
+        let koll = '';
+        let arnr = '';
+        let fbnr = '';
+
+        // Hoofdpatroon: optionele koll (2 tekens) + 4 cijfers + optionele letter + optionele "-1" + "-kleur"
+        const mainRe = /(?:\b([A-Za-z0-9]{2})\s*[- ]*)?([0-9]{4}[A-Za-z]?(?:-\d)?)-(\d{3})/;
+        const m = titleText.match(mainRe);
+
+        if (!m) {
+            return { koll, arnr, fbnr };
+        }
+
+        let kollCandidate = (m[1] || '').toUpperCase();
+        arnr = m[2];
+        fbnr = m[3];
+
+        // Koll is alleen geldig als het 2 tekens zijn met MINSTENS 1 letter én 1 cijfer (zoals M5, A3, V2)
+        if (
+            /^[A-Z0-9]{2}$/.test(kollCandidate) &&
+            /[A-Z]/.test(kollCandidate) &&
+            /\d/.test(kollCandidate)
+        ) {
+            koll = kollCandidate;
+        } else {
+            koll = '';
+        }
+
+        return { koll, arnr, fbnr };
+    }
+
     function processRows() {
         injectStyles();
 
@@ -94,45 +128,14 @@
 
             const marker = createMarker(titleLink);
 
-            // --- Parsing van koll / arnr / fbnr ---
-            let koll = '';
-            let arnr = '';
-            let fbnr = '';
-            let m;
+            // Swim/badmode-detectie
+            const isSwim = /badmode|swim|bikini|tankini/i.test(titleText);
 
-            // 1) Met koll + subvariant (M5-8890-1-765 of M5 8890-1-765)
-            m = titleText.match(/([A-Za-z0-9]{2})\s*[- ]?(\d{4}-\d)-(\d{3})/);
-            if (m) {
-                koll = m[1].toUpperCase();
-                arnr = m[2];
-                fbnr = m[3];
-            } else {
-                // 2) Met koll, zonder subvariant (M5 7811-186 of M5-7811-186)
-                m = titleText.match(/([A-Za-z0-9]{2})\s*[- ]?(\d{4})-(\d{3})/);
-                if (m) {
-                    koll = m[1].toUpperCase();
-                    arnr = m[2];
-                    fbnr = m[3];
-                } else {
-                    // 3) Zonder koll, met subvariant (8890-1-765)
-                    m = titleText.match(/(\d{4}-\d)-(\d{3})/);
-                    if (m) {
-                        arnr = m[1];
-                        fbnr = m[2];
-                    } else {
-                        // 4) Zonder koll, zonder subvariant (7811-186)
-                        m = titleText.match(/(\d{4})-(\d{3})/);
-                        if (m) {
-                            arnr = m[1];
-                            fbnr = m[2];
-                        }
-                    }
-                }
-            }
+            const { koll, arnr, fbnr } = parseAnitaCode(titleText);
 
             if (!arnr) {
-                // laatste fallback: alleen een 4-cijferig artikelnummer gebruiken
-                const artMatch = titleText.match(/(\d{4})/);
+                // laatste fallback: alleen een 4-cijferig artikelnummer (met optionele letter) gebruiken
+                const artMatch = titleText.match(/(\d{4}[A-Za-z]?)/);
                 if (artMatch) {
                     const arnrOnly = artMatch[1];
                     const normalUrl = buildNormalUrl(arnrOnly, '', koll);
@@ -147,7 +150,7 @@
             setMarkerPlain(marker, '…'); // bezig met checken
             row.dataset.anitaSaleChecked = '1';
 
-            checkSaleStatus(arnr, fbnr, koll, marker);
+            checkSaleStatus(arnr, fbnr, koll, marker, isSwim);
         });
     }
 
@@ -192,6 +195,8 @@
     }
 
     function hasVariantForColor(doc, arnr, fbnr, fullText) {
+        if (!doc) return false;
+
         // 1) Afbeelding met kleurnummer, zoals .../color/186.jpg
         const colorImgs = doc.querySelectorAll('img[src*="/color/"]');
         for (const img of colorImgs) {
@@ -232,18 +237,23 @@
         return false;
     }
 
-    function checkSaleStatus(arnr, fbnr, koll, marker) {
+    function checkSaleStatus(arnr, fbnr, koll, marker, isSwim) {
+        // Badmode eerst in bad-groepen, anders lingerie eerst
+        const vaknList = isSwim
+            ? ['SVBA50', 'SVBA30', 'SVCO70', 'SVCO50', 'SVCO30']
+            : ['SVCO70', 'SVCO50', 'SVCO30', 'SVBA50', 'SVBA30'];
+
         let index = 0;
 
         function tryNextVakn() {
-            if (index >= VAKN_LIST.length) {
+            if (index >= vaknList.length) {
                 // Geen sale-variant gevonden → zwarte ⬛, klikbaar naar normale productpagina
                 const normalUrl = buildNormalUrl(arnr, fbnr, koll);
                 setMarkerLink(marker, '⬛', normalUrl);
                 return;
             }
 
-            const vakn = VAKN_LIST[index++];
+            const vakn = vaknList[index++];
             const url = buildSaleUrl(arnr, fbnr, vakn, koll);
 
             GM_xmlhttpRequest({
@@ -253,7 +263,6 @@
                     const status = response.status;
                     const text = response.responseText || '';
 
-                    // 🔧 Terug naar "oude" login-detectie
                     const looksLikeLogin =
                         status === 401 ||
                         status === 403 ||
