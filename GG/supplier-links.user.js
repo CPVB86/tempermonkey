@@ -1,15 +1,14 @@
 // ==UserScript==
-// @name         GG | Supplier Links
+// @name         GG | Supplier-links.user.js
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      0.6
+// @version      0.8
 // @description  Voeg leveranciers-links toe voor [ext]-producten in Goedgepickt orderscherm
 // @author       You
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders/view/*
 // @run-at       document-idle
 // @grant        none
-// @author       Chantor van Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/gg-supplier-links.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/gg-supplier-links.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/supplier-links.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/supplier-links.user.js
 // ==/UserScript==
 
 (function () {
@@ -83,11 +82,28 @@
         const productName = normalizeText(productAnchor.textContent);
         if (!productName.includes('[ext]')) return;
 
-        const supplierId = getSupplierId(productName);
+        let supplierId = getSupplierId(productName);
         if (!supplierId) return;
 
         const baseUrl = getBaseUrl(productName);
         if (!baseUrl) return;
+
+        const lowerName = productName.toLowerCase();
+
+        // Speciale handling voor Charlie Choe:
+        // O57145-38-F11-31803 -> O57145-38
+        if (/charlie\s+choe/.test(lowerName)) {
+            const parts = supplierId.split('-');
+            if (parts.length >= 2) {
+                supplierId = parts[0] + '-' + parts[1];
+            }
+        }
+
+        // Speciale handling voor Lisca:
+        // 20137-1 / 20137-1-123 -> 20137 (eerste blok vóór eerste streepje)
+        if (/lisca/.test(lowerName)) {
+            supplierId = supplierId.split('-')[0].trim();
+        }
 
         const link = document.createElement('a');
         link.href = baseUrl + encodeURIComponent(supplierId);
