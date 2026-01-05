@@ -8,6 +8,9 @@
 // @grant        GM_xmlhttpRequest
 // @connect      b2b.anita.com
 // @author       Chantor van Beek
+// @author       Chantor van Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/anitas-prijzencircus.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/anitas-prijzencircus.user.js
 // ==/UserScript==
 
 (function () {
