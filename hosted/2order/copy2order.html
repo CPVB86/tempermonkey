@@ -294,7 +294,7 @@
                 ✂️ Handmatige invoer
             </button>
             <button id="btnClear" class="btn-secondary" type="button">
-                🗑️ Lijst legen
+                🧹 Lijst legen
             </button>
             <button id="btnDeleteSelected" class="btn-secondary" type="button">
                 ❌ Verwijder geselecteerde
@@ -314,6 +314,9 @@
             <select id="serverFileSelect">
                 <option value="">Bestand kiezen…</option>
             </select>
+<button id="btnDeleteServer" class="btn-outline" type="button">
+    🗑️ Verwijder bestand
+</button>
             <button id="btnRefreshFiles" class="btn-outline" type="button" style="display:none" title="Ververs lijst">
     ↻
 </button>
@@ -375,9 +378,10 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
             'use strict';
 
             // === CONFIG SERVER ENDPOINTS ===
-            const SAVE_URL = 'save_paste2order.php';
-            const LOAD_URL = 'load_paste2order.php';
-            const LIST_URL = 'list_paste2order.php';
+            const SAVE_URL   = 'save_paste2order.php';
+const LOAD_URL   = 'load_paste2order.php';
+const LIST_URL   = 'list_paste2order.php';
+const DELETE_URL = 'delete_paste2order.php';
 
             // Base URL's voor links
             const DDO_ORDER_BASE   = 'https://www.dutchdesignersoutlet.com/admin.php?section=orders&action=view&id=';
@@ -393,6 +397,7 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
             const btnUndoDelete = document.getElementById('btnUndoDelete');
             const btnSaveServer = document.getElementById('btnSaveServer');
             const btnRefreshFiles = document.getElementById('btnRefreshFiles');
+            const btnDeleteServer = document.getElementById('btnDeleteServer');
             const btnSplitOrder = document.getElementById('btnSplitOrder');
             const btnSplitSupplier = document.getElementById('btnSplitSupplier');
             const btnClearSplit = document.getElementById('btnClearSplit');
@@ -710,24 +715,41 @@ tr.appendChild(tdUuid);
                 }
 
                 const addedPlain = parseTextToRows(text);
-                if (!addedPlain.length) {
-                    setStatus('Geen geldige regels gevonden (verwacht 5–8 tab-gescheiden kolommen).');
-                    return;
-                }
+if (!addedPlain.length) {
+    setStatus('Geen geldige regels gevonden (verwacht 5–8 tab-gescheiden kolommen).');
+    return;
+}
 
-                for (const r of addedPlain) {
-                    r._id = String(rowIdCounter++);
-                    if (typeof r.checked !== 'boolean') r.checked = false;
-                    rows.push(r);
-                }
+// Bestaande orders die al in de lijst staan
+const existingOrderIds = new Set(
+    rows.map(r => r.orderId).filter(id => !!id)
+);
+const duplicateOrders = new Set();
 
-                if (sortState.key) {
-                    sortRows(sortState.key, sortState.dir, false);
-                }
+// Nieuwe regels toevoegen
+for (const r of addedPlain) {
+    if (r.orderId && existingOrderIds.has(r.orderId)) {
+        duplicateOrders.add(r.orderId);
+    }
+    r._id = String(rowIdCounter++);
+    if (typeof r.checked !== 'boolean') r.checked = false;
+    rows.push(r);
+}
 
-                renderTable();
-                clearSplit();
-                setStatus(`${addedPlain.length} regel(s) toegevoegd.`);
+// Sorteren indien actief
+if (sortState.key) {
+    sortRows(sortState.key, sortState.dir, false);
+}
+
+renderTable();
+clearSplit();
+
+let msg = `${addedPlain.length} regel(s) toegevoegd.`;
+if (duplicateOrders.size) {
+    msg += ` Let op: de volgende order(s) stonden al in de lijst: ${Array.from(duplicateOrders).join(', ')}.`;
+}
+setStatus(msg);
+
             }
 
             function handleClear() {
@@ -840,11 +862,20 @@ tr.appendChild(tdUuid);
             }
 
             function handleSelectAllChange() {
-                const checked = selectAllCheckbox.checked;
-                const checkboxes = tbody.querySelectorAll('input.row-select');
-                checkboxes.forEach(cb => { cb.checked = checked; });
-                rows.forEach(r => { r.checked = checked; });
-            }
+    const checked = selectAllCheckbox.checked;
+
+    // Hoofdtabel
+    const checkboxes = tbody.querySelectorAll('input.row-select');
+    checkboxes.forEach(cb => { cb.checked = checked; });
+    rows.forEach(r => { r.checked = checked; });
+
+    // Splits ook meekoppelen
+    const splitCbs = splitContainer.querySelectorAll('input.split-row-select');
+    splitCbs.forEach(cb => { cb.checked = checked; });
+
+    setStatus(checked ? 'Alle regels geselecteerd.' : 'Alle regels gedeselecteerd.');
+}
+
 
 // Enkelklik: checkbox in hoofd → model + split meekoppelen
 tbody.addEventListener('change', function (e) {
@@ -1096,6 +1127,45 @@ async function loadServerFileList(selectFilename) {
 
                 return rows;
             }
+
+async function handleDeleteServerFile() {
+    if (!currentFileName) {
+        setStatus('Er is geen serverbestand actief om te verwijderen.');
+        return;
+    }
+
+    if (!confirm(`Weet je zeker dat je ${currentFileName} wilt verwijderen?`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(DELETE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: currentFileName })
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || ('HTTP ' + res.status));
+
+        // Lokaal alles resetten
+        rows = [];
+        lastDeleted = [];
+        rowIdCounter = 1;
+        currentFileName = '';
+        currentFileLabel.textContent = 'nog niet opgeslagen';
+        renderTable();
+        clearSplit();
+
+        // Lijst van server-bestanden verversen
+        loadServerFileList().catch(console.error);
+        serverFileSelect.value = '';
+
+        setStatus(text || 'Bestand verwijderd.');
+    } catch (err) {
+        console.error('Verwijderen op server mislukt:', err);
+        setStatus('Verwijderen op server mislukt. Check delete_paste2order.php.');
+    }
+}
 
 async function handleLoadServer() {
     let fileToLoad = serverFileSelect.value || currentFileName;
@@ -1422,6 +1492,9 @@ splitContainer.addEventListener('change', function (e) {
             btnRefreshFiles.addEventListener('click', () => {
                 loadServerFileList().catch(console.error);
             });
+            btnDeleteServer.addEventListener('click', () => {
+    handleDeleteServerFile().catch(console.error);
+});
 
             // dropdown: direct laden bij selectie
             serverFileSelect.addEventListener('change', () => {
