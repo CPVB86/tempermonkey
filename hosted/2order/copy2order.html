@@ -251,6 +251,9 @@
         .split-card th {
             background: #f3f3f3;
         }
+        .amount-multi {
+    background-color: #ffe8cc;
+}
 
         @media print {
             body {
@@ -338,12 +341,13 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
                         <input type="checkbox" id="selectAll">
                     </th>
                     <th class="sortable" data-sort-key="orderId">Order</th>
-                    <th class="sortable" data-sort-key="title">Titel</th>
-                    <th class="sortable" data-sort-key="productId">Product ID</th>
-                    <th class="sortable" data-sort-key="ean">EAN</th>
-                    <th class="sortable" data-sort-key="size">Maat</th>
-                    <th class="right sortable" data-sort-key="amount">Aantal</th>
-                    <th class="uuid-col">GG</th>
+<th class="sortable" data-sort-key="title">Titel</th>
+<th class="sortable" data-sort-key="size">Maat</th>
+<th class="right sortable" data-sort-key="amount">Aantal</th>
+<th class="sortable" data-sort-key="productId">Product ID</th>
+<th class="sortable" data-sort-key="ean">EAN</th>
+<th class="uuid-col">GG</th>
+
                 </tr>
             </thead>
             <tbody>
@@ -460,72 +464,82 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
             }
 
             // Titel + supplierlink met Lisca/Charlie/Pastunette handling
-            function buildTitleCellContent(td, row) {
-                const title = row.title || '';
+function buildTitleCellContent(td, row) {
+    const title = row.title || '';
 
-                // Zoek de positie van " - [ext" (case-insensitive)
-                const extIndex = title.toLowerCase().indexOf(' - [ext');
-                if (extIndex === -1) {
-                    td.textContent = title;
-                    return;
-                }
+    // Zoek de positie van " - [ext" (case-insensitive)
+    const extIndex = title.toLowerCase().indexOf(' - [ext');
+    if (extIndex === -1) {
+        td.textContent = title;
+        return;
+    }
 
-                const prefix = title.slice(0, extIndex);
-                const suffix = title.slice(extIndex);
+    const prefix = title.slice(0, extIndex);
+    const suffix = title.slice(extIndex);
 
-                const dashIndex = prefix.lastIndexOf(' - ');
-                if (dashIndex === -1) {
-                    td.textContent = title;
-                    return;
-                }
+    const dashIndex = prefix.lastIndexOf(' - ');
+    if (dashIndex === -1) {
+        td.textContent = title;
+        return;
+    }
 
-                const before = prefix.slice(0, dashIndex + 3); // inclusief " - "
-                const supplierIdRaw = prefix.slice(dashIndex + 3).trim();
+    const before = prefix.slice(0, dashIndex + 3); // inclusief " - "
+    const supplierIdRaw = prefix.slice(dashIndex + 3).trim();
 
-                const lowerName = title.toLowerCase();
-                const baseUrl = getBaseUrl(title);
+    const lowerName = title.toLowerCase();
+    const baseUrl = getBaseUrl(title);
 
-                let searchId = supplierIdRaw;
-                const parts = supplierIdRaw.split('-').map(p => p.trim()).filter(Boolean);
+    let searchId = supplierIdRaw;
+    const parts = supplierIdRaw.split('-').map(p => p.trim()).filter(Boolean);
 
-                // Charlie Choe: zoek op eerste 2 blokken
-                if (/charlie\s+choe/.test(lowerName) && parts.length >= 2) {
-                    searchId = parts[0] + '-' + parts[1];
-                }
+    // Charlie Choe: zoek op eerste 2 blokken
+    if (/charlie\s+choe/.test(lowerName) && parts.length >= 2) {
+        searchId = parts[0] + '-' + parts[1];
+    }
 
-                // Lisca: zoek op eerste blok
-                if (/lisca/.test(lowerName) && parts.length >= 1) {
-                    searchId = parts[0];
-                }
+    // Lisca: zoek op eerste blok
+    if (/lisca/.test(lowerName) && parts.length >= 1) {
+        searchId = parts[0];
+    }
 
-                // Pastunette: alles behalve laatste blok
-                if (/pastunette/.test(lowerName) && parts.length >= 2) {
-                    searchId = parts.slice(0, parts.length - 1).join('-');
-                }
+    // Pastunette: alles behalve laatste blok
+    if (/pastunette/.test(lowerName) && parts.length >= 2) {
+        searchId = parts.slice(0, parts.length - 1).join('-');
+    }
 
-                td.innerHTML = '';
+    td.innerHTML = '';
 
-                if (before) {
-                    td.appendChild(document.createTextNode(before));
-                }
+    if (before) {
+        td.appendChild(document.createTextNode(before));
+    }
 
-                if (baseUrl && supplierIdRaw) {
-                    const a = document.createElement('a');
-                    a.href = baseUrl + encodeURIComponent(searchId);
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                    a.textContent = supplierIdRaw;
-                    a.className = 'supplier-link';
-                    a.title = 'Open leverancier (' + searchId + ')';
-                    td.appendChild(a);
-                } else {
-                    td.appendChild(document.createTextNode(supplierIdRaw));
-                }
+    if (baseUrl && supplierIdRaw) {
+        const a = document.createElement('a');
+        a.href = baseUrl + encodeURIComponent(searchId);
+        a.textContent = supplierIdRaw;
+        a.className = 'supplier-link';
+        a.title = 'Open leverancier (' + searchId + ')';
 
-                if (suffix) {
-                    td.appendChild(document.createTextNode(suffix));
-                }
+        a.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            try {
+                // Probeert een nieuw scherm/venster te openen
+                window.open(a.href, '_blank', 'noopener,noreferrer,width=1200,height=900');
+            } catch (e) {
+                // Fallback: standaard nieuw tabblad
+                window.open(a.href, '_blank');
             }
+        });
+
+        td.appendChild(a);
+    } else {
+        td.appendChild(document.createTextNode(supplierIdRaw));
+    }
+
+    if (suffix) {
+        td.appendChild(document.createTextNode(suffix));
+    }
+}
 
             function renderTable() {
                 tbody.innerHTML = '';
@@ -591,6 +605,11 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
                     tdAmount.textContent = row.amount;
                     tdAmount.className = 'right';
 
+                    const amtNum = parseFloat((row.amount || '').toString().replace(',', '.'));
+if (!isNaN(amtNum) && amtNum > 1) {
+    tdAmount.classList.add('amount-multi');
+}
+
                     const tdUuid = document.createElement('td');
                     tdUuid.className = 'uuid-col';
                     if (row.uuid) {
@@ -607,13 +626,13 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
                     }
 
                     tr.appendChild(tdCheck);
-                    tr.appendChild(tdOrder);
-                    tr.appendChild(tdTitle);
-                    tr.appendChild(tdPid);
-                    tr.appendChild(tdEan);
-                    tr.appendChild(tdSize);
-                    tr.appendChild(tdAmount);
-                    tr.appendChild(tdUuid);
+tr.appendChild(tdOrder);
+tr.appendChild(tdTitle);
+tr.appendChild(tdSize);
+tr.appendChild(tdAmount);
+tr.appendChild(tdPid);
+tr.appendChild(tdEan);
+tr.appendChild(tdUuid);
 
                     tbody.appendChild(tr);
                 }
@@ -731,7 +750,7 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
             function buildCsvContent() {
                 if (!rows.length) return '';
 
-                const header = ['Order', 'Titel', 'ProductID', 'EAN', 'Maat', 'Aantal', 'UUID', 'Checked'];
+                const header = ['Order', 'Titel', 'Maat', 'Aantal', 'ProductID', 'EAN', 'UUID', 'Checked'];
 
                 const lines = [];
                 lines.push(header.map(csvEscape).join(';'));
@@ -739,10 +758,10 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
                     lines.push([
                         row.orderId,
                         row.title,
-                        row.productId,
-                        row.ean,
                         row.size,
                         row.amount,
+                        row.productId,
+                        row.ean,
                         row.uuid,
                         row.checked ? '1' : ''
                     ].map(csvEscape).join(';'));
@@ -1110,13 +1129,13 @@ async function handleLoadServer() {
 
             const [
                 orderId,
-                title,
-                productId,
-                ean,
-                size,
-                amount,
-                uuid,
-                checkedVal
+    title,
+    size,
+    amount,
+    productId,
+    ean,
+    uuid,
+    checkedVal
             ] = cols;
 
             const checked =
@@ -1263,10 +1282,10 @@ async function handleLoadServer() {
 
         // Tabel binnen de card
         const t = document.createElement('table');
-        const thead = document.createElement('thead');
+        const theadEl = document.createElement('thead');
         const hr = document.createElement('tr');
 
-        [' ', 'Order', 'Titel', 'ProductID', 'EAN', 'Maat', 'Aantal'].forEach((col, idx) => {
+        [' ', 'Order', 'Titel', 'Maat', 'Aantal', 'ProductID', 'EAN'].forEach((col, idx) => {
             const th = document.createElement('th');
             th.textContent = col;
             if (idx === 0) {
@@ -1274,8 +1293,8 @@ async function handleLoadServer() {
             }
             hr.appendChild(th);
         });
-        thead.appendChild(hr);
-        t.appendChild(thead);
+        theadEl.appendChild(hr);
+        t.appendChild(theadEl);
 
         const tb = document.createElement('tbody');
 
@@ -1313,6 +1332,24 @@ async function handleLoadServer() {
             buildTitleCellContent(tdTitle, r);
             tr.appendChild(tdTitle);
 
+            // Maat
+            const tdSize = document.createElement('td');
+            tdSize.textContent = r.size || '';
+            tr.appendChild(tdSize);
+
+            // Aantal (met oranje highlight bij > 1)
+            const tdAmount = document.createElement('td');
+            tdAmount.textContent = r.amount || '';
+            tdAmount.style.whiteSpace = 'nowrap';
+            tdAmount.className = 'right';
+
+            const amtNum = parseFloat((r.amount || '').toString().replace(',', '.'));
+            if (!isNaN(amtNum) && amtNum > 1) {
+                tdAmount.classList.add('amount-multi');
+            }
+
+            tr.appendChild(tdAmount);
+
             // ProductID – link naar DDO-product
             const tdPid = document.createElement('td');
             tdPid.style.whiteSpace = 'nowrap';
@@ -1333,18 +1370,6 @@ async function handleLoadServer() {
             tdEan.textContent = r.ean || '';
             tr.appendChild(tdEan);
 
-            // Maat
-            const tdSize = document.createElement('td');
-            tdSize.textContent = r.size || '';
-            tr.appendChild(tdSize);
-
-            // Aantal
-            const tdAmount = document.createElement('td');
-            tdAmount.textContent = r.amount || '';
-            tdAmount.style.whiteSpace = 'nowrap';
-            tdAmount.className = 'right';
-            tr.appendChild(tdAmount);
-
             tb.appendChild(tr);
         });
 
@@ -1354,7 +1379,6 @@ async function handleLoadServer() {
         splitContainer.appendChild(card);
     });
 }
-
 
             // Event listeners
             // Checkboxes in split-cards koppelen aan origin-tabel
