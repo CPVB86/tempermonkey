@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG | Open in DDO
 // @namespace    https://www.dutchdesignersoutlet.com/
-// @version      1.0
-// @description  Voeg een paarse "Open in DDO" pill toe op Goedgepickt orderpagina's voor Dutch Designers Outlet.
+// @version      1.1
+// @description  Voeg een paarse "Open in DDO", blauwe "Open in MSP" en zwarte "Download Invoice" pill toe op Goedgepickt orderpagina's voor Dutch Designers Outlet.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
 // @run-at       document-idle
 // @author       Chantor van Beek
@@ -43,7 +43,13 @@
         if (!orderId) return;
 
         // Niet dubbel toevoegen
-        if (document.querySelector('[data-ddo-pill="true"]')) return;
+        if (
+            document.querySelector('[data-ddo-pill="true"]') ||
+            document.querySelector('[data-msp-pill="true"]') ||
+            document.querySelector('[data-ddo-invoice-pill="true"]')
+        ) {
+            return;
+        }
 
         // Zoek de bestaande "Aangemaakt via API" badge
         let apiBadge = null;
@@ -78,6 +84,29 @@
         ddoLink.style.textDecoration = 'none';
         ddoLink.style.cursor = 'pointer';
 
+        // --- Blauwe "Open in MSP" pill (#00abee) ---
+        const mspLink = document.createElement('a');
+        mspLink.textContent = 'Open in MSP';
+        mspLink.href = 'https://merchant.multisafepay.com/allpayments?options.query=' + encodeURIComponent(orderId);
+        mspLink.target = '_blank';
+        mspLink.rel = 'noopener noreferrer';
+        mspLink.dataset.mspPill = 'true';
+
+        if (apiBadge) {
+            mspLink.className = apiBadge.className;
+            const styleAttr3 = apiBadge.getAttribute('style');
+            if (styleAttr3) {
+                mspLink.setAttribute('style', styleAttr3);
+            }
+        } else {
+            mspLink.className = 'badge label mt-2';
+        }
+
+        mspLink.style.background = '#00abee';
+        mspLink.style.marginLeft = '4px';
+        mspLink.style.textDecoration = 'none';
+        mspLink.style.cursor = 'pointer';
+
         // --- Zwarte "Download Invoice" pill ---
         const invoiceLink = document.createElement('a');
         invoiceLink.textContent = 'Download Invoice';
@@ -101,14 +130,16 @@
         invoiceLink.style.textDecoration = 'none';
         invoiceLink.style.cursor = 'pointer';
 
-        // Invoegen
+        // Invoegen (volgorde: DDO → MSP → Invoice)
         if (apiBadge && apiBadge.parentNode) {
             apiBadge.parentNode.insertBefore(ddoLink, apiBadge.nextSibling);
-            ddoLink.insertAdjacentElement('afterend', invoiceLink);
+            ddoLink.insertAdjacentElement('afterend', mspLink);
+            mspLink.insertAdjacentElement('afterend', invoiceLink);
         } else {
             const body = document.querySelector('.orderdetailscol .m-portlet__body');
             if (body) {
                 body.appendChild(ddoLink);
+                body.appendChild(mspLink);
                 body.appendChild(invoiceLink);
             }
         }
