@@ -19,7 +19,8 @@
     const VAKN_LIST = ['SVCO70', 'SVCO50', 'SVCO30', 'SVBA50', 'SVBA30'];
 
     // Cache: zelfde SPID niet 10x checken
-    const CACHE = new Map(); // key: pid, value: { vakn, url } of null
+    // value kan zijn: { vakn, url } of { loginRequired: true } of null
+    const CACHE = new Map(); // key: pid
 
     function log(...args) {
         console.log('[P2O Anita]', ...args);
@@ -39,6 +40,10 @@
             }
             .p2o-anita-unmapped {
                 background-color: #e5e5e5 !important; /* lichtgrijs */
+                border-radius: 3px;
+            }
+            .p2o-anita-login {
+                background-color: #f8d4d4 !important; /* lichtrood */
                 border-radius: 3px;
             }
         `;
@@ -145,7 +150,7 @@
 
     function checkSaleStatus(pid, parsed, cb) {
         if (CACHE.has(pid)) {
-            cb(CACHE.get(pid)); // kan null zijn
+            cb(CACHE.get(pid)); // kan null of {loginRequired:true} of mapping zijn
             return;
         }
 
@@ -176,10 +181,10 @@
                         /type=["']password["']/i.test(text);
 
                     if (looksLikeLogin) {
-                        // Geen zin om door te blijven rammen als we gewoon een login-scherm krijgen
                         log('Login nodig / login-scherm voor', pid, 'vakn', vakn);
-                        CACHE.set(pid, null);
-                        cb(null);
+                        const result = { loginRequired: true };
+                        CACHE.set(pid, result);
+                        cb(result);
                         return;
                     }
 
@@ -243,6 +248,11 @@
             return;
         }
 
+        // Originele href bewaren (voor login-fout scenario)
+        if (!a.dataset.anitaOriginalHref) {
+            a.dataset.anitaOriginalHref = a.href;
+        }
+
         a.dataset.anitaEnhanced = '1';
         a.title = (a.title || '') + ' [check Anita sale…]';
 
@@ -255,11 +265,21 @@
                 parsed.koll || ''
             );
 
-            // Eerst alle kleurclasses wissen
-            a.classList.remove('p2o-anita-mapped', 'p2o-anita-unmapped');
+            // Reset kleurclasses
+            a.classList.remove('p2o-anita-mapped', 'p2o-anita-unmapped', 'p2o-anita-login');
 
+            // 1) LOGIN PROBLEEM → rood
+            if (res && res.loginRequired) {
+                const href = a.dataset.anitaOriginalHref || urlNoVakn;
+                a.href = href;
+                a.title = 'Login vereist op Anita B2B';
+                a.classList.add('p2o-anita-login');
+                log('Login vereist voor', pid, 'href=', href);
+                return;
+            }
+
+            // 2) GEEN mapping gevonden → grijs, vakn leeg
             if (!res || !res.vakn || !res.url) {
-                // GEEN mapping gevonden in SVCO70/SVCO50/SVCO30/SVBA50/SVBA30
                 a.href = urlNoVakn;
                 a.title = 'Open Anita B2B';
                 a.classList.add('p2o-anita-unmapped'); // lichtgrijs
@@ -267,7 +287,7 @@
                 return;
             }
 
-            // WEL mapping gevonden → gebruik sale-URL met vakn
+            // 3) WÉL mapping gevonden → groen, URL met vakn
             a.href = res.url;
             a.title = 'Open Anita B2B – ' + res.vakn;
             a.classList.add('p2o-anita-mapped'); // lichtgroen
@@ -291,7 +311,7 @@
         const links = document.querySelectorAll('#orderTable tbody a.supplier-link');
         links.forEach(enhanceAnitaLink);
 
-        // Optioneel ook in split-cards:
+        // Ook in split-cards
         const splitLinks = document.querySelectorAll('#splitContainer a.supplier-link');
         splitLinks.forEach(enhanceAnitaLink);
     }
