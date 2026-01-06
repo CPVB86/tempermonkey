@@ -3,7 +3,6 @@
 // @namespace    https://www.lingerieoutlet.nl
 // @version      1.6
 // @description  TSV kopieerknop voor [ext] + 00. Extern — disabled als er geen matches zijn 😇
-// @author       Jij & Mama
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders/view/*
 // @grant        GM_setClipboard
 // @run-at       document-idle
