@@ -1,0 +1,1423 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <title>Paste2Order</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #007bff;
+            --secondary: #6c757d;
+            --bg: #f7f7f7;
+            --border: #ddd;
+            --text: #333;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 2rem;
+        }
+
+        h1 {
+            margin-top: 0;
+            margin-bottom: 0.25rem;
+            font-family: "Orbitron", system-ui, sans-serif;
+            letter-spacing: 0.04em;
+        }
+
+        .subtitle {
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+            color: #666;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem 1.25rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .toolbar select {
+            font-size: 0.9rem;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: #fff;
+        }
+
+        button {
+            border-radius: 4px;
+            border: 1px solid transparent;
+            padding: 0.4rem 0.9rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+        }
+
+        .btn-secondary {
+            background: var(--secondary);
+            border-color: var(--secondary);
+            color: #fff;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border-color: var(--secondary);
+            color: var(--secondary);
+        }
+
+        .status {
+            font-size: 0.85rem;
+            color: #666;
+            min-height: 1.2em;
+            margin-bottom: 0.25rem;
+        }
+
+        .server-info {
+            font-size: 0.8rem;
+            color: #777;
+            margin-bottom: 0.75rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        thead { background: #f0f0f0; }
+
+        th, td {
+            border: 1px solid var(--border);
+            padding: 0.35rem 0.5rem;
+            text-align: left;
+        }
+
+        th {
+            font-weight: 600;
+            white-space: nowrap;
+            user-select: none;
+        }
+
+        th.sortable {
+            cursor: pointer;
+        }
+
+        th.sortable::after {
+            content: "⇅";
+            font-size: 0.7rem;
+            margin-left: 0.25rem;
+            opacity: 0.4;
+        }
+
+        th.sortable[data-sort-dir="asc"]::after {
+            content: "▲";
+            opacity: 0.8;
+        }
+
+        th.sortable[data-sort-dir="desc"]::after {
+            content: "▼";
+            opacity: 0.8;
+        }
+
+        tbody tr:nth-child(even) { background: #fafafa; }
+        tbody tr:hover { background: #f1f7ff; }
+
+        .center { text-align: center; }
+        .right { text-align: right; }
+        .hidden { display: none !important; }
+
+        #manualInputWrapper { margin-top: 0.75rem; }
+
+        #manualInput {
+            width: 100%;
+            min-height: 6rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+        }
+
+        .small-hint {
+            font-size: 0.8rem;
+            color: #777;
+            margin-top: 0.25rem;
+        }
+
+        .checkbox-col { width: 2.5rem; }
+
+        .uuid-col {
+            width: 2.5rem;
+            text-align: center;
+        }
+
+        .uuid-link {
+            text-decoration: none;
+            font-size: 1.1rem;
+        }
+
+        .supplier-link {
+            color: var(--primary);
+            text-decoration: underline;
+        }
+
+        .supplier-link:hover {
+            text-decoration: none;
+        }
+
+        .split-toolbar {
+            margin-top: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .split-container {
+            margin-top: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .split-card {
+            flex: 1 1 320px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 0.9rem;
+            background: #fafafa;
+        }
+
+        .split-card h3 {
+            margin: 0 0 0.25rem 0;
+            font-size: 0.95rem;
+        }
+
+        .split-card h3 a {
+            color: inherit;
+            text-decoration: underline;
+        }
+
+        .split-card h3 a:hover {
+            text-decoration: none;
+        }
+
+        .split-card .split-meta {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 0.4rem;
+        }
+
+        .split-card table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+
+        .split-card th,
+        .split-card td {
+            border: 1px solid #e0e0e0;
+            padding: 0.2rem 0.35rem;
+        }
+
+        .split-card th {
+            background: #f3f3f3;
+        }
+
+        @media print {
+            body {
+                background: #fff;
+                padding: 0;
+            }
+            .card {
+                border: none;
+                box-shadow: none;
+                padding: 0;
+            }
+            .toolbar,
+            #manualInputWrapper,
+            .subtitle,
+            .server-info,
+            .split-toolbar {
+                display: none !important;
+            }
+            /* Ext-kolom niet afdrukken */
+            .uuid-col {
+                display: none !important;
+            }
+            h1 { margin-bottom: 0.75rem; }
+            input[type="checkbox"] { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <h1>Paste2Order</h1>
+    <p class="subtitle">Plak hier je Copy2Order data en bundel je externe bestellingen.</p>
+
+    <div class="card">
+        <div class="toolbar">
+            <button id="btnPaste" class="btn-primary" type="button">
+                📋 Plak klembord
+            </button>
+            <button id="btnUseManual" class="btn-outline" style="display:none" type="button">
+                ✂️ Handmatige invoer
+            </button>
+            <button id="btnClear" class="btn-secondary" type="button">
+                🗑️ Lijst legen
+            </button>
+            <button id="btnDeleteSelected" class="btn-secondary" type="button">
+                ❌ Verwijder geselecteerde
+            </button>
+            <button id="btnUndoDelete" class="btn-outline" type="button" disabled>
+                ↩️ Ongedaan maken
+            </button>
+            <button id="btnExport" class="btn-primary" type="button">
+                💾 Exporteer als CSV
+            </button>
+            <button id="btnPrint" class="btn-secondary" type="button">
+                🖨️ Print lijst
+            </button>
+            <button id="btnSaveServer" class="btn-outline" type="button">
+                💾 Opslaan
+            </button>
+            <select id="serverFileSelect">
+                <option value="">Bestand kiezen…</option>
+            </select>
+            <button id="btnRefreshFiles" class="btn-outline" type="button" style="display:none" title="Ververs lijst">
+    ↻
+</button>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div class="server-info">
+            Huidig bestand: <strong id="currentFileLabel">nog niet opgeslagen</strong>
+        </div>
+
+        <div id="manualInputWrapper" class="hidden">
+            <label for="manualInput"><strong>Handmatige invoer</strong></label>
+            <textarea id="manualInput" placeholder="Plak hier je TSV:
+OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
+(5–7 kolommen toegestaan, meerdere regels)."></textarea>
+            <div class="small-hint">
+                Klik na het plakken opnieuw op <strong>Plak klembord</strong> om de tekst te verwerken.
+            </div>
+        </div>
+
+        <table id="orderTable">
+            <thead>
+                <tr>
+                    <th class="checkbox-col center">
+                        <input type="checkbox" id="selectAll">
+                    </th>
+                    <th class="sortable" data-sort-key="orderId">Order</th>
+                    <th class="sortable" data-sort-key="title">Titel</th>
+                    <th class="sortable" data-sort-key="productId">Product ID</th>
+                    <th class="sortable" data-sort-key="ean">EAN</th>
+                    <th class="sortable" data-sort-key="size">Maat</th>
+                    <th class="right sortable" data-sort-key="amount">Aantal</th>
+                    <th class="uuid-col">GG</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- wordt dynamisch gevuld -->
+            </tbody>
+        </table>
+
+        <div class="split-toolbar">
+            <button id="btnSplitOrder" class="btn-outline" type="button">
+                🧾 Splits op ordernummer
+            </button>
+            <button id="btnSplitSupplier" class="btn-outline" type="button">
+                🏷️ Splits op leverancier
+            </button>
+            <button id="btnClearSplit" class="btn-outline" type="button">
+                🧹 Wis splitsing
+            </button>
+        </div>
+
+        <div id="splitContainer" class="split-container"></div>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            // === CONFIG SERVER ENDPOINTS ===
+            const SAVE_URL = 'save_paste2order.php';
+            const LOAD_URL = 'load_paste2order.php';
+            const LIST_URL = 'list_paste2order.php';
+
+            // Base URL's voor links
+            const DDO_ORDER_BASE   = 'https://www.dutchdesignersoutlet.com/admin.php?section=orders&action=view&id=';
+            const DDO_PRODUCT_BASE = 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=';
+            const GP_ORDER_BASE    = 'https://fm-e-warehousing.goedgepickt.nl/orders/view/';
+
+            const btnPaste = document.getElementById('btnPaste');
+            const btnUseManual = document.getElementById('btnUseManual');
+            const btnClear = document.getElementById('btnClear');
+            const btnExport = document.getElementById('btnExport');
+            const btnPrint = document.getElementById('btnPrint');
+            const btnDeleteSelected = document.getElementById('btnDeleteSelected');
+            const btnUndoDelete = document.getElementById('btnUndoDelete');
+            const btnSaveServer = document.getElementById('btnSaveServer');
+            const btnRefreshFiles = document.getElementById('btnRefreshFiles');
+            const btnSplitOrder = document.getElementById('btnSplitOrder');
+            const btnSplitSupplier = document.getElementById('btnSplitSupplier');
+            const btnClearSplit = document.getElementById('btnClearSplit');
+
+            const statusEl = document.getElementById('status');
+            const manualWrapper = document.getElementById('manualInputWrapper');
+            const manualInput = document.getElementById('manualInput');
+            const tbody = document.querySelector('#orderTable tbody');
+            const thead = document.querySelector('#orderTable thead');
+            const selectAllCheckbox = document.getElementById('selectAll');
+            const currentFileLabel = document.getElementById('currentFileLabel');
+            const serverFileSelect = document.getElementById('serverFileSelect');
+            const splitContainer = document.getElementById('splitContainer');
+
+            let rowIdCounter = 1;
+            let rows = [];
+            let sortState = { key: null, dir: 'asc' };
+            let lastDeleted = [];
+            let currentFileName = '';
+            let lastCheckedIndex = null; // voor shift-click selectie
+
+            // === Leverancier base URL logic ===
+            function getBaseUrl(productName) {
+                const name = productName.toLowerCase();
+
+                if (/wacoal|freya|fantasie|elomi/.test(name)) {
+                    return 'https://b2b.wacoal-europe.com/b2b/en/EUR/search/?text=';
+                }
+                if (/lisca/.test(name)) {
+                    return 'https://b2b-eu.lisca.com/catalogsearch/result/?q=';
+                }
+                if (/triumph/.test(name)) {
+                    return 'https://b2b.triumph.com/products/NL_TriumphPROD?search=';
+                }
+                if (/sloggi/.test(name)) {
+                    return 'https://b2b.triumph.com/products/NL_sloggiPROD?search=';
+                }
+                if (/lingadore/.test(name)) {
+                    return 'https://b2b.lingadore.com/nl/catalog/item/';
+                }
+                if (/sugar\s*candy/.test(name)) {
+                    return 'https://b2b.cakelingerie.eu/search?controller=search&s=';
+                }
+                if (/muchachomalo|chicamala/.test(name)) {
+                    return 'https://agent.muchachomalo.com/en/search?keyword=';
+                }
+                if (/mundo\s+unico/.test(name)) {
+                    return 'https://www.colomoda.eu/search/';
+                }
+                if (/charlie\s+choe/.test(name)) {
+                    return 'https://vangennip.itsperfect.it/webshop/search/';
+                }
+                if (/pastunette|rebelle|robson/.test(name)) {
+                    return 'https://b2b.zetex.nl/webstore/v2/search?q=';
+                }
+                if (/ringella/.test(name)) {
+                    return 'https://b2b.ringella.com/ItemView.action?number=';
+                }
+                
+                if (/anita|rosa/.test(name)) {
+                    return 'https://b2b.anita.com/';
+                }
+
+                return null;
+            }
+
+            function setStatus(msg) {
+                statusEl.textContent = msg || '';
+            }
+
+            // Titel + supplierlink met Lisca/Charlie/Pastunette handling
+            function buildTitleCellContent(td, row) {
+                const title = row.title || '';
+
+                // Zoek de positie van " - [ext" (case-insensitive)
+                const extIndex = title.toLowerCase().indexOf(' - [ext');
+                if (extIndex === -1) {
+                    td.textContent = title;
+                    return;
+                }
+
+                const prefix = title.slice(0, extIndex);
+                const suffix = title.slice(extIndex);
+
+                const dashIndex = prefix.lastIndexOf(' - ');
+                if (dashIndex === -1) {
+                    td.textContent = title;
+                    return;
+                }
+
+                const before = prefix.slice(0, dashIndex + 3); // inclusief " - "
+                const supplierIdRaw = prefix.slice(dashIndex + 3).trim();
+
+                const lowerName = title.toLowerCase();
+                const baseUrl = getBaseUrl(title);
+
+                let searchId = supplierIdRaw;
+                const parts = supplierIdRaw.split('-').map(p => p.trim()).filter(Boolean);
+
+                // Charlie Choe: zoek op eerste 2 blokken
+                if (/charlie\s+choe/.test(lowerName) && parts.length >= 2) {
+                    searchId = parts[0] + '-' + parts[1];
+                }
+
+                // Lisca: zoek op eerste blok
+                if (/lisca/.test(lowerName) && parts.length >= 1) {
+                    searchId = parts[0];
+                }
+
+                // Pastunette: alles behalve laatste blok
+                if (/pastunette/.test(lowerName) && parts.length >= 2) {
+                    searchId = parts.slice(0, parts.length - 1).join('-');
+                }
+
+                td.innerHTML = '';
+
+                if (before) {
+                    td.appendChild(document.createTextNode(before));
+                }
+
+                if (baseUrl && supplierIdRaw) {
+                    const a = document.createElement('a');
+                    a.href = baseUrl + encodeURIComponent(searchId);
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    a.textContent = supplierIdRaw;
+                    a.className = 'supplier-link';
+                    a.title = 'Open leverancier (' + searchId + ')';
+                    td.appendChild(a);
+                } else {
+                    td.appendChild(document.createTextNode(supplierIdRaw));
+                }
+
+                if (suffix) {
+                    td.appendChild(document.createTextNode(suffix));
+                }
+            }
+
+            function renderTable() {
+                tbody.innerHTML = '';
+
+                if (!rows.length) {
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.colSpan = 8;
+                    td.className = 'center';
+                    td.textContent = 'Nog geen regels toegevoegd.';
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
+                    selectAllCheckbox.checked = false;
+                    return;
+                }
+
+                for (const row of rows) {
+                    const tr = document.createElement('tr');
+
+                    const tdCheck = document.createElement('td');
+                    tdCheck.className = 'center';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'row-select';
+                    cb.dataset.id = row._id;
+                    cb.checked = !!row.checked;
+                    tdCheck.appendChild(cb);
+
+                    const tdOrder = document.createElement('td');
+                    if (row.orderId) {
+                        const a = document.createElement('a');
+                        a.href = DDO_ORDER_BASE + encodeURIComponent(row.orderId);
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        a.textContent = row.orderId;
+                        tdOrder.appendChild(a);
+                    } else {
+                        tdOrder.textContent = '';
+                    }
+
+                    const tdTitle = document.createElement('td');
+                    buildTitleCellContent(tdTitle, row);
+
+                    const tdPid = document.createElement('td');
+                    if (row.productId) {
+                        const a = document.createElement('a');
+                        a.href = DDO_PRODUCT_BASE + encodeURIComponent(row.productId);
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        a.textContent = row.productId;
+                        tdPid.appendChild(a);
+                    } else {
+                        tdPid.textContent = '';
+                    }
+
+                    const tdEan = document.createElement('td');
+                    tdEan.textContent = row.ean;
+
+                    const tdSize = document.createElement('td');
+                    tdSize.textContent = row.size;
+
+                    const tdAmount = document.createElement('td');
+                    tdAmount.textContent = row.amount;
+                    tdAmount.className = 'right';
+
+                    const tdUuid = document.createElement('td');
+                    tdUuid.className = 'uuid-col';
+                    if (row.uuid) {
+                        const a = document.createElement('a');
+                        a.href = GP_ORDER_BASE + encodeURIComponent(row.uuid);
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        a.className = 'uuid-link';
+                        a.title = 'Open extern orderoverzicht (' + row.uuid + ')';
+                        a.textContent = '📦';
+                        tdUuid.appendChild(a);
+                    } else {
+                        tdUuid.textContent = '';
+                    }
+
+                    tr.appendChild(tdCheck);
+                    tr.appendChild(tdOrder);
+                    tr.appendChild(tdTitle);
+                    tr.appendChild(tdPid);
+                    tr.appendChild(tdEan);
+                    tr.appendChild(tdSize);
+                    tr.appendChild(tdAmount);
+                    tr.appendChild(tdUuid);
+
+                    tbody.appendChild(tr);
+                }
+
+                selectAllCheckbox.checked = rows.length > 0 && rows.every(r => r.checked);
+            }
+
+            function parseTextToRows(text) {
+                const newRows = [];
+                if (!text) return newRows;
+
+                const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                for (const line of lines) {
+                    const parts = line.split('\t');
+                    if (parts.length < 5) {
+                        console.warn('Regel heeft te weinig kolommen en wordt overgeslagen:', line);
+                        continue;
+                    }
+
+                    let orderId, title, productId, ean, size, amount, uuid, checkedVal;
+                    if (parts.length >= 8) {
+                        [orderId, title, productId, ean, size, amount, uuid, checkedVal] = parts;
+                    } else if (parts.length === 7) {
+                        [orderId, title, productId, ean, size, amount, uuid] = parts;
+                        checkedVal = '';
+                    } else if (parts.length === 6) {
+                        [orderId, title, productId, ean, size, amount] = parts;
+                        uuid = '';
+                        checkedVal = '';
+                    } else { // 5 kolommen
+                        [orderId, title, productId, ean, amount] = parts;
+                        size = '';
+                        uuid = '';
+                        checkedVal = '';
+                    }
+
+                    const checked = (checkedVal || '').toLowerCase() === '1' || (checkedVal || '').toLowerCase() === 'true';
+
+                    newRows.push({
+                        orderId: (orderId || '').trim(),
+                        title: (title || '').trim(),
+                        productId: (productId || '').trim(),
+                        ean: (ean || '').trim(),
+                        size: (size || '').trim(),
+                        amount: (amount || '').trim(),
+                        uuid: (uuid || '').trim(),
+                        checked
+                    });
+                }
+                return newRows;
+            }
+
+            async function handlePasteClick() {
+                setStatus('');
+                let text = '';
+
+                if (!manualWrapper.classList.contains('hidden') && manualInput.value.trim()) {
+                    text = manualInput.value;
+                } else if (navigator.clipboard && navigator.clipboard.readText) {
+                    try {
+                        text = await navigator.clipboard.readText();
+                    } catch (err) {
+                        console.error('Clipboard lezen mislukt:', err);
+                        setStatus('Klembord lezen mislukt. Gebruik desnoods handmatige invoer.');
+                        return;
+                    }
+                } else {
+                    setStatus('Clipboard-API niet beschikbaar. Gebruik de handmatige invoer.');
+                    return;
+                }
+
+                if (!text.trim()) {
+                    setStatus('Geen tekst gevonden in klembord/invoer.');
+                    return;
+                }
+
+                const addedPlain = parseTextToRows(text);
+                if (!addedPlain.length) {
+                    setStatus('Geen geldige regels gevonden (verwacht 5–8 tab-gescheiden kolommen).');
+                    return;
+                }
+
+                for (const r of addedPlain) {
+                    r._id = String(rowIdCounter++);
+                    if (typeof r.checked !== 'boolean') r.checked = false;
+                    rows.push(r);
+                }
+
+                if (sortState.key) {
+                    sortRows(sortState.key, sortState.dir, false);
+                }
+
+                renderTable();
+                clearSplit();
+                setStatus(`${addedPlain.length} regel(s) toegevoegd.`);
+            }
+
+            function handleClear() {
+                rows = [];
+                lastDeleted = [];
+                btnUndoDelete.disabled = true;
+                renderTable();
+                clearSplit();
+                setStatus('Lijst geleegd.');
+            }
+
+            function csvEscape(value) {
+                const v = (value || '').toString();
+                if (/[;"\n]/.test(v)) {
+                    return '"' + v.replace(/"/g, '""') + '"';
+                }
+                return v;
+            }
+
+            function buildCsvContent() {
+                if (!rows.length) return '';
+
+                const header = ['Order', 'Titel', 'ProductID', 'EAN', 'Maat', 'Aantal', 'UUID', 'Checked'];
+
+                const lines = [];
+                lines.push(header.map(csvEscape).join(';'));
+                for (const row of rows) {
+                    lines.push([
+                        row.orderId,
+                        row.title,
+                        row.productId,
+                        row.ean,
+                        row.size,
+                        row.amount,
+                        row.uuid,
+                        row.checked ? '1' : ''
+                    ].map(csvEscape).join(';'));
+                }
+                return lines.join('\n');
+            }
+
+            function handleExport() {
+                if (!rows.length) {
+                    setStatus('Niets om te exporteren.');
+                    return;
+                }
+
+                const content = buildCsvContent();
+                const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'paste2order-export.csv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                setStatus(`CSV geëxporteerd (${rows.length} regels).`);
+            }
+
+            function handlePrint() {
+                window.print();
+            }
+
+            function toggleManualInput() {
+                const show = manualWrapper.classList.contains('hidden');
+                if (show) {
+                    manualWrapper.classList.remove('hidden');
+                    manualInput.focus();
+                    setStatus('Handmatige invoer geactiveerd. Plak hier je data en klik weer op "Plak klembord".');
+                } else {
+                    manualWrapper.classList.add('hidden');
+                    setStatus('Handmatige invoer verborgen.');
+                }
+            }
+
+            function handleDeleteSelected() {
+                const checkboxes = tbody.querySelectorAll('input.row-select:checked');
+                if (!checkboxes.length) {
+                    setStatus('Geen regels geselecteerd om te verwijderen.');
+                    return;
+                }
+
+                const idsToDelete = new Set();
+                checkboxes.forEach(cb => idsToDelete.add(cb.dataset.id));
+
+                lastDeleted = rows.filter(row => idsToDelete.has(row._id));
+                rows = rows.filter(row => !idsToDelete.has(row._id));
+                btnUndoDelete.disabled = lastDeleted.length === 0;
+
+                renderTable();
+                clearSplit();
+                setStatus(`${idsToDelete.size} geselecteerde regel(s) verwijderd.`);
+            }
+
+            function handleUndoDelete() {
+                if (!lastDeleted.length) return;
+                rows.push(...lastDeleted);
+                lastDeleted = [];
+                btnUndoDelete.disabled = true;
+
+                if (sortState.key) {
+                    sortRows(sortState.key, sortState.dir, false);
+                }
+
+                renderTable();
+                clearSplit();
+                setStatus('Laatste verwijderactie ongedaan gemaakt.');
+            }
+
+            function handleSelectAllChange() {
+                const checked = selectAllCheckbox.checked;
+                const checkboxes = tbody.querySelectorAll('input.row-select');
+                checkboxes.forEach(cb => { cb.checked = checked; });
+                rows.forEach(r => { r.checked = checked; });
+            }
+
+// Enkelklik: checkbox in hoofd → model + split meekoppelen
+tbody.addEventListener('change', function (e) {
+    const target = e.target;
+    if (!target.classList.contains('row-select')) return;
+
+    const id = target.dataset.id;
+    const checked = target.checked;
+
+    // Model bijwerken
+    const row = rows.find(r => r._id === id);
+    if (row) {
+        row.checked = checked;
+    }
+
+    // Bijbehorende checkbox in split-cards mee laten lopen
+    const splitCb = splitContainer.querySelector('input.split-row-select[data-id="' + id + '"]');
+    if (splitCb) {
+        splitCb.checked = checked;
+    }
+
+    // Select-all state updaten
+    selectAllCheckbox.checked = rows.length > 0 && rows.every(r => r.checked);
+});
+// Shift-klik: range selecteren + model + splits syncen
+tbody.addEventListener('click', function (e) {
+    const target = e.target;
+    if (!target.classList.contains('row-select')) return;
+
+    const checkboxes = Array.from(tbody.querySelectorAll('input.row-select'));
+    const currentIndex = checkboxes.indexOf(target);
+
+    // Geen shift: alleen index onthouden, de change-handler doet de rest
+    if (!e.shiftKey || currentIndex === -1) {
+        lastCheckedIndex = currentIndex;
+        return;
+    }
+
+    // Eerste shift-klik zonder eerdere referentie
+    if (lastCheckedIndex === null || lastCheckedIndex === -1) {
+        lastCheckedIndex = currentIndex;
+        return;
+    }
+
+    const shouldCheck = target.checked; // gewenste eindstatus voor de hele range
+
+    // Bereik bepalen
+    const start = Math.min(lastCheckedIndex, currentIndex);
+    const end   = Math.max(lastCheckedIndex, currentIndex);
+
+    for (let i = start; i <= end; i++) {
+        const cb = checkboxes[i];
+        cb.checked = shouldCheck;
+
+        const id = cb.dataset.id;
+        const row = rows.find(r => r._id === id);
+        if (row) {
+            row.checked = shouldCheck;
+        }
+
+        // Split-variant mee laten lopen
+        const splitCb = splitContainer.querySelector('input.split-row-select[data-id="' + id + '"]');
+        if (splitCb) {
+            splitCb.checked = shouldCheck;
+        }
+    }
+
+    // Select-all bijwerken
+    selectAllCheckbox.checked = rows.length > 0 && rows.every(r => r.checked);
+
+    // Nieuwe “laatste” markeren
+    lastCheckedIndex = currentIndex;
+});
+
+            function sortRows(key, dir, updateHeader = true) {
+                rows.sort((a, b) => {
+                    let av = a[key] ?? '';
+                    let bv = b[key] ?? '';
+
+                    if (key === 'orderId' || key === 'amount') {
+                        const an = parseFloat((av || '').toString().replace(',', '.'));
+                        const bn = parseFloat((bv || '').toString().replace(',', '.'));
+                        if (!isNaN(an) && !isNaN(bn)) {
+                            return dir === 'asc' ? an - bn : bn - an;
+                        }
+                    }
+
+                    av = av.toString().toLowerCase();
+                    bv = bv.toString().toLowerCase();
+                    const cmp = av.localeCompare(bv, 'nl');
+                    return dir === 'asc' ? cmp : -cmp;
+                });
+
+                sortState.key = key;
+                sortState.dir = dir;
+
+                if (updateHeader) {
+                    const ths = thead.querySelectorAll('th.sortable');
+                    ths.forEach(th => {
+                        if (th.dataset.sortKey === key) {
+                            th.dataset.sortDir = dir;
+                        } else {
+                            th.removeAttribute('data-sort-dir');
+                        }
+                    });
+                }
+            }
+
+            function handleHeaderClick(e) {
+                const th = e.target.closest('th.sortable');
+                if (!th) return;
+
+                const key = th.dataset.sortKey;
+                if (!key) return;
+
+                let dir = 'asc';
+                if (sortState.key === key && sortState.dir === 'asc') {
+                    dir = 'desc';
+                }
+
+                sortRows(key, dir, true);
+                renderTable();
+            }
+
+            function generateTimestampFilename() {
+                const d = new Date();
+                const pad = n => n.toString().padStart(2, '0');
+                const dd = pad(d.getDate());
+                const mm = pad(d.getMonth() + 1);
+                const yyyy = d.getFullYear().toString();
+                const HH = pad(d.getHours());
+                const MM = pad(d.getMinutes());
+                return `${dd}${mm}${yyyy}${HH}${MM}.csv`;
+            }
+
+            function formatFilenameLabel(filename) {
+                const base = filename.replace(/\.csv$/i, '');
+                const m = base.match(/^(\d{2})(\d{2})(\d{4})(\d{2})(\d{2})$/);
+                if (!m) return filename;
+                const [ , dd, mm, yyyy, HH, MM ] = m;
+                return `${dd}-${mm}-${yyyy} ${HH}:${MM}u`;
+            }
+
+async function loadServerFileList(selectFilename) {
+    try {
+        // Cache-buster + no-store om verouderde JSON te voorkomen
+        const res = await fetch(LIST_URL + '?t=' + Date.now(), {
+            cache: 'no-store'
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const files = await res.json(); // ["050120261500.csv", "050120261700.csv", ...]
+
+        serverFileSelect.innerHTML = '';
+        const optEmpty = document.createElement('option');
+        optEmpty.value = '';
+        optEmpty.textContent = 'Serverbestand kiezen…';
+        serverFileSelect.appendChild(optEmpty);
+
+        if (Array.isArray(files) && files.length) {
+            files
+                .slice()
+                .sort()      // oplopend
+                .reverse()   // nieuwste eerst
+                .forEach(fn => {
+                    const opt = document.createElement('option');
+                    opt.value = fn;
+                    opt.textContent = formatFilenameLabel(fn);
+                    serverFileSelect.appendChild(opt);
+                });
+        }
+
+        const target = selectFilename || currentFileName;
+        if (target) {
+            serverFileSelect.value = target;
+        }
+    } catch (err) {
+        console.error('Lijst ophalen mislukt:', err);
+        // oude inhoud laten staan
+    }
+}
+
+            async function handleSaveServer() {
+                if (!rows.length) {
+                    setStatus('Geen data om op te slaan op de server.');
+                    return;
+                }
+
+                if (!currentFileName) {
+                    currentFileName = generateTimestampFilename();
+                }
+
+                const content = buildCsvContent();
+                try {
+                    const res = await fetch(SAVE_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            filename: currentFileName,
+                            content
+                        })
+                    });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const text = await res.text();
+                    currentFileLabel.textContent = currentFileName;
+                    setStatus(text || `Opgeslagen op server als ${currentFileName}.`);
+                    loadServerFileList(currentFileName).catch(console.error);
+                } catch (err) {
+                    console.error('Opslaan op server mislukt:', err);
+                    setStatus('Opslaan op server mislukt. Check save_paste2order.php.');
+                }
+            }
+
+            // simpele CSV parser
+            function parseCsv(text) {
+                const rows = [];
+                let row = [];
+                let field = '';
+                let inQuotes = false;
+
+                for (let i = 0; i < text.length; i++) {
+                    const c = text[i];
+                    const next = text[i + 1];
+
+                    if (c === '"' && inQuotes && next === '"') {
+                        field += '"';
+                        i++;
+                    } else if (c === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (c === ';' && !inQuotes) {
+                        row.push(field);
+                        field = '';
+                    } else if ((c === '\n' || c === '\r') && !inQuotes) {
+                        if (field !== '' || row.length) {
+                            row.push(field);
+                            rows.push(row);
+                        }
+                        field = '';
+                        row = [];
+                        if (c === '\r' && next === '\n') i++;
+                    } else {
+                        field += c;
+                    }
+                }
+
+                if (field !== '' || row.length) {
+                    row.push(field);
+                    rows.push(row);
+                }
+
+                return rows;
+            }
+
+async function handleLoadServer() {
+    let fileToLoad = serverFileSelect.value || currentFileName;
+    if (!fileToLoad) {
+        setStatus('Geen serverbestand geselecteerd.');
+        return;
+    }
+
+    try {
+        // Altijd verse versie ophalen, niet uit cache
+        const res = await fetch(
+            `${LOAD_URL}?filename=${encodeURIComponent(fileToLoad)}&t=${Date.now()}`,
+            { cache: 'no-store' }
+        );
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
+        const fileText = await res.text();
+
+        const csvRows = parseCsv(fileText);
+        if (!csvRows.length) {
+            setStatus('Geen data in serverbestand gevonden.');
+            return;
+        }
+
+        const dataRows = csvRows.slice(1); // eerste rij is header
+        rows = [];
+        rowIdCounter = 1;
+
+        for (const cols of dataRows) {
+            if (cols.length < 6) continue;
+
+            const [
+                orderId,
+                title,
+                productId,
+                ean,
+                size,
+                amount,
+                uuid,
+                checkedVal
+            ] = cols;
+
+            const checked =
+                (checkedVal || '').toLowerCase() === '1' ||
+                (checkedVal || '').toLowerCase() === 'true';
+
+            rows.push({
+                _id: String(rowIdCounter++),
+                orderId: (orderId || '').trim(),
+                title: (title || '').trim(),
+                productId: (productId || '').trim(),
+                ean: (ean || '').trim(),
+                size: (size || '').trim(),
+                amount: (amount || '').trim(),
+                uuid: (uuid || '').trim(),
+                checked
+            });
+        }
+
+        currentFileName = fileToLoad;
+        currentFileLabel.textContent = currentFileName;
+        serverFileSelect.value = currentFileName;
+        lastDeleted = [];
+        btnUndoDelete.disabled = true;
+
+        renderTable();
+        clearSplit();
+        setStatus(`Serverbestand ${fileToLoad} geladen (${rows.length} regels).`);
+    } catch (err) {
+        console.error('Laden van server mislukt:', err);
+        setStatus('Laden vanaf server mislukt. Check load_paste2order.php en bestandsnaam.');
+    }
+}
+
+
+            // --- Splits functionaliteit ---
+
+            function clearSplit() {
+                splitContainer.innerHTML = '';
+            }
+
+            function buildSplitByOrder() {
+                clearSplit();
+                if (!rows.length) {
+                    setStatus('Geen data om op te splitsen.');
+                    return;
+                }
+
+                const groups = {};
+                rows.forEach(r => {
+                    const key = r.orderId || '(geen order)';
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(r);
+                });
+
+                const entries = Object.entries(groups).map(([key, list]) => ({
+                    key,
+                    label: 'Order ' + key,
+                    rows: list
+                }));
+
+                renderSplitCards(entries, 'order');
+                setStatus('Gesplitst op ordernummer.');
+            }
+
+            function getSupplierGroupInfo(title) {
+                const baseUrl = getBaseUrl(title || '');
+                if (!baseUrl) {
+                    return { key: 'overig', label: 'Overige leveranciers', href: null };
+                }
+                try {
+                    const u = new URL(baseUrl);
+                    return { key: u.hostname, label: u.hostname, href: u.origin };
+                } catch {
+                    return { key: baseUrl, label: baseUrl, href: baseUrl };
+                }
+            }
+
+            function buildSplitBySupplier() {
+                clearSplit();
+                if (!rows.length) {
+                    setStatus('Geen data om op te splitsen.');
+                    return;
+                }
+
+                const groups = {};
+                rows.forEach(r => {
+                    const g = getSupplierGroupInfo(r.title || '');
+                    if (!groups[g.key]) {
+                        groups[g.key] = { label: g.label, href: g.href, rows: [] };
+                    }
+                    groups[g.key].rows.push(r);
+                });
+
+                const entries = Object.entries(groups).map(([key, obj]) => ({
+                    key,
+                    label: key === 'overig' ? 'Overige leveranciers' : obj.label,
+                    href: obj.href,
+                    rows: obj.rows
+                }));
+
+                entries.sort((a, b) => a.label.localeCompare(b.label, 'nl'));
+
+                renderSplitCards(entries, 'supplier');
+                setStatus('Gesplitst op leverancier.');
+            }
+
+            function renderSplitCards(groupEntries, mode) {
+    splitContainer.innerHTML = '';
+    if (!groupEntries.length) return;
+
+    groupEntries.forEach(group => {
+        const card = document.createElement('div');
+        card.className = 'split-card';
+
+        // Titel van de card (leverancier klikbaar in supplier-mode)
+        const h = document.createElement('h3');
+        if (mode === 'supplier' && group.href) {
+            const a = document.createElement('a');
+            a.href = group.href;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = group.label;
+            h.appendChild(a);
+        } else {
+            h.textContent = group.label;
+        }
+        card.appendChild(h);
+
+        // Meta (orders + aantal regels)
+        const meta = document.createElement('div');
+        meta.className = 'split-meta';
+
+        const orderSet = new Set();
+        group.rows.forEach(r => {
+            if (r.orderId) orderSet.add(r.orderId);
+        });
+        const orderText = orderSet.size
+            ? 'Orders: ' + Array.from(orderSet).join(', ')
+            : 'Orders: n.v.t.';
+
+        meta.textContent = `${orderText} – Regels: ${group.rows.length}`;
+        card.appendChild(meta);
+
+        // Tabel binnen de card
+        const t = document.createElement('table');
+        const thead = document.createElement('thead');
+        const hr = document.createElement('tr');
+
+        [' ', 'Order', 'Titel', 'ProductID', 'EAN', 'Maat', 'Aantal'].forEach((col, idx) => {
+            const th = document.createElement('th');
+            th.textContent = col;
+            if (idx === 0) {
+                th.style.width = '2rem';
+            }
+            hr.appendChild(th);
+        });
+        thead.appendChild(hr);
+        t.appendChild(thead);
+
+        const tb = document.createElement('tbody');
+
+        group.rows.forEach(r => {
+            const tr = document.createElement('tr');
+
+            // Checkbox-kolom (gekoppeld aan row._id)
+            const tdCheck = document.createElement('td');
+            tdCheck.className = 'center';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'split-row-select';
+            cb.dataset.id = r._id;
+            cb.checked = !!r.checked;
+            tdCheck.appendChild(cb);
+            tr.appendChild(tdCheck);
+
+            // Order – link naar DDO-order
+            const tdOrder = document.createElement('td');
+            tdOrder.style.whiteSpace = 'nowrap';
+            if (r.orderId) {
+                const a = document.createElement('a');
+                a.href = DDO_ORDER_BASE + encodeURIComponent(r.orderId);
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.textContent = r.orderId;
+                tdOrder.appendChild(a);
+            } else {
+                tdOrder.textContent = '';
+            }
+            tr.appendChild(tdOrder);
+
+            // Titel – met supplierlink-logic
+            const tdTitle = document.createElement('td');
+            buildTitleCellContent(tdTitle, r);
+            tr.appendChild(tdTitle);
+
+            // ProductID – link naar DDO-product
+            const tdPid = document.createElement('td');
+            tdPid.style.whiteSpace = 'nowrap';
+            if (r.productId) {
+                const a = document.createElement('a');
+                a.href = DDO_PRODUCT_BASE + encodeURIComponent(r.productId);
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.textContent = r.productId;
+                tdPid.appendChild(a);
+            } else {
+                tdPid.textContent = '';
+            }
+            tr.appendChild(tdPid);
+
+            // EAN
+            const tdEan = document.createElement('td');
+            tdEan.textContent = r.ean || '';
+            tr.appendChild(tdEan);
+
+            // Maat
+            const tdSize = document.createElement('td');
+            tdSize.textContent = r.size || '';
+            tr.appendChild(tdSize);
+
+            // Aantal
+            const tdAmount = document.createElement('td');
+            tdAmount.textContent = r.amount || '';
+            tdAmount.style.whiteSpace = 'nowrap';
+            tdAmount.className = 'right';
+            tr.appendChild(tdAmount);
+
+            tb.appendChild(tr);
+        });
+
+        t.appendChild(tb);
+        card.appendChild(t);
+
+        splitContainer.appendChild(card);
+    });
+}
+
+
+            // Event listeners
+            // Checkboxes in split-cards koppelen aan origin-tabel
+splitContainer.addEventListener('change', function (e) {
+    const target = e.target;
+    if (!target.classList.contains('split-row-select')) return;
+
+    const id = target.dataset.id;
+    const checked = target.checked;
+
+    // Model bijwerken
+    const row = rows.find(r => r._id === id);
+    if (row) {
+        row.checked = checked;
+    }
+
+    // Checkbox in de hoofd-tabel mee laten lopen
+    const mainCb = tbody.querySelector('input.row-select[data-id="' + id + '"]');
+    if (mainCb) {
+        mainCb.checked = checked;
+    }
+
+    // Select-all state updaten
+    selectAllCheckbox.checked = rows.length > 0 && rows.every(r => r.checked);
+});
+
+            btnPaste.addEventListener('click', () => {
+                handlePasteClick().catch(console.error);
+            });
+            btnClear.addEventListener('click', handleClear);
+            btnExport.addEventListener('click', handleExport);
+            btnPrint.addEventListener('click', handlePrint);
+            btnUseManual.addEventListener('click', toggleManualInput);
+            btnDeleteSelected.addEventListener('click', handleDeleteSelected);
+            btnUndoDelete.addEventListener('click', handleUndoDelete);
+            selectAllCheckbox.addEventListener('change', handleSelectAllChange);
+            thead.addEventListener('click', handleHeaderClick);
+            btnSaveServer.addEventListener('click', () => {
+                handleSaveServer().catch(console.error);
+            });
+            btnRefreshFiles.addEventListener('click', () => {
+                loadServerFileList().catch(console.error);
+            });
+
+            // dropdown: direct laden bij selectie
+            serverFileSelect.addEventListener('change', () => {
+                if (serverFileSelect.value) {
+                    handleLoadServer().catch(console.error);
+                }
+            });
+
+            btnSplitOrder.addEventListener('click', buildSplitByOrder);
+            btnSplitSupplier.addEventListener('click', buildSplitBySupplier);
+            btnClearSplit.addEventListener('click', () => {
+                clearSplit();
+                setStatus('Splitsing gewist.');
+            });
+
+            // Init
+            renderTable();
+            setStatus('Klaar om orderdata te verwerken!');
+            loadServerFileList().catch(console.error);
+        })();
+    </script>
+</body>
+</html>
