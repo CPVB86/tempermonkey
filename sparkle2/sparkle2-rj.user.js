@@ -313,4 +313,89 @@
     const colorSwatches = document.querySelectorAll('.swatch-wrapper .swatch-option.color');
     if (colorSwatches.length) {
       colorSwatches.forEach(swatchOption => {
-        const wrapper = swatchOption.closest('
+                const wrapper = swatchOption.closest('.swatch-wrapper');
+        if (!wrapper) return;
+
+        if (wrapper.querySelector('.sparkle-rj-btn')) return; // geen dubbele knoppen
+
+        const labelEl = wrapper.querySelector('.swatch-label');
+        const labelFromDom = labelEl ? labelEl.textContent.trim() : '';
+
+        const rawLabel =
+          swatchOption.getAttribute('data-option-label') ||
+          swatchOption.getAttribute('aria-label') ||
+          labelFromDom;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sparkle-rj-btn';
+        btn.textContent = '✨ Sparkle';
+
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          // juiste rij (tr) voor deze kleur
+          const row = wrapper.closest('tr.swatch-attribute-options');
+          const stockBySize = row ? getStockForRow(row) : {};
+
+          const colorInfo = parseColorLabel(rawLabel);
+          const payload = buildSparklePayloadForColor(colorInfo);
+          payload.stockBySize = stockBySize;
+
+          const sparkleComment = buildSparkleComment(payload);
+
+          console.clear();
+          console.log('▶️ SPARKLE payload voor kleur:', rawLabel, payload);
+          console.log('📦 Stock per maat:', stockBySize);
+
+          const ok = await copyToClipboard(sparkleComment);
+
+          if (ok) {
+            btn.classList.add('copied');
+            btn.textContent = '✅ Gekopieerd';
+            setTimeout(() => {
+              btn.classList.remove('copied');
+              btn.textContent = '✨ Sparkle';
+            }, 1500);
+          } else {
+            btn.textContent = '⚠️ Kopieer handmatig (console)';
+          }
+        });
+
+        wrapper.appendChild(btn);
+      });
+
+      console.log('Sparkle RJ: knoppen toegevoegd aan kleur-swatch(es).');
+      return;
+    }
+
+    // Geen kleuren-swatch → single-color fallback
+    console.log('Sparkle RJ: geen kleur-swatch gevonden, single-color modus.');
+    addButtonSingleColor();
+  }
+
+  // ---- Start ---------------------------------------------------------------
+
+  function initWhenReady() {
+    const checkInterval = setInterval(() => {
+      const hasSku = document.querySelector('td[data-th="SKU"]');
+      const hasColorSwatch = document.querySelector('.swatch-wrapper .swatch-option.color');
+      const hasSizeOnlyTable = document.querySelector('tbody.swatch-attribute.size tr.swatch-attribute-options .swatch-option.text');
+
+      if (hasSku && (hasColorSwatch || hasSizeOnlyTable)) {
+        clearInterval(checkInterval);
+        addButtonsToSwatches();
+      }
+    }, 400);
+
+    setTimeout(() => clearInterval(checkInterval), 15000);
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    initWhenReady();
+  } else {
+    document.addEventListener('DOMContentLoaded', initWhenReady);
+  }
+})();
+
