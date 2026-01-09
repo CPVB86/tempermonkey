@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Sparkle 2 | DDO
-// @version      3.2
+// @version      3.4
 // @description  Leest één SPARKLE payload uit het klembord en vult DDO backend velden. Klik ✨ of gebruik Ctrl+Shift+V / Cmd+Shift+V (vult + Update product).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
@@ -157,12 +157,49 @@
     return false;
   }
 
+  // 🔧 HOOFDSTUK: hier doen we nu “vul aan” voor name
   function applyToBackend(data, ctx) {
-    const supplierName = (data.name || '').trim();
-    const title = (data.title || '').trim() || `${ctx.localName} ${supplierName}`.trim();
+    const nameInput = document.querySelector('input[name="name"]');
+    const existingName = (nameInput?.value || '').trim();
 
-    setValue('input[name="name"]', title);
-    setValue('input[name="title"]', title);
+    const supplierName  = (data.name  || '').trim();
+    const supplierTitle = (data.title || '').trim() || supplierName;
+
+    // Merk / prefix-afleiding
+    // - Voor NAME gebruiken we de korte vorm die al in het veld staat (bijv. "RJ")
+    // - Voor TITLE gebruiken we ctx.brandName (bijv. "RJ Bodywear") wanneer bekend
+    const brandPrefixForName = (existingName || ctx.brandName || '').trim();
+    const brandForTitle      = (ctx.brandName || brandPrefixForName || '').trim();
+
+    // NAME: vul aan → bestaande waarde + leverancierstitel (als nog niet aanwezig)
+    let newName = existingName;
+    if (supplierTitle) {
+      const normExisting = existingName.toLowerCase();
+      const normSupplier = supplierTitle.toLowerCase();
+
+      if (!normExisting.includes(normSupplier)) {
+        // bv. "RJ" + "Allure Washington Hemdje..." → "RJ Allure Washington Hemdje..."
+        newName = [brandPrefixForName, supplierTitle].filter(Boolean).join(' ').trim();
+      }
+    }
+
+    if (newName && newName !== existingName) {
+      setValue('input[name="name"]', newName);
+    }
+
+    // TITLE: merk + titel
+    let title = '';
+    if (supplierTitle && brandForTitle) {
+      title = `${brandForTitle} ${supplierTitle}`.trim();  // bv. "RJ Bodywear Allure Washington..."
+    } else if ((data.title || '').trim()) {
+      title = (data.title || '').trim();
+    } else {
+      title = newName || supplierTitle || existingName;
+    }
+
+    if (title) {
+      setValue('input[name="title"]', title);
+    }
 
     setValue('input[name="price"]', data.rrp);
     setValue('input[name="price_advice"]', data.rrp);
@@ -184,7 +221,6 @@
       return false;
     }
 
-    // Run wired handlers
     try {
       btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       btn.click();
@@ -280,7 +316,17 @@
 
     try {
       const nameInput = document.querySelector('input[name="name"]');
-      const localName = nameInput?.value.trim() || '';
+      const localNameRaw = nameInput?.value.trim() || '';
+
+      // Merk-detectie:
+      // - als "RJ" of "RJ Bodywear" in name staat → brandName = "RJ Bodywear"
+      // - anders: brandName = volledige inhoud van name
+      let brandName = '';
+      if (/rj bodywear/i.test(localNameRaw) || /^rj(\s|$)/i.test(localNameRaw)) {
+        brandName = 'RJ Bodywear';
+      } else {
+        brandName = localNameRaw;
+      }
 
       const raw = await navigator.clipboard.readText();
       const payload = parseSparklePayload(raw);
@@ -302,8 +348,8 @@
       logContract(data);
 
       applyDefaults();
-      applyBrandByName(localName);
-      applyToBackend(data, { localName });
+      applyBrandByName(brandName);
+      applyToBackend(data, { localName: localNameRaw, brandName });
 
       if ((data.descriptionText || '').trim()) {
         const safe = escapeHtml(data.descriptionText.trim());
