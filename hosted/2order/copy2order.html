@@ -61,38 +61,82 @@
         }
 
         button {
-            border-radius: 4px;
-            border: 1px solid transparent;
-            padding: 0.4rem 0.9rem;
-            font-size: 0.9rem;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-        }
+    border-radius: 4px;
+    border: 1px solid transparent;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition:
+        transform 0.08s ease-out,
+        box-shadow 0.08s ease-out,
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        opacity 0.15s ease;
+}
 
-        button:disabled {
-            cursor: not-allowed;
-            opacity: 0.5;
-        }
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    box-shadow: none;
+    transform: none;
+}
 
-        .btn-primary {
-            background: var(--primary);
-            border-color: var(--primary);
-            color: #fff;
-        }
+/* Hover & click feedback */
+button:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    filter: brightness(1.03);
+}
 
-        .btn-secondary {
-            background: var(--secondary);
-            border-color: var(--secondary);
-            color: #fff;
-        }
+button:not(:disabled):active {
+    transform: translateY(0) scale(0.97);
+    box-shadow: 0 0 0 rgba(0,0,0,0);
+}
 
-        .btn-outline {
-            background: transparent;
-            border-color: var(--secondary);
-            color: var(--secondary);
-        }
+/* Kleine variant voor icoon-knopjes (rij-delete) */
+.btn-icon {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.85rem;
+}
+
+/* Kleuren blijven herkenbaar, maar met hover */
+.btn-primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+.btn-primary:not(:disabled):hover {
+    background: #0062cc;
+    border-color: #0062cc;
+}
+
+.btn-secondary {
+    background: var(--secondary);
+    border-color: var(--secondary);
+    color: #fff;
+}
+.btn-secondary:not(:disabled):hover {
+    background: #5a6268;
+    border-color: #5a6268;
+}
+
+.btn-outline {
+    background: transparent;
+    border-color: var(--secondary);
+    color: var(--secondary);
+}
+.btn-outline:not(:disabled):hover {
+    background: var(--secondary);
+    color: #fff;
+}
+
+.delete-col {
+    width: 2.5rem;
+    text-align: center;
+}
 
         .status {
             font-size: 0.85rem;
@@ -251,9 +295,16 @@
         .split-card th {
             background: #f3f3f3;
         }
-        .amount-multi {
+.amount-multi {
     background-color: #ffe8cc;
 }
+
+.split-card th:last-child,
+.split-card td:last-child {
+    width: 2.5rem;
+    text-align: center;
+}
+
 
         @media print {
             body {
@@ -277,7 +328,10 @@
                 display: none !important;
             }
             h1 { margin-bottom: 0.75rem; }
-            input[type="checkbox"] { display: none; }
+            input[type="checkbox"] { display: unset; }
+            .uuid-col, .delete-col {
+        display: none !important;
+    }
         }
     </style>
 </head>
@@ -296,7 +350,7 @@
             <button id="btnClear" class="btn-secondary" type="button">
                 🧹 Lijst legen
             </button>
-            <button id="btnDeleteSelected" class="btn-secondary" type="button">
+            <button id="btnDeleteSelected" class="btn-secondary" style="display:none" type="button">
                 ❌ Verwijder geselecteerde
             </button>
             <button id="btnUndoDelete" class="btn-outline" type="button" disabled>
@@ -350,6 +404,7 @@ OrderID[TAB]Titel[TAB]ProductID[TAB]EAN[TAB]Maat[TAB]Aantal[TAB]UUID
 <th class="sortable" data-sort-key="productId">Product ID</th>
 <th class="sortable" data-sort-key="ean">EAN</th>
 <th class="uuid-col">GG</th>
+<th class="delete-col center"></th>
 
                 </tr>
             </thead>
@@ -552,7 +607,7 @@ function buildTitleCellContent(td, row) {
                 if (!rows.length) {
                     const tr = document.createElement('tr');
                     const td = document.createElement('td');
-                    td.colSpan = 8;
+                    td.colSpan = 9;
                     td.className = 'center';
                     td.textContent = 'Nog geen regels toegevoegd.';
                     tr.appendChild(td);
@@ -562,85 +617,100 @@ function buildTitleCellContent(td, row) {
                 }
 
                 for (const row of rows) {
-                    const tr = document.createElement('tr');
+    const tr = document.createElement('tr');
 
-                    const tdCheck = document.createElement('td');
-                    tdCheck.className = 'center';
-                    const cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.className = 'row-select';
-                    cb.dataset.id = row._id;
-                    cb.checked = !!row.checked;
-                    tdCheck.appendChild(cb);
+    const tdCheck = document.createElement('td');
+    tdCheck.className = 'center';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'row-select';
+    cb.dataset.id = row._id;
+    cb.checked = !!row.checked;
+    tdCheck.appendChild(cb);
 
-                    const tdOrder = document.createElement('td');
-                    if (row.orderId) {
-                        const a = document.createElement('a');
-                        a.href = DDO_ORDER_BASE + encodeURIComponent(row.orderId);
-                        a.target = '_blank';
-                        a.rel = 'noopener noreferrer';
-                        a.textContent = row.orderId;
-                        tdOrder.appendChild(a);
-                    } else {
-                        tdOrder.textContent = '';
-                    }
+    const tdOrder = document.createElement('td');
+    if (row.orderId) {
+        const a = document.createElement('a');
+        a.href = DDO_ORDER_BASE + encodeURIComponent(row.orderId);
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = row.orderId;
+        tdOrder.appendChild(a);
+    } else {
+        tdOrder.textContent = '';
+    }
 
-                    const tdTitle = document.createElement('td');
-                    buildTitleCellContent(tdTitle, row);
+    const tdTitle = document.createElement('td');
+    buildTitleCellContent(tdTitle, row);
 
-                    const tdPid = document.createElement('td');
-                    if (row.productId) {
-                        const a = document.createElement('a');
-                        a.href = DDO_PRODUCT_BASE + encodeURIComponent(row.productId);
-                        a.target = '_blank';
-                        a.rel = 'noopener noreferrer';
-                        a.textContent = row.productId;
-                        tdPid.appendChild(a);
-                    } else {
-                        tdPid.textContent = '';
-                    }
+    const tdSize = document.createElement('td');
+    tdSize.textContent = row.size;
 
-                    const tdEan = document.createElement('td');
-                    tdEan.textContent = row.ean;
+    const tdAmount = document.createElement('td');
+    tdAmount.textContent = row.amount;
+    tdAmount.className = 'right';
 
-                    const tdSize = document.createElement('td');
-                    tdSize.textContent = row.size;
+    const amtNum = parseFloat((row.amount || '').toString().replace(',', '.'));
+    if (!isNaN(amtNum) && amtNum > 1) {
+        tdAmount.classList.add('amount-multi');
+    }
 
-                    const tdAmount = document.createElement('td');
-                    tdAmount.textContent = row.amount;
-                    tdAmount.className = 'right';
+    const tdPid = document.createElement('td');
+    if (row.productId) {
+        const a = document.createElement('a');
+        a.href = DDO_PRODUCT_BASE + encodeURIComponent(row.productId);
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = row.productId;
+        tdPid.appendChild(a);
+    } else {
+        tdPid.textContent = '';
+    }
 
-                    const amtNum = parseFloat((row.amount || '').toString().replace(',', '.'));
-if (!isNaN(amtNum) && amtNum > 1) {
-    tdAmount.classList.add('amount-multi');
+    const tdEan = document.createElement('td');
+    tdEan.textContent = row.ean;
+
+    const tdUuid = document.createElement('td');
+    tdUuid.className = 'uuid-col';
+    if (row.uuid) {
+        const a = document.createElement('a');
+        a.href = GP_ORDER_BASE + encodeURIComponent(row.uuid);
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'uuid-link';
+        a.title = 'Open extern orderoverzicht (' + row.uuid + ')';
+        a.textContent = '📦';
+        tdUuid.appendChild(a);
+    } else {
+        tdUuid.textContent = '';
+    }
+
+    // 🔥 HIER: delete-cel + knop aanmaken
+    const tdDelete = document.createElement('td');
+    tdDelete.className = 'center delete-col';
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-outline btn-icon btn-row-delete';
+    delBtn.title = 'Deze regel verwijderen';
+    delBtn.dataset.id = row._id;
+    delBtn.textContent = '🗑️';
+
+    tdDelete.appendChild(delBtn);
+
+    // Alles in de juiste volgorde toevoegen
+    tr.appendChild(tdCheck);
+    tr.appendChild(tdOrder);
+    tr.appendChild(tdTitle);
+    tr.appendChild(tdSize);
+    tr.appendChild(tdAmount);
+    tr.appendChild(tdPid);
+    tr.appendChild(tdEan);
+    tr.appendChild(tdUuid);
+    tr.appendChild(tdDelete);   // nu bestaat tdDelete ook echt 😉
+
+    tbody.appendChild(tr);
 }
-
-                    const tdUuid = document.createElement('td');
-                    tdUuid.className = 'uuid-col';
-                    if (row.uuid) {
-                        const a = document.createElement('a');
-                        a.href = GP_ORDER_BASE + encodeURIComponent(row.uuid);
-                        a.target = '_blank';
-                        a.rel = 'noopener noreferrer';
-                        a.className = 'uuid-link';
-                        a.title = 'Open extern orderoverzicht (' + row.uuid + ')';
-                        a.textContent = '📦';
-                        tdUuid.appendChild(a);
-                    } else {
-                        tdUuid.textContent = '';
-                    }
-
-                    tr.appendChild(tdCheck);
-tr.appendChild(tdOrder);
-tr.appendChild(tdTitle);
-tr.appendChild(tdSize);
-tr.appendChild(tdAmount);
-tr.appendChild(tdPid);
-tr.appendChild(tdEan);
-tr.appendChild(tdUuid);
-
-                    tbody.appendChild(tr);
-                }
 
                 selectAllCheckbox.checked = rows.length > 0 && rows.every(r => r.checked);
             }
@@ -684,7 +754,8 @@ tr.appendChild(tdUuid);
                         size: (size || '').trim(),
                         amount: (amount || '').trim(),
                         uuid: (uuid || '').trim(),
-                        checked
+                        checked,
+                        extraChecked: false,
                     });
                 }
                 return newRows;
@@ -903,6 +974,25 @@ tbody.addEventListener('change', function (e) {
 // Shift-klik: range selecteren + model + splits syncen
 tbody.addEventListener('click', function (e) {
     const target = e.target;
+
+    // 1) Klik op prullenbak-icoon (rij verwijderen)
+    if (target.classList.contains('btn-row-delete')) {
+        const id = target.dataset.id;
+        const index = rows.findIndex(r => r._id === id);
+        if (index !== -1) {
+            // Laatste verwijderde rij bewaren voor Undo
+            lastDeleted = [rows[index]];
+            rows.splice(index, 1);
+            btnUndoDelete.disabled = lastDeleted.length === 0;
+
+            renderTable();
+            clearSplit();
+            setStatus('1 regel verwijderd.');
+        }
+        return;
+    }
+
+    // 2) Shift-klik logica voor checkboxes
     if (!target.classList.contains('row-select')) return;
 
     const checkboxes = Array.from(tbody.querySelectorAll('input.row-select'));
@@ -1221,7 +1311,8 @@ async function handleLoadServer() {
                 size: (size || '').trim(),
                 amount: (amount || '').trim(),
                 uuid: (uuid || '').trim(),
-                checked
+                checked,
+                extraChecked: false,
             });
         }
 
@@ -1347,7 +1438,18 @@ async function handleLoadServer() {
             ? 'Orders: ' + Array.from(orderSet).join(', ')
             : 'Orders: n.v.t.';
 
-        meta.textContent = `${orderText} – Regels: ${group.rows.length}`;
+        const totalUnits = group.rows.reduce((sum, r) => {
+    const n = parseFloat((r.amount || '').toString().replace(',', '.'));
+    return sum + (isNaN(n) ? 0 : n);
+}, 0);
+
+// netter tonen: 32 i.p.v. 32.0
+const totalUnitsLabel = Number.isInteger(totalUnits)
+    ? String(totalUnits)
+    : totalUnits.toFixed(2).replace('.', ',');
+
+meta.textContent = `${orderText} – Regels: ${group.rows.length} – Stuks: ${totalUnitsLabel}`;
+
         card.appendChild(meta);
 
         // Tabel binnen de card
@@ -1355,7 +1457,7 @@ async function handleLoadServer() {
         const theadEl = document.createElement('thead');
         const hr = document.createElement('tr');
 
-        [' ', 'Order', 'Titel', 'Maat', 'Aantal', 'ProductID', 'EAN'].forEach((col, idx) => {
+        [' ', 'Order', 'Titel', 'Maat', 'Aantal', 'ProductID', 'EAN', ' '].forEach((col, idx) => {
             const th = document.createElement('th');
             th.textContent = col;
             if (idx === 0) {
@@ -1440,6 +1542,20 @@ async function handleLoadServer() {
             tdEan.textContent = r.ean || '';
             tr.appendChild(tdEan);
 
+// Extra checkbox (rechts van EAN)
+const tdExtra = document.createElement('td');
+tdExtra.className = 'center';
+tdExtra.style.whiteSpace = 'nowrap';
+
+const cbExtra = document.createElement('input');
+cbExtra.type = 'checkbox';
+cbExtra.className = 'split-extra-check';
+cbExtra.dataset.id = r._id;
+cbExtra.checked = !!r.extraChecked;
+
+tdExtra.appendChild(cbExtra);
+tr.appendChild(tdExtra);
+
             tb.appendChild(tr);
         });
 
@@ -1451,9 +1567,19 @@ async function handleLoadServer() {
 }
 
             // Event listeners
-            // Checkboxes in split-cards koppelen aan origin-tabel
+// Checkboxes in split-cards koppelen aan origin-tabel
 splitContainer.addEventListener('change', function (e) {
     const target = e.target;
+
+    // ✅ Extra checkbox in split-tabellen
+    if (target.classList.contains('split-extra-check')) {
+        const id = target.dataset.id;
+        const row = rows.find(r => r._id === id);
+        if (row) row.extraChecked = target.checked;
+        return;
+    }
+
+    // ✅ Bestaande split checkbox (selectie)
     if (!target.classList.contains('split-row-select')) return;
 
     const id = target.dataset.id;
@@ -1461,19 +1587,16 @@ splitContainer.addEventListener('change', function (e) {
 
     // Model bijwerken
     const row = rows.find(r => r._id === id);
-    if (row) {
-        row.checked = checked;
-    }
+    if (row) row.checked = checked;
 
     // Checkbox in de hoofd-tabel mee laten lopen
     const mainCb = tbody.querySelector('input.row-select[data-id="' + id + '"]');
-    if (mainCb) {
-        mainCb.checked = checked;
-    }
+    if (mainCb) mainCb.checked = checked;
 
     // Select-all state updaten
     selectAllCheckbox.checked = rows.length > 0 && rows.every(r => r.checked);
 });
+
 
             btnPaste.addEventListener('click', () => {
                 handlePasteClick().catch(console.error);
