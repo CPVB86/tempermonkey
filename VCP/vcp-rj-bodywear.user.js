@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP | RJ Bodywear
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      0.1
-// @description  Vergelijk local stock met RJ Bodywear stock via jsonConfig op categoriepagina’s (dames/heren). Zonder bridge.
+// @version      0.21
+// @description  Vergelijk local stock met RJ Bodywear stock via jsonConfig-index (scan eerst /dames, dan /heren). Extra console logging.
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
@@ -17,23 +17,27 @@
   'use strict';
 
   const ON_TOOL = location.hostname.includes('lingerieoutlet.nl');
-
   if (!ON_TOOL) return;
 
   // =========================
   // CONFIG
   // =========================
   const RJ_BASE = 'https://b2b.rjbodywear.com';
-  const TIMEOUT_MS = 20000;
 
-  // categorie-scan
-  const MAX_PAGES = 50;
-  const LIST_LIMIT = 36; // zoals je scraper
+  const TIMEOUT_MS  = 20000;
+  const MAX_PAGES   = 50;
+  const LIST_LIMIT  = 36;
 
-  // concurrency (tool)
   const CONCURRENCY = 3;
 
-  const uid  = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const DEBUG_RJ = {
+    scanPages: true,        // log elke URL die geladen wordt
+    scanTable: true,        // console.table met scan resultaten
+    variants: false,        // console.table raw variants per artikel
+    perItemTable: true,     // console.table local vs remote per artikel
+    scanUrlsInTable: false  // zet op true als je URL kolom in scan-table wil
+  };
+
   const norm = (s = '') => String(s).toLowerCase().trim().replace(/\s+/g, ' ');
 
   // =========================
@@ -64,7 +68,9 @@
           remoteStock: Number.isFinite(r.remoteStock) ? r.remoteStock : '—',
           status: r.actie
         })));
-      } finally { console.groupEnd(); }
+      } finally {
+        console.groupEnd();
+      }
     }
   };
 
@@ -84,7 +90,9 @@
       GM_xmlhttpRequest({
         method: 'GET',
         url,
-        headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        },
         onload: (res) => {
           if (done) return;
           done = true;
@@ -107,9 +115,39 @@
   }
 
   // =========================
-  // Size normalization / aliasing
-  // (overgenomen stijl uit je scraper + Mundo)
+  // Helpers: PID / SKU / maat
   // =========================
+  function baseFromSupplierPid(pid) {
+    const s = String(pid || '').trim();
+    if (!s) return '';
+    const parts = s.split('-');
+    return parts.length >= 3 ? parts.slice(0, 3).join('-') : s;
+  }
+
+  function toBaseSku(skuRaw) {
+    const s = String(skuRaw || '').trim();
+    if (!s) return '';
+    const parts = s.split('-');
+    return parts.length >= 3 ? parts.slice(0, 3).join('-') : s;
+  }
+
+  function deriveColorSuffix(pid) {
+    const s = String(pid || '').trim();
+    if (!s) return null;
+
+    const parts = s.split('-').filter(Boolean);
+
+    if (parts.length >= 3) {
+      const candidate = parts[2];
+      if (/^\d{3}$/.test(candidate)) return candidate;
+    }
+
+    const allMatches = s.match(/\d{3}/g);
+    if (allMatches && allMatches.length) return allMatches[allMatches.length - 1];
+
+    return null;
+  }
+
   function normalizeSize(s) {
     let out = String(s || '')
       .toUpperCase()
@@ -120,7 +158,7 @@
       .replace(/[–—]/g, '-')
       .replace(/^(\d{2})-(\d{2})$/, '$1/$2');
 
-    // RJ/Tool mismatch: XXL vs 2XL
+    // extern XXL ↔ 2XL
     if (out === 'XXL') out = '2XL';
 
     return out;
@@ -156,48 +194,12 @@
         if (SIZE_ALIAS[nx]) set.add(SIZE_ALIAS[nx]);
       });
     }
+
     return Array.from(set);
   }
 
   // =========================
-  // PID helpers (zoals scraper)
-  // =========================
-  function baseFromSupplierPid(pid) {
-    const s = String(pid || '').trim();
-    if (!s) return '';
-    const parts = s.split('-');
-    if (parts.length >= 3) return parts.slice(0, 3).join('-');
-    return s;
-  }
-
-  function toBaseSku(skuRaw) {
-    const s = String(skuRaw || '').trim();
-    if (!s) return '';
-    const parts = s.split('-');
-    if (parts.length >= 3) return parts.slice(0, 3).join('-');
-    return s;
-  }
-
-  function deriveColorSuffix(pid) {
-    const s = String(pid || '').trim();
-    if (!s) return null;
-
-    const parts = s.split('-').filter(Boolean);
-
-    if (parts.length >= 3) {
-      const candidate = parts[2];
-      if (/^\d{3}$/.test(candidate)) return candidate;
-    }
-
-    const allMatches = s.match(/\d{3}/g);
-    if (allMatches && allMatches.length) return allMatches[allMatches.length - 1];
-
-    return null;
-  }
-
-  // =========================
-  // Stock mapping (VCP: 0 = niet leverbaar)
-  // (zelfde schaal als Naturana-like in Mundo)
+  // Stock mapping (VCP = 0 is "niet leverbaar")
   // =========================
   function mapRjStockLevel(remoteQty) {
     const n = Number(remoteQty) || 0;
@@ -210,65 +212,130 @@
   }
 
   // =========================
-  // jsonConfig extraction (zoals scraper)
+  // jsonConfig extraction
   // =========================
   function extractAllJsonConfigsFromHtml(html) {
     const configs = [];
-
     const re1 = /"jsonConfig":\s*(\{[\s\S]*?\}),\s*['"]jsonSwatchConfig['"]/g;
     const re2 = /jsonConfig:\s*(\{[\s\S]*?\}),\s*jsonSwatchConfig/g;
 
     for (const re of [re1, re2]) {
       let m;
       while ((m = re.exec(html)) !== null) {
-        try {
-          const cfg = JSON.parse(m[1]);
-          configs.push(cfg);
-        } catch (e) {
-          // ignore per-block parse errors
-        }
+        try { configs.push(JSON.parse(m[1])); } catch {}
       }
     }
     return configs;
   }
 
-  function findMatchingConfigForBase(baseSku, configs) {
-    baseSku = String(baseSku || '').trim();
-    if (!baseSku) return null;
+  // =========================
+  // INDEX BUILDER (scan eerst /dames, dan /heren)
+  // =========================
+  let RJ_INDEX_PROMISE = null;
 
-    for (const cfg of configs) {
-      const skus = cfg.skus || {};
-      for (const fullSku of Object.values(skus)) {
-        const base = toBaseSku(fullSku);
-        if (base === baseSku) return cfg;
-      }
-    }
-    return null;
+  function makeEmptyIndex() {
+    return {
+      byBase: new Map(), // baseSku -> { jsonConfig, sourceUrl, path, page }
+      scan: []           // { path, page, url, configsFound, basesAdded, error? }
+    };
   }
 
-  async function findJsonConfigForSupplierPid(supplierPid, maxPages = MAX_PAGES) {
-    const baseSku = baseFromSupplierPid(supplierPid);
-    if (!baseSku) return null;
+  function addConfigToIndex(index, cfg, meta) {
+    const skus = cfg?.skus || {};
+    const bases = new Set();
 
-    // In VCP weten we niet "men vs dames" uit brand-title, dus: probeer beide.
-    const startPaths = ['/dames', '/heren'];
+    Object.values(skus).forEach(fullSku => {
+      const base = toBaseSku(fullSku);
+      if (base) bases.add(base);
+    });
 
-    for (const startPath of startPaths) {
-      for (let page = 1; page <= maxPages; page++) {
-        const url = `${RJ_BASE}${startPath}?p=${page}&product_list_limit=${LIST_LIMIT}`;
-        const html = await httpGetText(url);
-
-        const configs = extractAllJsonConfigsFromHtml(html);
-        if (!configs.length) break; // geen jsonConfig meer → stop deze categorie
-
-        const matchCfg = findMatchingConfigForBase(baseSku, configs);
-        if (matchCfg) {
-          return { productUrl: url, jsonConfig: matchCfg, startPath };
-        }
+    let added = 0;
+    for (const base of bases) {
+      if (!index.byBase.has(base)) {
+        index.byBase.set(base, {
+          jsonConfig: cfg,
+          sourceUrl: meta.url,
+          path: meta.path,
+          page: meta.page
+        });
+        added++;
       }
     }
+    return added;
+  }
 
-    return null;
+  async function buildRjIndexOnce() {
+    if (RJ_INDEX_PROMISE) return RJ_INDEX_PROMISE;
+
+    RJ_INDEX_PROMISE = (async () => {
+      const index = makeEmptyIndex();
+
+      console.groupCollapsed('[RJ][index] start scan /dames -> /heren');
+
+      const paths = ['/dames', '/heren'];
+
+      for (const path of paths) {
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const url = `${RJ_BASE}${path}?p=${page}&product_list_limit=${LIST_LIMIT}`;
+          if (DEBUG_RJ.scanPages) console.info(`[RJ][index] GET ${url}`);
+
+          let html;
+          try {
+            html = await httpGetText(url);
+          } catch (e) {
+            console.warn(`[RJ][index] fetch error op ${url}:`, String(e?.message || e));
+            index.scan.push({ path, page, url, configsFound: -1, basesAdded: 0, error: true });
+            continue;
+          }
+
+          const configs = extractAllJsonConfigsFromHtml(html);
+
+          if (!configs.length) {
+            index.scan.push({ path, page, url, configsFound: 0, basesAdded: 0 });
+            console.info(`[RJ][index] ${path} p=${page} → jsonConfigs=0 => stop ${path}`);
+            break;
+          }
+
+          let basesAddedTotal = 0;
+          for (const cfg of configs) {
+            basesAddedTotal += addConfigToIndex(index, cfg, { path, page, url });
+          }
+
+          index.scan.push({
+            path,
+            page,
+            url,
+            configsFound: configs.length,
+            basesAdded: basesAddedTotal
+          });
+
+          console.info(`[RJ][index] ${path} p=${page} → jsonConfigs=${configs.length}, basesAdded=${basesAddedTotal}, totalBases=${index.byBase.size}`);
+        }
+      }
+
+      if (DEBUG_RJ.scanTable) {
+        console.groupCollapsed(`[RJ][index] scan-resultaat (${index.byBase.size} baseSku's)`);
+        console.table(index.scan.map(r => {
+          const row = {
+            path: r.path,
+            page: r.page,
+            jsonConfigs: r.configsFound,
+            basesAdded: r.basesAdded,
+            error: r.error ? 'YES' : ''
+          };
+          if (DEBUG_RJ.scanUrlsInTable) row.url = r.url;
+          return row;
+        }));
+        console.groupEnd();
+      }
+
+      console.info(`[RJ][index] klaar. Total baseSku's in index: ${index.byBase.size}`);
+      console.groupEnd();
+
+      return index;
+    })();
+
+    return RJ_INDEX_PROMISE;
   }
 
   // =========================
@@ -293,7 +360,6 @@
         sizeAttrId = String(attrId);
         sizeAttr   = attr;
       }
-
       if (!colorAttr && (code === 'color' || label === 'color' || label.includes('kleur'))) {
         colorAttrId = String(attrId);
         colorAttr   = attr;
@@ -309,15 +375,13 @@
       valueToSizeLabel[String(opt.id)] = opt.label || '';
     }
 
-    // Kleurfilter: suffix uit PID matchen in color-label
     const colorSuffix = deriveColorSuffix(supplierPid);
     let targetColorValueIndex = null;
 
     if (colorSuffix && colorAttr && Array.isArray(colorAttr.options)) {
       for (const opt of colorAttr.options) {
         const lbl = String(opt.label || '').trim();
-        if (!lbl) continue;
-        if (lbl.includes(colorSuffix)) {
+        if (lbl && lbl.includes(colorSuffix)) {
           targetColorValueIndex = String(opt.id);
           break;
         }
@@ -366,7 +430,6 @@
   }
 
   function buildStatusMapFromVariants(variants) {
-    // map keys = allerlei aliasCandidates -> { qty, stockLevel }
     const map = {};
 
     const add = (sizeKey, qty) => {
@@ -379,8 +442,7 @@
         const ex = map[k];
         if (!ex) map[k] = { qty, stock: stockLevel };
         else {
-          // neem de hoogste qty/stock als er dubbels zijn
-          ex.qty = Math.max(ex.qty || 0, qty || 0);
+          ex.qty   = Math.max(ex.qty || 0, qty || 0);
           ex.stock = Math.max(ex.stock || 0, stockLevel || 0);
         }
       }
@@ -391,12 +453,49 @@
   }
 
   function resolveRemote(statusMap, label) {
-    for (const c of aliasCandidates(label)) if (statusMap[c]) return statusMap[c];
+    for (const c of aliasCandidates(label)) {
+      if (statusMap[c]) return statusMap[c];
+    }
     return undefined;
   }
 
   // =========================
-  // UI markering (zelfde als Mundo)
+  // REPORT BUILDER
+  // =========================
+  function buildReport(localTable, statusMap) {
+    const rows = localTable.querySelectorAll('tbody tr');
+    const report = [];
+
+    rows.forEach(row => {
+      const maat  = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+
+      const remoteEntry = resolveRemote(statusMap, maat);
+      const remoteQty   = Number(remoteEntry?.qty);
+      const remoteStock = Number(remoteEntry?.stock);
+
+      const hasRemote = remoteEntry && Number.isFinite(remoteStock);
+      const effAvail  = hasRemote ? remoteStock > 0 : false;
+
+      let actie = 'none';
+      if (local > 0 && !effAvail) actie = 'uitboeken';
+      else if (local === 0 && effAvail) actie = 'bijboeken';
+      else if (local === 0 && !effAvail) actie = 'negeren';
+
+      report.push({
+        maat,
+        local,
+        remoteQty: hasRemote ? (Number.isFinite(remoteQty) ? remoteQty : 0) : NaN,
+        remoteStock: hasRemote ? remoteStock : NaN,
+        actie
+      });
+    });
+
+    return report;
+  }
+
+  // =========================
+  // UI markering
   // =========================
   function jumpFlash(el) {
     if (!el) return;
@@ -410,7 +509,6 @@
 
   function applyRulesAndMark(localTable, statusMap) {
     const rows = localTable.querySelectorAll('tbody tr');
-    const report = [];
     let firstMut = null;
 
     rows.forEach(row => {
@@ -418,10 +516,9 @@
       const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
 
       const remoteEntry = resolveRemote(statusMap, maat);
-      const supplierQty = Number(remoteEntry?.qty) || 0;
       const supVal      = Number(remoteEntry?.stock);
-
-      const effAvail = Number.isFinite(supVal) ? supVal > 0 : false;
+      const hasRemote   = remoteEntry && Number.isFinite(supVal);
+      const effAvail    = hasRemote ? supVal > 0 : false;
 
       row.style.background = '';
       row.style.transition = 'background-color .25s';
@@ -429,40 +526,24 @@
       row.classList.remove('status-green', 'status-red');
       delete row.dataset.status;
 
-      let actie = 'none';
-
       if (local > 0 && !effAvail) {
         row.style.background = '#f8d7da';
-        row.title = remoteEntry ? 'Uitboeken (leverancier niet op voorraad)' : 'Uitboeken/Negeren (maat onbekend)';
+        row.title = hasRemote ? 'Uitboeken (leverancier niet op voorraad)' : 'Uitboeken/Negeren (maat onbekend)';
         row.dataset.status = 'remove';
         row.classList.add('status-red');
-        actie = 'uitboeken';
         if (!firstMut) firstMut = row;
-
       } else if (local === 0 && effAvail) {
         row.style.background = '#d4edda';
-        row.title = `Bijboeken ${supVal} (leverancier qty: ${supplierQty})`;
+        row.title = `Bijboeken ${supVal} (leverancier qty: ${Number(remoteEntry?.qty) || 0})`;
         row.dataset.status = 'add';
         row.classList.add('status-green');
-        actie = 'bijboeken';
         if (!firstMut) firstMut = row;
-
       } else if (local === 0 && !effAvail) {
-        row.title = remoteEntry ? 'Negeren (leverancier niet op voorraad)' : 'Negeren (maat onbekend)';
-        actie = 'negeren';
+        row.title = hasRemote ? 'Negeren (leverancier niet op voorraad)' : 'Negeren (maat onbekend)';
       }
-
-      report.push({
-        maat,
-        local,
-        remoteQty: remoteEntry ? supplierQty : NaN,
-        remoteStock: remoteEntry ? supVal : NaN,
-        actie
-      });
     });
 
     if (firstMut) jumpFlash(firstMut);
-    return report;
   }
 
   function bepaalLogStatus(report, statusMap) {
@@ -477,17 +558,25 @@
   }
 
   // =========================
-  // Concurrency helper (zoals Mundo)
+  // Concurrency helper
   // =========================
   function pLimit(n) {
-    const q = []; let a = 0;
+    const q = [];
+    let a = 0;
+
     const next = () => {
       if (a >= n || !q.length) return;
       a++;
-      const { fn, resolve, reject } = q.shift();
-      fn().then(resolve, reject).finally(() => { a--; next(); });
+      const job = q.shift();
+      job.fn()
+        .then(job.resolve, job.reject)
+        .finally(() => { a--; next(); });
     };
-    return fn => new Promise((resolve, reject) => { q.push({ fn, resolve, reject }); next(); });
+
+    return (fn) => new Promise((resolve, reject) => {
+      q.push({ fn, resolve, reject });
+      next();
+    });
   }
 
   // =========================
@@ -498,60 +587,121 @@
     if (!tables.length) return;
 
     const progress = StockKit.makeProgress(btn);
-    progress.start(tables.length);
 
+    // 1) Indexeren
+    progress.start(tables.length + 1);
+    Logger.status('RJ', 'indexeren...');
+
+    let index;
+    try {
+      index = await buildRjIndexOnce();
+    } catch (e) {
+      Logger.status('RJ', 'afwijking (index build error)');
+      console.error('[RJ] index build error:', e);
+      progress.setDone(1);
+      progress.success(0);
+      return;
+    }
+
+    progress.setDone(1);
+    Logger.status('RJ', `index klaar (${index.byBase.size} items)`);
+
+    // 2) Vergelijken
     const limit = pLimit(CONCURRENCY);
-    let idx = 0;
+    let doneCount = 0;
     let totalMut = 0;
 
-    await Promise.all(tables.map(table => limit(async () => {
-      const tableId  = (table.id || '').trim();
-      const anchorId = tableId || 'onbekend';
+    const jobs = tables.map((table) => {
+      return limit(async () => {
+        const tableId  = (table.id || '').trim();
+        const anchorId = tableId || 'onbekend';
 
-      // ✅ AANNAME: table.id = supplierPid
-      const supplierPid = tableId;
-
-      if (!supplierPid) {
-        Logger.status(anchorId, 'niet-gevonden (geen supplierPid)');
-        Logger.perMaat(anchorId, []);
-        progress.setDone(++idx);
-        return;
-      }
-
-      try {
-        const match = await findJsonConfigForSupplierPid(supplierPid, MAX_PAGES);
-        if (!match || !match.jsonConfig) {
-          Logger.status(anchorId, 'niet-gevonden');
+        // ✅ aanname: table.id = supplierPid
+        const supplierPid = tableId;
+        if (!supplierPid) {
+          Logger.status(anchorId, 'niet-gevonden (geen supplierPid)');
           Logger.perMaat(anchorId, []);
-          progress.setDone(++idx);
+          progress.setDone(2 + (++doneCount));
           return;
         }
 
-        const variants = buildVariantsFromJsonConfig(match.jsonConfig, supplierPid);
-        const statusMap = buildStatusMapFromVariants(variants);
+        const baseSku = baseFromSupplierPid(supplierPid);
 
-        if (!statusMap || Object.keys(statusMap).length === 0) {
-          Logger.status(anchorId, 'niet-gevonden');
-          Logger.perMaat(anchorId, []);
-        } else {
-          const report = applyRulesAndMark(table, statusMap);
+        try {
+          console.groupCollapsed(`[RJ] ${supplierPid}`);
+
+          const hit = index.byBase.get(baseSku);
+          if (!hit || !hit.jsonConfig) {
+            Logger.status(anchorId, 'niet-gevonden');
+            Logger.perMaat(anchorId, []);
+            console.warn(`[RJ] geen index-hit voor baseSku ${baseSku}`);
+            console.groupEnd();
+            progress.setDone(2 + (++doneCount));
+            return;
+          }
+
+          console.info(`[RJ] index-hit: baseSku=${baseSku} → ${hit.path} p=${hit.page}`);
+          console.info(`[RJ] source: ${hit.sourceUrl}`);
+
+          const variants = buildVariantsFromJsonConfig(hit.jsonConfig, supplierPid);
+
+          if (DEBUG_RJ.variants) {
+            console.groupCollapsed('[RJ][variants] raw');
+            console.table(variants.map(v => ({
+              sizeKey: v.sizeKey,
+              sizeLabel: v.sizeLabel,
+              qty: v.remoteQty,
+              sku: v.sku,
+              id: v.id
+            })));
+            console.groupEnd();
+          }
+
+          const statusMap = buildStatusMapFromVariants(variants);
+          if (!statusMap || Object.keys(statusMap).length === 0) {
+            Logger.status(anchorId, 'niet-gevonden');
+            Logger.perMaat(anchorId, []);
+            console.warn(`[RJ] statusMap leeg voor ${supplierPid}`);
+            console.groupEnd();
+            progress.setDone(2 + (++doneCount));
+            return;
+          }
+
+          const report = buildReport(table, statusMap);
+          applyRulesAndMark(table, statusMap);
+
           totalMut += report.filter(r => r.actie === 'uitboeken' || r.actie === 'bijboeken').length;
+
           Logger.status(anchorId, bepaalLogStatus(report, statusMap));
           Logger.perMaat(anchorId, report);
+
+          if (DEBUG_RJ.perItemTable) {
+            console.groupCollapsed(`[RJ][table] ${supplierPid} (local vs remote)`);
+            console.table(report.map(r => ({
+              maat: r.maat,
+              local: r.local,
+              remoteQty: Number.isFinite(r.remoteQty) ? r.remoteQty : '—',
+              remoteStock: Number.isFinite(r.remoteStock) ? r.remoteStock : '—',
+              conclusie: r.actie
+            })));
+            console.groupEnd();
+          }
+
+          console.groupEnd();
+        } catch (e) {
+          try { console.groupEnd(); } catch {}
+          const msg = String(e?.message || e);
+          if (msg.includes('HTTP 401') || msg.includes('HTTP 403')) Logger.status(anchorId, 'afwijking (auth/cookies op RJ)');
+          else if (msg.includes('Timeout')) Logger.status(anchorId, 'afwijking (timeout)');
+          else Logger.status(anchorId, 'afwijking');
+          Logger.perMaat(anchorId, []);
+        } finally {
+          progress.setDone(2 + (++doneCount));
         }
+      });
+    });
 
-      } catch (e) {
-        const msg = String(e?.message || e);
-        if (msg.includes('HTTP 401') || msg.includes('HTTP 403')) Logger.status(anchorId, 'afwijking (auth/cookies op RJ tab)');
-        else if (msg.includes('Timeout')) Logger.status(anchorId, 'afwijking (timeout)');
-        else Logger.status(anchorId, 'afwijking');
-
-        Logger.perMaat(anchorId, []);
-      } finally {
-        progress.setDone(++idx);
-      }
-    })));
-
+    await Promise.all(jobs);
     progress.success(totalMut);
   }
 
@@ -564,8 +714,6 @@
     const val = norm(sel.value || '');
     const txt = norm(sel.options[sel.selectedIndex]?.text || '');
     const blob = `${val} ${txt}`;
-
-    // ruim matchen
     return /\brj\b/i.test(blob) || /rj\s*bodywear/i.test(blob);
   }
 
