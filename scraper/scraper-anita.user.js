@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EAN Scraper | Anita
-// @version      3.8
-// @description  Haalt Anita B2B-voorraad op (data-in-stock) en vult DDO; daarna EANs uit Google Sheet. Alt-klik: DEBUG aan/uit. Ctrl-klik: Sheet refresh (cache-bypass). Ondersteunt Koll (M3/M4/M5) in Sheet kolom A (met heuristiek). Hotkey: Ctrl+Shift+S (met autosave).
+// @version      3.9
+// @description  Haalt Anita B2B-voorraad op (data-in-stock) en vult DDO; daarna EANs uit Google Sheet. Alt-klik: DEBUG aan/uit. Ctrl-klik: Sheet refresh (stock+EAN). Ctrl+Alt-klik: alleen EANs + autosave. Hotkey: Ctrl+Shift+S (met autosave).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @grant        GM_xmlhttpRequest
 // @connect      b2b.anita.com
@@ -36,8 +36,8 @@
   const ACCEPT_HDR = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
   // Google Sheet (specifiek tabblad)
-  const SHEET_ID = "1ufj-NCmFw0B5PQ2trYZO_9AWqKvZOxnm";
-  const SHEET_GID = "1536470535";
+  const SHEET_ID = "1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68";
+  const SHEET_GID = "2033780105";
 
   // Cache + authuser voorkeur
   const CACHE_KEY    = `anitaSheetCache:${SHEET_ID}:${SHEET_GID}`;
@@ -77,7 +77,7 @@
     btn = document.createElement("button");
     btn.id = BTN_ID;
     btn.textContent = "⛏️ SS&E | Anita/Rosa";
-    btn.title = "Klik: uitvoeren • Alt-klik: DEBUG aan/uit • Ctrl-klik: Sheet refresh";
+    btn.title = "Klik: stock+EAN • Alt-klik: DEBUG • Ctrl-klik: stock+EAN + Sheet refresh • Ctrl+Alt-klik: alleen EANs + autosave";
     Object.assign(btn.style, {
       position: "fixed", right: "10px", top: "10px", zIndex: 999999,
       padding: "10px 12px", background: "#007cba", color: "#fff",
@@ -147,30 +147,34 @@
 
   // ────────────────────────────────────────────────────────────────────────────
   // supplier_pid parsing
-  function parseSupplierPid(input) {
-    const raw = String(input || "").trim().toUpperCase();
-    const normd = raw
-      .replace(/[_\s]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "");
-    const m = normd.match(/^(?:(M[345])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)\-(\d{3})$/i);
+ function parseSupplierPid(input) {
+  const raw = String(input || "").trim().toUpperCase();
 
-    if (!m) {
-      const noColor = normd.match(/^(?:(M[345])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)$/i);
-      if (noColor) {
-        const koll = noColor[1] || "";
-        const productId = noColor[2];
-        throw new Error(`Kleurcode ontbreekt voor ${koll ? koll + "-" : ""}${productId}. Voeg altijd een 3-cijferige kleur toe (bv. "-430").`);
-      }
-      throw new Error(`Onbekend supplier_pid-format: "${raw}". Verwacht bv. "M4-8314-1-430" of "5727X-181".`);
+  // normaliseer: spaties/_ -> -, dubbele - weg, trim -
+  const normd = raw
+    .replace(/[_\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  // Sta M3..M6 toe + accepteer evt. letters achter de kleurcode (bv. 305is)
+  const m = normd.match(/^(?:(M[3-6])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)\-(\d{3})[A-Z]*$/i);
+
+  if (!m) {
+    const noColor = normd.match(/^(?:(M[3-6])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)$/i);
+    if (noColor) {
+      const koll = noColor[1] || "";
+      const productId = noColor[2];
+      throw new Error(`Kleurcode ontbreekt voor ${koll ? koll + "-" : ""}${productId}. Voeg altijd een 3-cijferige kleur toe (bv. "-430").`);
     }
-
-    const koll = m[1] || "";
-    const productId = m[2];
-    const colorCode = m[3];
-
-    return { productId, colorCode, koll };
+    throw new Error(`Onbekend supplier_pid-format: "${raw}". Verwacht bv. "M6-6560-1-305" of "6560-1-305".`);
   }
+
+  const koll = m[1] || "";
+  const productId = m[2];
+  const colorCode = m[3];
+
+  return { productId, colorCode, koll };
+}
 
   // ────────────────────────────────────────────────────────────────────────────
   // Anita fetch
@@ -756,16 +760,49 @@
   // Main flow (klik / hotkey)
   async function handleClick(btn, evt, autoSaveThisRun = false) {
     try {
-      if (evt && evt.altKey) {
+      const hasCtrl  = !!(evt && evt.ctrlKey);
+      const hasAlt   = !!(evt && evt.altKey);
+      const hasShift = !!(evt && evt.shiftKey);
+      const hasMeta  = !!(evt && (evt.metaKey || evt.key === "Meta"));
+
+      // Alt-alleen: DEBUG togglen
+      const isAltOnly = hasAlt && !hasCtrl && !hasShift && !hasMeta;
+      if (isAltOnly) {
         DEBUG = !DEBUG;
-        setBtnState(btn, `🐞 Debug ${DEBUG ? "ON" : "OFF"}`, DEBUG ? "#8e44ad" : "#007cba",
-          "Klik: uitvoeren • Alt-klik: DEBUG aan/uit • Ctrl-klik: Sheet refresh");
+        setBtnState(
+          btn,
+          `🐞 Debug ${DEBUG ? "ON" : "OFF"}`,
+          DEBUG ? "#8e44ad" : "#007cba",
+          "Klik: stock+EAN • Alt-klik: DEBUG • Ctrl-klik: stock+EAN + Sheet refresh • Ctrl+Alt-klik: alleen EANs + autosave"
+        );
         dbg("DEBUG toggled →", DEBUG);
         return;
       }
-      const forceSheetRefresh = !!(evt && evt.ctrlKey);
-      if (forceSheetRefresh) {
-        setBtnState(btn, "🔄 Sheet refresh…", "#6c757d", "Cache omzeilen & opnieuw downloaden");
+
+      // Modi:
+      // - Ctrl          → stock + EAN, met sheet-refresh
+      // - Ctrl+Alt      → alleen EAN, geen sheet-refresh, wél autosave
+      // - Geen modifiers→ stock + EAN, geen refresh, geen autosave
+      const eanOnly           = hasCtrl && hasAlt;
+      const forceSheetRefresh = hasCtrl && !hasAlt;
+      const autoSave          = autoSaveThisRun || (hasCtrl && hasAlt);
+
+      if (forceSheetRefresh && !eanOnly) {
+        // Ctrl-klik: stock + EAN, maar eerst cache omzeilen
+        setBtnState(
+          btn,
+          "🔄 Sheet refresh…",
+          "#6c757d",
+          "Cache omzeilen & opnieuw downloaden (stock + EANs)"
+        );
+      } else if (eanOnly) {
+        // Ctrl+Alt-klik: alleen EANs, geen geforceerde refresh
+        setBtnState(
+          btn,
+          "⏳ Alleen EANs…",
+          "#6c757d",
+          "Alleen EANs vullen (stock ongemoeid, autosave aan, géén sheet-refresh-force)"
+        );
       }
 
       const brand = getBrand();
@@ -793,25 +830,41 @@
         return;
       }
 
-      setBtnState(
-        btn,
-        "⏳ Stock ophalen…",
-        "#6c757d",
-        `Product ${productId}, kleur ${colorCode}${koll ? `, ${koll}` : ""}`
-      );
-      const html = await fetchAnitaHtml(productId, colorCode, koll);
-      const supplierStatus = extractStockFromHtml(html, colorCode);
-      const { updated: sUpd, missing: sMiss } = applyStockToDdo(supplierStatus);
+      let sUpd = 0, sMiss = 0;
 
-      if (sUpd === 0) {
-        setBtnState(btn, "❌ Geen overeenkomstige maten", "#E06666", "Stock: 0 updates (zie console bij DEBUG)");
-        return;
+      // ── STOCK (alleen als we NIET in eanOnly-mode zitten)
+      if (!eanOnly) {
+        setBtnState(
+          btn,
+          "⏳ Stock ophalen…",
+          "#6c757d",
+          `Product ${productId}, kleur ${colorCode}${koll ? `, ${koll}` : ""}`
+        );
+
+        const html = await fetchAnitaHtml(productId, colorCode, koll);
+        const supplierStatus = extractStockFromHtml(html, colorCode);
+        const r = applyStockToDdo(supplierStatus);
+        sUpd = r.updated;
+        sMiss = r.missing;
+
+        if (sUpd === 0) {
+          setBtnState(btn, "❌ Geen overeenkomstige maten", "#E06666", "Stock: 0 updates (zie console bij DEBUG)");
+          return;
+        }
+
+        setBtnState(btn, `✅ Stock ${sUpd}× (miss: ${sMiss}) → EANs…`, "#2ecc71", "Vul EANs in");
       }
-      setBtnState(btn, `✅ Stock ${sUpd}× (miss: ${sMiss}) → EANs…`, "#2ecc71", "Vul EANs in");
 
+      // ── SHEET + EAN (voor beide modi)
       try {
         const raw = await fetchSheetRaw({ force: forceSheetRefresh });
-        dbg("Using", raw.kind.toUpperCase(), "authuser", raw.authuser, raw.fromCache ? "(cache)" : "(fresh)");
+        dbg(
+          "Using",
+          raw.kind.toUpperCase(),
+          "authuser",
+          raw.authuser,
+          raw.fromCache ? "(cache)" : "(fresh)"
+        );
         const rows = raw.kind === "csv" ? parseCsv(raw.text) : parseTsv(raw.text);
 
         debugPreviewDdoSizes();
@@ -819,20 +872,54 @@
         const eanMap = buildEanMapFromRows(rows, productId, colorCode, koll);
         const { updated: eUpd, missing: eMiss } = applyEansToDdo(eanMap);
 
-        if (eUpd > 0) {
-          setBtnState(btn, `✅ Stock ${sUpd} | ✅ EANs ${eUpd} (miss: ${eMiss})`, "#2ecc71",
-            "Voorraad + EANs ingevuld");
+        if (!eanOnly) {
+          // Normale modus: stock + EAN
+          if (eUpd > 0) {
+            setBtnState(
+              btn,
+              `✅ Stock ${sUpd} | ✅ EANs ${eUpd} (miss: ${eMiss})`,
+              "#2ecc71",
+              "Voorraad + EANs ingevuld"
+            );
+          } else {
+            setBtnState(
+              btn,
+              `✅ Stock ${sUpd} | 🟧 EANs 0 (miss: ${eMiss})`,
+              "#f39c12",
+              "Geen EAN-match; check Koll/Artikelnummer/Kleurcode/Cup/Maat/EAN in Sheet"
+            );
+          }
         } else {
-          setBtnState(btn, `✅ Stock ${sUpd} | 🟧 EANs 0 (miss: ${eMiss})`, "#f39c12",
-            "Geen EAN-match; check Koll/Artikelnummer/Kleurcode/Cup/Maat/EAN in Sheet");
+          // Alleen EANs (Ctrl+Alt)
+          if (eUpd > 0) {
+            setBtnState(
+              btn,
+              `✅ Alleen EANs ${eUpd} (miss: ${eMiss})`,
+              "#2ecc71",
+              "Alleen EANs ingevuld (stock ongemoeid gelaten, autosave actief)"
+            );
+          } else {
+            setBtnState(
+              btn,
+              `🟧 Alleen EANs 0 (miss: ${eMiss})`,
+              "#f39c12",
+              "Geen EAN-match; check Koll/Artikelnummer/Kleurcode/Cup/Maat/EAN in Sheet"
+            );
+          }
         }
       } catch (e) {
         console.error("[EAN Sheet] Fout:", e);
-        setBtnState(btn, `✅ Stock ${sUpd} | ❌ EAN-fetch`, "#E06666", e?.message || "Fout bij Sheet");
+        if (!eanOnly) {
+          setBtnState(btn, `✅ Stock ${sUpd} | ❌ EAN-fetch`, "#E06666", e?.message || "Fout bij Sheet");
+        } else {
+          setBtnState(btn, "❌ EAN-fetch (alleen EANs)", "#E06666", e?.message || "Fout bij Sheet");
+        }
       }
 
-      // ⬇︎ Alleen bij hotkey-run automatisch opslaan
-      if (autoSaveThisRun) {
+      // Autosave:
+      // - Hotkey Ctrl+Shift+S → autoSaveThisRun = true
+      // - Ctrl+Alt-klik       → autoSave = true
+      if (autoSave) {
         clickUpdateProductButton();
       }
 
