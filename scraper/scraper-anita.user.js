@@ -147,7 +147,7 @@
 
   // ────────────────────────────────────────────────────────────────────────────
   // supplier_pid parsing
- function parseSupplierPid(input) {
+function parseSupplierPid(input) {
   const raw = String(input || "").trim().toUpperCase();
 
   // normaliseer: spaties/_ -> -, dubbele - weg, trim -
@@ -156,17 +156,22 @@
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 
-  // Sta M3..M6 toe + accepteer evt. letters achter de kleurcode (bv. 305is)
-  const m = normd.match(/^(?:(M[3-6])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)\-(\d{3})[A-Z]*$/i);
+  // Koll = 1 letter + 1 cijfer (bv. M6, L9) optioneel
+  // Kleurcode = 3 cijfers, evt letters erachter (bv. 305is)
+  const m = normd.match(/^(?:([A-Z]\d)\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)\-(\d{3})[A-Z]*$/i);
 
   if (!m) {
-    const noColor = normd.match(/^(?:(M[3-6])\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)$/i);
+    const noColor = normd.match(/^(?:([A-Z]\d)\-)?([A-Z0-9]+(?:\-[A-Z0-9]+)*)$/i);
     if (noColor) {
       const koll = noColor[1] || "";
       const productId = noColor[2];
-      throw new Error(`Kleurcode ontbreekt voor ${koll ? koll + "-" : ""}${productId}. Voeg altijd een 3-cijferige kleur toe (bv. "-430").`);
+      throw new Error(
+        `Kleurcode ontbreekt voor ${koll ? koll + "-" : ""}${productId}. Voeg altijd een 3-cijferige kleur toe (bv. "-430").`
+      );
     }
-    throw new Error(`Onbekend supplier_pid-format: "${raw}". Verwacht bv. "M6-6560-1-305" of "6560-1-305".`);
+    throw new Error(
+      `Onbekend supplier_pid-format: "${raw}". Verwacht bv. "L9-6560-1-305" of "6560-1-305".`
+    );
   }
 
   const koll = m[1] || "";
@@ -175,6 +180,7 @@
 
   return { productId, colorCode, koll };
 }
+
 
   // ────────────────────────────────────────────────────────────────────────────
   // Anita fetch
