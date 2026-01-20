@@ -94,20 +94,21 @@ function ensureButton() {
         .map((line) => line.trim())
         .filter(Boolean)
         .map((line) => {
-          const [maat, ean, pid] = line.split("\t");
-          return { maat, ean, pid };
-        });
+  const [maat, ean, pid, stock] = line.split("\t");
+  return { maat, ean, pid, stock };
+});
 
       const supplierPid = document.querySelector(PID_SELECTOR)?.value?.trim();
       if (!supplierPid) return fail("❌ Geen Supplier PID");
 
       const filtered = data
-        .map((r) => ({
-          ...r,
-          pid: r.pid?.trim().toUpperCase(),
-          _normMaat: normalizeSize(r.maat),
-        }))
-        .filter((r) => supplierPid.toUpperCase().startsWith(r.pid));
+  .map((r) => ({
+    ...r,
+    pid: r.pid?.trim().toUpperCase(),
+    stock: (r.stock ?? "").trim(), // kan leeg zijn
+    _normMaat: normalizeSize(r.maat),
+  }))
+  .filter((r) => r.pid && supplierPid.toUpperCase().startsWith(r.pid));
 
       if (filtered.length === 0)
         return fail(`❌ Geen matches voor PID: ${supplierPid}`);
@@ -117,29 +118,46 @@ function ensureButton() {
 
       const rows = table.querySelectorAll("tr");
       let matched = 0;
+let stockUpdated = 0;
 
-      rows.forEach((row) => {
-        const cells = row.querySelectorAll("td");
-        if (cells.length < 2) return;
+rows.forEach((row) => {
+  const cells = row.querySelectorAll("td");
+  if (cells.length < 2) return;
 
-        const maatInput = cells[0].querySelector("input");
-        const maatCellRaw = maatInput ? maatInput.value : "";
-        const maatCell = normalizeSize(maatCellRaw);
-        const eanInput = row.querySelector(
-          'input[name^="options"][name$="[barcode]"]'
-        );
-        if (!maatCell || !eanInput) return;
+  // maat uit de eerste kolom
+  const maatInput = cells[0].querySelector("input");
+  const maatCellRaw = maatInput ? maatInput.value : "";
+  const maatCell = normalizeSize(maatCellRaw);
 
-        const match = filtered.find((entry) => entry._normMaat === maatCell);
-        if (match) {
-          eanInput.value = match.ean;
-          eanInput.dispatchEvent(new Event("input", { bubbles: true }));
-          matched++;
-        }
-      });
+  const eanInput = row.querySelector(
+    'input[name^="options"][name$="[barcode]"]'
+  );
+  const stockInput = row.querySelector(
+    'input[name^="options"][name$="[stock]"]'
+  );
+
+  if (!maatCell || !eanInput) return;
+
+  const match = filtered.find((entry) => entry._normMaat === maatCell);
+  if (!match) return;
+
+  // EAN plakken
+  if (match.ean) {
+    eanInput.value = match.ean;
+    eanInput.dispatchEvent(new Event("input", { bubbles: true }));
+    matched++;
+  }
+
+  // Stock plakken (optioneel)
+  if (match.stock !== "" && stockInput) {
+    stockInput.value = match.stock;
+    stockInput.dispatchEvent(new Event("input", { bubbles: true }));
+    stockUpdated++;
+  }
+});
 
       btn.style.backgroundColor = "#2ecc71";
-      btn.textContent = `📦 ${matched} EAN's geplakt!`;
+      btn.textContent = `📦 ${matched} EAN's geplakt! + ${stockUpdated} stock bijgewerkt!`;
       setTimeout(resetBtn, 2000);
     } catch (e) {
       console.error("❌ Fout bij plakken:", e);
