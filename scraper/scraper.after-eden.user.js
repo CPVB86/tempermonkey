@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Scraper | After Eden
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1.1
-// @description  Haal After Eden stock via bcg.fashionportal.shop/itemquantitycal (HTML) en vul #tabs-3 in (DDO admin). Haal EAN via Google Sheet (gid per merk). Hotkey: Ctrl+Shift+A (autosave).
+// @version      1.2.0
+// @description  Haal After Eden/Elbrina stock via bcg.fashionportal.shop/itemquantitycal (HTML) en vul #tabs-3 in (DDO admin). Haal EAN via Google Sheet (gid). Hotkey: Ctrl+Shift+A (autosave).
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @grant        GM_xmlhttpRequest
 // @connect      bcg.fashionportal.shop
@@ -41,6 +41,7 @@
   const SHEET_ID = '1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68';
   const SHEET_GID_BY_BRAND = {
     aftereden: '1291267370',
+    elbrina:   '1291267370', // zelfde sheet/gid (pas aan als Elbrina later een eigen gid krijgt)
   };
 
   const SHEET_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -59,6 +60,8 @@
   // 4) Maat ontbreekt in remote matrix -> NEGEREN (laat local ongemoeid)
   function mapAfterEdenInventoryToLocalStock(remoteInventory) {
     const r = Number(remoteInventory) || 0;
+
+    // remote bestaat (we zitten alleen in mapping als maat in remote bestaat)
     if (r <= 0) return 1;
 
     const adjusted = Math.max(0, r - 4);
@@ -79,7 +82,7 @@
         method: 'GET',
         url,
         headers,
-        anonymous: false, // <- gebruikt jouw lokale cookies (B2B + Google)
+        anonymous: false, // gebruikt jouw lokale cookies (B2B + Google)
         onload: (res) => resolve(res),
         onerror: () => reject(new Error('Network error')),
         ontimeout: () => reject(new Error('Timeout')),
@@ -108,6 +111,8 @@
     return String(s || '').trim();
   }
 
+  function hasTable() { return !!$(TABLE_SELECTOR); }
+
   function isTab3Active() {
     const activeByHeader = document.querySelector(
       '#tabs .ui-tabs-active a[href="#tabs-3"], ' +
@@ -121,8 +126,6 @@
     const style = getComputedStyle(panel);
     return style.display !== 'none' && style.visibility !== 'hidden' && style.height !== '0px';
   }
-
-  function hasTable() { return !!$(TABLE_SELECTOR); }
 
   function clickUpdateProductButton() {
     const saveBtn =
@@ -141,9 +144,16 @@
     return (titleAttr || text || selectText || '').replace(/\u00A0/g, ' ').trim();
   }
 
+  // ✅ beschikbaar voor alle merken beginnend met "After Eden" + ook Elbrina
   function getBrandKey() {
     const t = getBrandTitle().toLowerCase();
-    if (t.includes('after eden')) return 'aftereden';
+
+    // alles wat begint met after eden (ook "After Eden ..." varianten)
+    if (t.startsWith('after eden') || t.includes('after eden')) return 'aftereden';
+
+    // elbrina
+    if (t.startsWith('elbrina') || t.includes('elbrina')) return 'elbrina';
+
     return '';
   }
 
@@ -152,17 +162,36 @@
     return key ? (SHEET_GID_BY_BRAND[key] || '') : '';
   }
 
-  function isAfterEdenBrand() {
-    return getBrandKey() === 'aftereden';
+  function isAllowedBrand() {
+    return !!getBrandKey() && !!getSheetGidForBrand();
   }
 
   function getItemNumberFromSupplierPid() {
     const raw = document.querySelector(PID_SELECTOR)?.value || '';
     const pid = String(raw).trim().split(/[\s,;]+/)[0];
-    return pid;
+    return pid; // item_number = exact supplier_pid
   }
 
-  // ========= Sheet cache (zelfde flow als je voorbeeld) =========
+  // ========= Robust inventory read =========
+  // 3D: .qty-limit[data-inventory]
+  // 1D list (S/M/L/...): idem, maar soms is data-title op input betrouwbaarder
+  function readRemoteInventoryFromBox(box) {
+    const qtyLimit = box.querySelector('.qty-limit');
+    const input = box.querySelector('input.quntity-input');
+
+    const invA = qtyLimit?.getAttribute('data-inventory'); // voorkeur
+    const invB = qtyLimit?.dataset?.inventory;             // tolerant
+    const invC = input?.getAttribute('data-title');        // fallback
+    const invD = input?.dataset?.title;                    // fallback
+
+    const raw = (invA ?? invB ?? invC ?? invD ?? '0');
+
+    const cleaned = String(raw).trim().replace(',', '.');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  // ========= Sheet cache =========
   function sheetCacheKeyForGid(gid) {
     return `afteredenSheetCache:${SHEET_ID}:${gid}`;
   }
@@ -217,22 +246,17 @@
   }
 
   // ========= EAN map (Sheet: Size | Ean | Supplier ID) =========
-  // Voorbeeld uit jouw sheet:
-  // Size   Ean             Supplier ID
-  // 70C    0000000000001   10.05.6185-230
   function buildEanMapFromRows_SimpleCols(rows, supplierPidRaw) {
     const eanMap = new Map();
     const pidWanted = normalizePid(supplierPidRaw);
 
     if (!rows || rows.length < 2) return eanMap;
 
-    // Header-detectie (case-insensitive)
     const header = rows[0].map(c => String(c || '').trim().toLowerCase());
     const idxSize = header.findIndex(h => h === 'size' || h.includes('size'));
     const idxEan  = header.findIndex(h => h === 'ean' || h.includes('ean'));
     const idxPid  = header.findIndex(h => h === 'supplier id' || h.includes('supplier'));
 
-    // Fallback op vaste posities: Size/Ean/Supplier ID
     const sizeI = idxSize >= 0 ? idxSize : 0;
     const eanI  = idxEan  >= 0 ? idxEan  : 1;
     const pidI  = idxPid  >= 0 ? idxPid  : 2;
@@ -259,9 +283,17 @@
   }
 
   // ========= Stock HTML parsing =========
-  function parseHtmlToExactMap(html) {
+  // We ondersteunen:
+  // A) 3D BH matrix: .qty-by-size-3D (band header + cup rows)
+  // B) 1D list (brief/broekjes): .qty-by-size.qty-by-size-list met .add-qty-box per maat (S/M/L/XL/XXL)
+  function parseHtmlToMaps(html) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
+    const exactMap = new Map(); // "70C" etc
+    const oneDMap  = new Map(); // "S" "M" "L" etc
+    const debugRows = [];
+
+    // ---- A) 3D matrix ----
     const headerRow = doc.querySelector('.qty-by-size-3D');
     const bandSizes = headerRow
       ? [...headerRow.querySelectorAll('.size-for.text-center')]
@@ -269,44 +301,89 @@
           .filter(Boolean)
       : [];
 
-    const rows = [...doc.querySelectorAll('.qty-by-size-3D')].slice(1);
+    const matrixRows = [...doc.querySelectorAll('.qty-by-size-3D')].slice(1);
 
-    const exactMap = new Map();
-    const debugRows = [];
+    if (bandSizes.length && matrixRows.length) {
+      for (const row of matrixRows) {
+        const cup = row.querySelector('.size-for.cup-size')?.textContent?.trim();
+        if (!cup) continue;
 
-    for (const row of rows) {
-      const cup = row.querySelector('.size-for.cup-size')?.textContent?.trim();
-      if (!cup) continue;
+        const cells = [...row.querySelectorAll('.add-qty-box')];
 
-      const cells = [...row.querySelectorAll('.add-qty-box')];
+        cells.forEach((cell, idx) => {
+          const band = bandSizes[idx] || null;
+          if (!band) return;
 
-      cells.forEach((cell, idx) => {
-        const band = bandSizes[idx] || null;
-        if (!band) return;
+          const remoteInventory = readRemoteInventoryFromBox(cell);
+          const input = cell.querySelector('input.quntity-input');
+          const itemVarId = input?.getAttribute('data-itemvarid') || '';
 
-        const qtyLimit = cell.querySelector('.qty-limit');
-        const remoteInventory = qtyLimit ? Number(qtyLimit.getAttribute('data-inventory') || '0') : 0;
+          const status =
+            cell.classList.contains('outofstock') || remoteInventory === 0 ? 'outofstock' : 'available';
 
-        const input = cell.querySelector('input.quntity-input');
+          const sizeKey = normalizeLocalSize(`${band}${cup}`);
+          const adjusted = Math.max(0, (Number(remoteInventory) || 0) - 4);
+          const mapped = mapAfterEdenInventoryToLocalStock(remoteInventory);
+
+          exactMap.set(sizeKey, { remoteInventory, adjusted, mapped, itemVarId, status });
+
+          debugRows.push({
+            type: '3D',
+            size: sizeKey,
+            band,
+            cup,
+            remoteInventory,
+            adjusted,
+            mapped,
+            status,
+            itemVarId
+          });
+        });
+      }
+    }
+
+    // ---- B) 1D list sizes (S/M/L/XL/XXL etc) ----
+    // voorbeeld: .qty-by-size.qty-by-size-list ... .add-qty-box met .size-for = "M"
+    const listWraps = [...doc.querySelectorAll('.qty-by-size.qty-by-size-list, .qty-by-size-list')];
+
+    for (const wrap of listWraps) {
+      const boxes = [...wrap.querySelectorAll('.add-qty-box')];
+      for (const box of boxes) {
+        const sizeRaw = box.querySelector('.size-for')?.textContent?.trim();
+        if (!sizeRaw) continue;
+
+        const sizeKey = normalizeLocalSize(sizeRaw); // "S" "M" etc
+        const remoteInventory = readRemoteInventoryFromBox(box);
+
+        const input = box.querySelector('input.quntity-input');
         const itemVarId = input?.getAttribute('data-itemvarid') || '';
 
         const status =
-          cell.classList.contains('outofstock') || remoteInventory === 0 ? 'outofstock' : 'available';
+          box.classList.contains('outofstock') || remoteInventory === 0 ? 'outofstock' : 'available';
 
-        const sizeKey = normalizeLocalSize(`${band}${cup}`);
         const adjusted = Math.max(0, (Number(remoteInventory) || 0) - 4);
         const mapped = mapAfterEdenInventoryToLocalStock(remoteInventory);
 
-        exactMap.set(sizeKey, { remoteInventory, adjusted, mapped, itemVarId, status });
-        debugRows.push({ size: sizeKey, band, cup, remoteInventory, adjusted, mapped, status, itemVarId });
-      });
+        // 1D-map: we willen best match per maat (meestal uniek)
+        oneDMap.set(sizeKey, { remoteInventory, adjusted, mapped, itemVarId, status });
+
+        debugRows.push({
+          type: '1D',
+          size: sizeKey,
+          remoteInventory,
+          adjusted,
+          mapped,
+          status,
+          itemVarId
+        });
+      }
     }
 
-    console.groupCollapsed('[AfterEden] Remote matrix (parsed + mapped)');
+    console.groupCollapsed('[AfterEden] Remote sizes (parsed + mapped)');
     console.table(debugRows);
     console.groupEnd();
 
-    return { exactMap, bandSizes };
+    return { exactMap, oneDMap };
   }
 
   // ========= Apply =========
@@ -315,13 +392,12 @@
     return normalizeLocalSize(sizeInput?.value || '');
   }
 
-  function applyToTable(exactMap, eanMap) {
+  function applyToTable(exactMap, oneDMap, eanMap) {
     const table = document.querySelector(TABLE_SELECTOR);
     if (!table) return { matched: 0, report: [] };
 
     const rows = table.querySelectorAll('tbody tr');
     let matched = 0;
-
     const report = [];
 
     rows.forEach(row => {
@@ -331,7 +407,11 @@
 
       const localBefore = stockInput ? Number(stockInput.value || 0) : 0;
 
-      const remoteObj = sizeKey ? exactMap.get(sizeKey) : null;
+      // eerst exact (BH), anders 1D (S/M/L)
+      const remoteObj =
+        (sizeKey ? exactMap.get(sizeKey) : null) ||
+        (sizeKey ? oneDMap.get(sizeKey)  : null) ||
+        null;
 
       // ✅ maat ontbreekt remote -> NEGEREN (niet overschrijven)
       if (!remoteObj) {
@@ -406,10 +486,18 @@
     if (!btn) return;
 
     const gid = getSheetGidForBrand();
-    const okBrand = isAfterEdenBrand() && !!gid;
+    const okBrand = isAllowedBrand() && !!gid;
     btn.style.display = (okBrand && isTab3Active()) ? '' : 'none';
     btn.disabled = !hasTable();
     btn.style.opacity = hasTable() ? '1' : '.55';
+
+    // label dynamisch (After Eden vs Elbrina)
+    const bk = getBrandKey();
+    const label = bk === 'elbrina' ? '⛏️ SS&E | Elbrina' : '⛏️ SS&E | After Eden';
+    if (!btn.disabled && btn.textContent && btn.textContent.includes('SS&E')) {
+      // alleen aanpassen als hij in "idle" staat
+      if (!/⏳|📦|⚠️|❌/u.test(btn.textContent)) btn.textContent = label;
+    }
   }
 
   function ensureButton() {
@@ -463,7 +551,7 @@
     }
 
     const stockUrl = STOCK_URL(itemNumber);
-    console.log('[AfterEden] supplierPidRaw:', supplierPidRaw, 'itemNumber:', itemNumber);
+    console.log('[AfterEden] brandKey:', brandKey, 'supplierPidRaw:', supplierPidRaw, 'itemNumber:', itemNumber);
     console.log('[AfterEden] Stock URL:', stockUrl);
 
     setBtnState({ text: `⏳ Stock laden (${brandKey})...`, bg: '#f1c40f', disabled: true, opacity: '.85' });
@@ -477,7 +565,7 @@
       const looksWrong = !html.includes('data-inventory=') && /login|sign in|unauthorized/i.test(html);
       if (looksWrong) throw new Error('LOGIN_REQUIRED');
 
-      const { exactMap } = parseHtmlToExactMap(html);
+      const { exactMap, oneDMap } = parseHtmlToMaps(html);
 
       // --- Sheet / EAN ---
       setBtnState({ text: `⏳ Sheet (EAN) laden (gid ${gid})...`, bg: '#6c757d', disabled: true, opacity: '.85' });
@@ -489,7 +577,7 @@
       const eanMap = buildEanMapFromRows_SimpleCols(rows, supplierPidRaw);
 
       // --- Apply ---
-      const { matched } = applyToTable(exactMap, eanMap);
+      const { matched } = applyToTable(exactMap, oneDMap, eanMap);
 
       setBtnState({
         text: matched ? `📦 ${matched} rijen gevuld` : '⚠️ 0 rijen gevuld',
