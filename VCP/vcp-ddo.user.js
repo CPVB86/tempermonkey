@@ -102,6 +102,7 @@
     'mundo-unico': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=228', payload: basePayload() },
     'zetex': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=224', payload: basePayload() },
     'rj-bodywear': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=233', payload: basePayload() },
+    'after-eden': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=235', payload: basePayload() },
     'charlie-choe': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=204', payload: basePayload() }
   };
 
