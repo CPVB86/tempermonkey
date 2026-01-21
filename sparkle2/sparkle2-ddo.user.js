@@ -140,22 +140,62 @@
       }
     }
   }
+async function setTinyMceHtml(htmlToSet) {
+  // 1) Prefer: TinyMCE API (verschilt per versie)
+  try {
+    const api =
+      (window.tinymce && (tinymce.get?.('mce_1') || tinymce.get?.('mce_1'))) ||
+      (window.tinyMCE && (tinyMCE.get?.('mce_1') || tinyMCE.getInstanceById?.('mce_1')));
 
-  async function setTinyMceHtml(htmlToSet) {
-    const iframe = document.querySelector('iframe.tox-edit-area__iframe') || document.querySelector('iframe[id^="mce_"]');
-    if (!iframe?.contentDocument) return false;
+    if (api && typeof api.setContent === 'function') {
+      api.setContent(htmlToSet);
 
-    for (let i = 0; i < 15; i++) {
-      const body = iframe.contentDocument.getElementById('tinymce') || iframe.contentDocument.body;
-      if (body) {
-        body.innerHTML = htmlToSet;
-        try { iframe.contentWindow?.focus?.(); } catch (_) {}
-        return true;
-      }
-      await sleep(120);
+      // Zorg ook dat de onderliggende textarea mee is (sommige backends lezen die)
+      try {
+        const ta = document.querySelector('textarea#mce_1[name="description"]');
+        if (ta) {
+          ta.value = api.getContent({ format: 'raw' }) || '';
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+          ta.dispatchEvent(new Event('change', { bubbles: true }));
+          if (typeof window.$ === 'function') {
+            try { window.$(ta).trigger('input').trigger('change'); } catch (_) {}
+          }
+        }
+      } catch (_) {}
+
+      return true;
     }
-    return false;
+  } catch (_) {}
+
+  // 2) Fallback: direct het juiste iframe targetten
+  for (let i = 0; i < 20; i++) {
+    const iframe = document.querySelector('#mce_1_ifr');
+    const doc = iframe?.contentDocument;
+    const body = doc?.getElementById('tinymce') || doc?.body;
+
+    if (body) {
+      body.innerHTML = htmlToSet;
+
+      // Onderliggende textarea ook bijwerken (veilig)
+      const ta = document.querySelector('textarea#mce_1[name="description"]');
+      if (ta) {
+        ta.value = htmlToSet;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+        if (typeof window.$ === 'function') {
+          try { window.$(ta).trigger('input').trigger('change'); } catch (_) {}
+        }
+      }
+
+      try { iframe.contentWindow?.focus?.(); } catch (_) {}
+      return true;
+    }
+
+    await sleep(120);
   }
+
+  return false;
+}
 
   // 🔧 HOOFDSTUK: hier doen we nu “vul aan” voor name
   function applyToBackend(data, ctx) {
