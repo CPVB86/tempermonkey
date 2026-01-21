@@ -122,6 +122,7 @@
     naturana:      'https://naturana-online.de/naturana/',
     'mundo-unico': 'https://www.colomoda.eu/',
     'rj-bodywear': 'https://b2b.rjbodywear.com/customer/account/login',
+    'after-eden':  'https://bcg.fashionportal.shop/',
     // qlinn:      'https://…' // toevoegen zodra beschikbaar
   };
 
@@ -154,6 +155,7 @@
     if (/^charlie-choe/.test(key)) return 'charlie-choe';
     if (/^hom/.test(key)) return 'hom';
     if (/^q-linn/.test(key)) return 'qlinn';
+    if (/^after-eden/.test(key)) return 'after-eden';
     if (/^(lingadore|lingadore-beach|lingadore-consignatie)/.test(key)) return 'lingadore';
     if (/^triumph/.test(key)) return 'triumph';
     if (/^sloggi/.test(key)) return 'sloggi';
