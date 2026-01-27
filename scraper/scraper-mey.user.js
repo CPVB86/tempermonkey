@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         EAN Scraper | Mey
-// @version      1.0
-// @description  Scrape EAN + remote stock from mey B2B, map to local stock levels and paste into tab #tabs-3. Includes hotkeys + autosave.
+// @version      1.4
+// @description  Scrape EAN + remote stock from mey B2B, map to local stock levels and paste into tab #tabs-3. BH-maten via xvalues key parsing (bv. D;38;75 => 75D). Skip ghost variants: stock<=0 AND missing EAN. Includes hotkeys + autosave.
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @author       C. P. v. Beek + GPT
 // @grant        GM_xmlhttpRequest
 // @connect      meyb2b.com
-// @author       C. P. v. Beek
+// @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-mey.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-mey.user.js
 // ==/UserScript==
@@ -57,6 +57,11 @@
       .trim();
   }
 
+  function isBraSizeLabel(s) {
+    const t = normSize(s);
+    return /^\d{2,3}[A-Z]{1,4}$/.test(t); // AA/A/B/... tot 4 chars safe
+  }
+
   function isTypingTarget(ev) {
     const t = ev.target;
     if (!t) return false;
@@ -71,25 +76,47 @@
     if (!tab1) return false;
     for (const el of tab1.querySelectorAll("select,[role='combobox']")) {
       const opt = el.tagName === "SELECT" ? el.options[el.selectedIndex] : null;
-      const txt = (opt ? opt.textContent : el.textContent || el.value || "")
+      const t = (opt ? opt.textContent : el.textContent || el.value || "")
         .trim()
         .toLowerCase();
-      if (txt.includes("mey")) return true;
+      if (t.includes("mey")) return true;
     }
     return false;
   }
 
-  function parsePidForMey(pid) {
-    const s = String(pid || "").trim();
-    const nums = s.match(/\b\d+\b/g) || [];
+  // PID tolerant: styleid (6-9 digits) + laatste 3-5 digits als kleur
+function parsePidForMey(pid) {
+  const s = String(pid || "").trim();
 
-    const style = (nums.find(n => n.length >= 6 && n.length <= 9) || "").trim();
-    const colorCandidates = nums.filter(n => n !== style && n.length >= 3 && n.length <= 5);
-    const color = (colorCandidates[colorCandidates.length - 1] || "").trim();
-
-    return { styleid: style, colorKey: color };
+  // 1) Meest betrouwbaar: voor "1230081-1718"
+  const dash = s.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+  if (dash) {
+    return { styleid: dash[1], colorKey: dash[2] };
   }
 
+  // 2) Mey API id-achtige strings "ME;NO;1230081;*;*"
+  const semi = s.match(/(?:^|;)(\d{4,})(?:;|$)/);
+  // semi pakt het eerste lange nummer tussen ; ;
+  // maar: we willen de beste kandidaat (meestal langste)
+  const nums = s.match(/\d+/g) || [];
+  if (!nums.length) return { styleid: "", colorKey: "" };
+
+  // styleid = langste (meestal product nr)
+  const styleid = [...nums].sort((a,b) => b.length - a.length)[0] || "";
+
+  // colorKey = laatste "korte" nummer (3-6 digits) dat niet gelijk is aan styleid
+  const colorCandidates = nums.filter(n => n !== styleid && n.length >= 3 && n.length <= 6);
+  const colorKey = (colorCandidates[colorCandidates.length - 1] || "").trim();
+
+  // als semi match bestaat en langer is dan styleid, gebruik die (extra safeguard)
+  const semiCandidate = semi?.[1] || "";
+  const finalStyle = (semiCandidate && semiCandidate.length >= styleid.length) ? semiCandidate : styleid;
+
+  return { styleid: finalStyle, colorKey };
+}
+
+
+  // mapping remote -> local stock (zoals afgesproken)
   function remoteToLocalStockLevel(remoteStock) {
     const n = Number(remoteStock);
     if (!Number.isFinite(n) || n <= 0) return 1;
@@ -124,7 +151,7 @@
     return `https://meyb2b.com/b2bapi?-/${uniq}/OrderDetail/collection`;
   }
 
-  async function fetchOrderDetailCollection(styleid) {
+  async function fetchOrderDetailCollection(styleid, zkey = "*") {
     const url = buildMeyUrl();
     const payload = [{
       _getparams: { "": "undefined" },
@@ -139,7 +166,7 @@
         styleareaid: "NO",
         styleid: String(styleid),
         variantid: "*",
-        zkey: "*"
+        zkey: String(zkey || "*")
       }],
       assortid: MEY_CTX.assortid,
       ordertypeid: MEY_CTX.ordertypeid
@@ -154,9 +181,12 @@
   }
 
   /******************************************************************
-   * PARSE EAN + STOCK
+   * PARSE EAN + STOCK (apparel + bra)
+   * - apparel: key "*;1718;XS" etc => use v.size
+   * - bra: key "D;38;75" => cup=D band=75 => key "75D"
+   * - SKIP ghost: if stock<=0 AND ean missing => ignore variant completely
    ******************************************************************/
-  function parseMeyEans(json, preferredColorKey = "") {
+  function parseMeyPairs(json, preferredColorKey = "") {
     const resultArr = json?.[0]?.result || [];
     if (!resultArr.length) return { pairs: [], usedColorKey: "" };
 
@@ -166,16 +196,35 @@
     const fallbackColorKey = (ykeys.length === 1 ? String(ykeys[0]) : "");
     const colorKey = (preferredColorKey || fallbackColorKey || "").trim();
 
-    const map = new Map();
+    const map = new Map(); // key -> {ean, stock}
 
     for (const [k, v] of Object.entries(xvalues)) {
-      const size = normSize(v?.size || "");
+      // Filter op kleurKey waar mogelijk (apparel keys starten met "*;")
+      if (colorKey && k.startsWith("*;") && !k.includes(`;${colorKey};`)) continue;
+
       const ean = String(v?.ean || "").trim();
       const stock = Number(v?.stock ?? 0);
 
-      if (!size) continue;
-      if (colorKey && !k.includes(`;${colorKey};`)) continue;
+      // ✅ SKIP ghost variants (jouw laatste touch)
+      if ((!ean || ean.length < 8) && (!Number.isFinite(stock) || stock <= 0)) {
+        // geen ean + geen voorraad => negeren (dus geen stock=1 plakken)
+        continue;
+      }
 
+      // --- Detect bra key: CUP;something;BAND ---
+      const mBra = String(k).match(/^([A-Z]{1,4})\;[^;]*\;(\d{2,3})$/i);
+      if (mBra) {
+        const cup = String(mBra[1]).toUpperCase();
+        const band = String(mBra[2]).toUpperCase();
+        const key = `${band}${cup}`;
+
+        if (!map.has(key)) map.set(key, { ean, stock });
+        continue;
+      }
+
+      // --- Default (apparel/1D): use v.size as key ---
+      const size = normSize(v?.size || "");
+      if (!size) continue;
       if (!map.has(size)) map.set(size, { ean, stock });
     }
 
@@ -190,6 +239,8 @@
 
   /******************************************************************
    * PASTE INTO TAB 3
+   * - Alleen maten die remote heeft
+   * - Stock: alleen plakken als remote variant niet "ghost" was (die zaten al niet in pairs)
    ******************************************************************/
   function pasteIntoTab3(pairs, tab3, { doEan = true, doStock = true } = {}) {
     let matchedEan = 0;
@@ -206,7 +257,7 @@
       const key = normSize(raw);
 
       const hit = bySize.get(key);
-      if (!hit) continue;
+      if (!hit) continue; // ✅ niet in remote -> negeren
 
       if (doEan) {
         const eanInput = row.querySelector('input[name^="options"][name$="[barcode]"]');
@@ -306,8 +357,10 @@
 
         setBtn(btn, true, "⏳ Scrapen…", 0);
 
-        const json = await fetchOrderDetailCollection(styleid);
-        const { pairs } = parseMeyEans(json, colorKey);
+        const json = await fetchOrderDetailCollection(styleid, "*");
+        const parsed = parseMeyPairs(json, colorKey);
+
+        let pairs = parsed.pairs;
 
         if (!pairs.length) {
           setBtn(btn, false, "❌ Geen data gevonden");
@@ -315,11 +368,14 @@
           return;
         }
 
+        // Expand synoniemen alleen voor lettermaten, niet voor BH keys (75D etc.)
         const expanded = [];
         for (const p of pairs) {
           expanded.push(p);
-          for (const alt of altSizes(p.key)) {
-            if (alt !== p.key) expanded.push({ ...p, key: alt });
+          if (!isBraSizeLabel(p.key)) {
+            for (const alt of altSizes(p.key)) {
+              if (alt !== p.key) expanded.push({ ...p, key: alt });
+            }
           }
         }
 
