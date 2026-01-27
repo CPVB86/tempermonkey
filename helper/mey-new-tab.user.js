@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         meyB2B - NewTab
+// @name         Mey | NewTab
 // @namespace    https://runiversity.nl/
 // @version      1.2.0
 // @description  Adds a stable button on collection tiles to open the item in a new tab (survives re-renders).
