@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP | Mey
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.0
-// @description  Vergelijk local stock met remote stock (mey) — knop/progress via StockKit, geen inline-overschrijvingen.
+// @version      1.1
+// @description  Vergelijk local stock met remote stock (mey) — knop/progress via StockKit, geen inline-overschrijvingen. BH via key parsing (D;38;75 => 75D). Tolerante PID parsing + skip ghost variants.
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -26,18 +26,13 @@
   };
 
   const TIMEOUT = 15000;
-
-  // Zorg dat je dropdown label/value een van deze bevat
   const SUPPORTED_BRANDS = new Set(["mey"]);
 
-  // Context (uit jouw mey payload; als dit ooit wisselt: even updaten)
   const MEY_CTX = {
     dataareaid: "ME:NO",
     custid: "385468",
     assortid: "ddd8763b-b678-4004-ba8b-c64d45b5333c",
     ordertypeid: "NO",
-    // In mey payload zat dit; meestal wordt dit niet hard gevalideerd.
-    // Als het wel moet, kun je 'm later uit een echte request “lenen”.
     webSocketUniqueId: (crypto?.randomUUID ? crypto.randomUUID() : `ws-${Date.now()}-${Math.floor(Math.random()*1e6)}`)
   };
 
@@ -45,7 +40,7 @@
   const $ = (s, r = document) => r.querySelector(s);
   const norm = (s = "") => String(s).toLowerCase().trim().replace(/[-_]+/g, " ").replace(/\s+/g, " ");
 
-  // ---------- Logger (zoals Anita/Wacoal) ----------
+  // ---------- Logger ----------
   const Logger = {
     lb() {
       return (typeof unsafeWindow !== "undefined" && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek;
@@ -105,29 +100,65 @@
     return `https://meyb2b.com/b2bapi?-/${uniq}/OrderDetail/collection`;
   }
 
+  // ✅ tolerant PID parse: supports "1230081-1718", "ME;NO;1230081;*;*/1718", etc.
   function parsePid(pid) {
-    // verwacht: "1230081-1718" (styleid-colorKey)
     const s = String(pid || "").trim();
-    const m = s.match(/^(\d+)\s*[-_]\s*(\d+)$/);
-    if (!m) return { styleid: "", colorKey: "" };
-    return { styleid: m[1], colorKey: m[2] };
+
+    // 1) clean "1230081-1718"
+    let m = s.match(/^\s*(\d+)\s*[-_]\s*(\d+)\s*$/);
+    if (m) return { styleid: m[1], colorKey: m[2] };
+
+    // 2) if contains .../1718 at end
+    m = s.match(/\/\s*(\d{3,6})\s*$/);
+    const trailingColor = m?.[1] || "";
+
+    // 3) all numbers
+    const nums = s.match(/\d+/g) || [];
+    if (!nums.length) return { styleid: "", colorKey: "" };
+
+    // styleid = longest number (usually article no.)
+    const styleid = [...nums].sort((a,b) => b.length - a.length)[0] || "";
+
+    // colorKey = last 3-6 digit number not equal styleid (prefer trailing)
+    const colorCandidates = nums.filter(n => n !== styleid && n.length >= 3 && n.length <= 6);
+    const colorKey = (trailingColor || colorCandidates[colorCandidates.length - 1] || "").trim();
+
+    return { styleid, colorKey };
   }
 
   function normSize(raw) {
     return String(raw || "").toUpperCase().trim().replace(/\s+/g, "");
   }
 
-  // Jouw mapping: remote (aantal) -> local (1..5)
+  // remote count -> local (1..5)
   function remoteToLocalStockLevel(remoteStock) {
     const n = Number(remoteStock);
-    if (!Number.isFinite(n) || n <= 0) return 1;
-    if (n === 1) return 1;
-    if (n === 2) return 2;
+    if (!Number.isFinite(n) || n <= 0) return 0
+    if (n === 1) return 0
+    if (n === 2) return 1
     if (n === 3) return 3;
     if (n === 4) return 4;
-    return 5; // >4
+    return 5;
   }
 
+  // ✅ key parsing: BH keys like "D;38;75" => "75D"
+  function keyToMaat(k, v) {
+    const ks = String(k || "");
+
+    // bra key: CUP;something;BAND
+    const mBra = ks.match(/^([A-Z]{1,4})\;[^;]*\;(\d{2,3})$/i);
+    if (mBra) {
+      const cup = String(mBra[1]).toUpperCase();
+      const band = String(mBra[2]).toUpperCase();
+      return `${band}${cup}`; // 75D
+    }
+
+    // apparel: use v.size
+    const size = normSize(v?.size);
+    return size || "";
+  }
+
+  // ✅ remoteMap: maatKey -> remoteStock (only real variants; skip ghost stock<=0 && no EAN)
   async function fetchRemoteMap(styleid, colorKey) {
     const url = buildMeyUrl();
 
@@ -156,18 +187,22 @@
     const res0 = json?.[0]?.result?.[0];
     const xvalues = res0?.xvalues || {};
 
-    // size -> remoteStock
-    const map = {};
+    const map = {}; // maat -> stock
 
     for (const [k, v] of Object.entries(xvalues)) {
-      // keys als "*;1718;XS" => filter op ;colorKey;
-      if (colorKey && !k.includes(`;${colorKey};`)) continue;
-
-      const size = normSize(v?.size);
-      if (!size) continue;
+      // apparel keys filteren op kleur: "*;1718;XS"
+      if (colorKey && String(k).startsWith("*;") && !String(k).includes(`;${colorKey};`)) continue;
 
       const stock = Number(v?.stock ?? 0);
-      map[size] = stock;
+      const ean = String(v?.ean || "").trim();
+
+      // ✅ ghost variant skip
+      if ((!ean || ean.length < 8) && (!Number.isFinite(stock) || stock <= 0)) continue;
+
+      const maat = keyToMaat(k, v);
+      if (!maat) continue;
+
+      map[maat] = stock;
     }
 
     return map;
@@ -185,9 +220,7 @@
       const local = parseInt(String(localCell?.textContent || "").trim(), 10) || 0;
 
       // alleen toepassen op maten die remote heeft
-      if (!Object.prototype.hasOwnProperty.call(remoteMap, maat)) {
-        return; // local-only maat negeren
-      }
+      if (!Object.prototype.hasOwnProperty.call(remoteMap, maat)) return;
 
       const remote = Number(remoteMap[maat] ?? 0);
       const expected = remoteToLocalStockLevel(remote);
@@ -202,7 +235,6 @@
       let actie = "none";
 
       if (local !== expected) {
-        // kleur: groen als local te laag (bijboeken), rood als local te hoog (uitboeken)
         if (local < expected) {
           row.style.background = "#d4edda";
           row.title = `Bijboeken (expected ${expected}, remote ${remote})`;
@@ -259,7 +291,7 @@
     for (const table of tables) {
       idx++;
 
-      const pid = (table.id || "").trim(); // verwacht: styleid-colorKey
+      const pid = (table.id || "").trim(); // verwacht: styleid-colorKey (maar tolerant)
       const label = table.querySelector("thead th[colspan]")?.textContent?.trim() || pid || "onbekend";
       const anchorId = pid || label;
 
@@ -272,7 +304,7 @@
         }
 
         const { styleid, colorKey } = parsePid(pid);
-        if (!styleid || !colorKey) {
+        if (!styleid) {
           Logger.status(anchorId, "niet-gevonden");
           Logger.perMaat(anchorId, []);
           progress.setDone(idx);
