@@ -3,6 +3,7 @@
 // @version      1.4
 // @description  Kopieert een SPARKLE payload naar het klembord (meyb2b.com) incl. descriptionHtml + reference.
 // @match        https://meyb2b.com/*
+// @match        https://www.meyb2b.com/*
 // @grant        none
 // @run-at       document-idle
 // @author       C. P. v. Beek
@@ -65,12 +66,51 @@
     return m ? m[1] : "";
   }
 
-  function extractColorKey() {
+function extractColorKey() {
+  // 1) probeer “actieve”/geselecteerde kleur (klassennamen kunnen verschillen)
+  const candidates = [
+    ".color.active[rel]",
+    ".color.selected[rel]",
+    ".color.is-active[rel]",
+    ".color[aria-selected='true'][rel]",
+    ".colorBullet.active",
+    ".colorBullet.selected",
+    ".colorBullet.is-active"
+  ];
+
+  // helper: vind dichtstbijzijnde .color[rel]
+  const relFrom = (node) => {
+    const c = node?.closest?.(".color[rel]") || null;
+    const rel = c?.getAttribute?.("rel") || "";
+    const m = rel.match(/(\d{2,})/);
+    return m ? m[1] : "";
+  };
+
+  for (const sel of candidates) {
+    const hit = document.querySelector(sel);
+    const ck = relFrom(hit);
+    if (ck) return ck;
+  }
+
+  // 2) fallback: eerste .color[rel] (oude gedrag)
+  {
     const el = document.querySelector(".color[rel]");
     const rel = el?.getAttribute("rel") || "";
     const m = rel.match(/(\d{2,})/);
-    return m ? m[1] : "";
+    if (m) return m[1];
   }
+
+  // 3) laatste redmiddel: haal de numerieke code uit "1718 soft pink" in .colorName
+  const cn = document.querySelector(".colorName");
+  if (cn) {
+    const links = [...cn.querySelectorAll("a")].map(a => txt(a)).filter(Boolean);
+    const candidate = links.find(t => /^\d+\b/.test(t)) || "";
+    const m = candidate.match(/^(\d+)/);
+    if (m) return m[1];
+  }
+
+  return "";
+}
 
   function extractColorName() {
     const cn = document.querySelector(".colorName");
