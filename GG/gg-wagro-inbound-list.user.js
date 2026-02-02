@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         GG | Inbound WaGro Prio
+// @name         GG | Wagro Inbound List
 // @namespace    gg-wagro-inbound
 // @version      1.3.1
 // @description  Check de Pick Prio locations per Extern Product.
 // @match        https://fm-e-warehousing.goedgepickt.nl/goods/inbound/*
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/gg-inbound-wagro-prio.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/gg-inbound-wagro-prio.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/gg-wagro-inbound-list.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/gg-wagro-inbound-list.user.js
 // ==/UserScript==
 
 (function () {
