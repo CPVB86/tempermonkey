@@ -30,12 +30,63 @@
   const MAX_UI_CONCURRENT = 1;  // UI automation (locatie wijzigen)
 
   // Locatie mapping: eerste match wint
-  const LOCATION_RULES = [
-    { name: "Lisca Nachtmode", match: /lisca\s+nachtmode/i, targetKey: "WaGro / Lisca Badmode" },
-    { name: "Lisca",          match: /\blisca\b/i,          targetKey: "WaGro / Lisca" },
-    { name: "Triumph",        match: /\btriumph\b/i,        targetKey: "WaGro / Triumph" },
-    { name: "Muchachomalo",   match: /\bmuchachomalo\b/i,   targetKey: "WaGro / Muchachomalo" },
-  ];
+// Locatie mapping: eerste match wint
+const LOCATION_RULES = [
+  // ===================== Lisca (varianten eerst) =====================
+  { name: "Lisca Nachtmode", match: /\blisca\b.*\bnachtmode\b/i,                 targetKey: "WaGro / Lisca Nachtmode" },
+  { name: "Lisca Badmode",   match: /\blisca\b.*\b(badmode|swim|swimwear)\b/i,   targetKey: "WaGro / Lisca Badmode" },
+  { name: "Lisca",           match: /\blisca\b/i,                               targetKey: "WaGro / Lisca" },
+
+  // ===================== Anita (varianten) =====================
+  { name: "Anita Maternity", match: /\banita\b.*\bmaternity\b/i,                targetKey: "WaGro / Anita Maternity" },
+  { name: "Anita Badmode",   match: /\banita\b.*\b(badmode|swim|swimwear)\b/i,   targetKey: "WaGro / Anita Badmode" },
+  { name: "Anita",           match: /\banita\b/i,                               targetKey: "WaGro / Anita" },
+
+  // ===================== Rosa Faia (varianten) =====================
+  { name: "Rosa Faia Badmode", match: /\brosa\s*faia\b.*\b(badmode|swim|swimwear)\b/i, targetKey: "WaGro / Rosa Faia Badmode" },
+  { name: "Rosa Faia",         match: /\brosa\s*faia\b/i,                              targetKey: "WaGro / Rosa Faia" },
+
+  // ===================== LingaDore (varianten) =====================
+  { name: "LingaDore Beach", match: /\blingadore\b.*\b(beach|badmode|swim|swimwear)\b/i, targetKey: "WaGro / LingaDore Beach" },
+  { name: "LingaDore",       match: /\blingadore\b/i,                                   targetKey: "WaGro / LingaDore" },
+
+  // ===================== Elomi (varianten) =====================
+  { name: "Elomi Swimwear",  match: /\belomi\b.*\b(swim|swimwear|badmode)\b/i,     targetKey: "WaGro / Elomi Swimwear" },
+  { name: "Elomi",           match: /\belomi\b/i,                                   targetKey: "WaGro / Elomi" },
+
+  // ===================== Fantasie (varianten) =====================
+  { name: "Fantasie Swim",     match: /\bfantasie\b.*\b(swim|swimwear|badmode)\b/i, targetKey: "WaGro / Fantasie Swim" },
+  { name: "Fantasie Lingerie", match: /\bfantasie\b.*\blingerie\b/i,                targetKey: "WaGro / Fantasie Lingerie" },
+
+  // ===================== Freya (varianten) =====================
+  { name: "Freya Swim",     match: /\bfreya\b.*\b(swim|swimwear|badmode)\b/i,       targetKey: "WaGro / Freya Swim" },
+  { name: "Freya Lingerie", match: /\bfreya\b.*\blingerie\b/i,                      targetKey: "WaGro / Freya Lingerie" },
+
+  // ===================== Muchachomalo / Chicamala =====================
+  { name: "Muchachomalo",   match: /\bmuchachomalo\b/i,   targetKey: "WaGro / Muchachomalo" },
+  { name: "Chicamala",      match: /\bchicamala\b/i,      targetKey: "WaGro / Muchachomalo" },
+
+  // ===================== Triumph / Sloggi =====================
+  { name: "Triumph",        match: /\btriumph\b/i,        targetKey: "WaGro / Triumph" },
+  { name: "Sloggi",         match: /\bsloggi\b/i,         targetKey: "WaGro / Sloggi" },
+
+  // ===================== Overige locaties (1-op-1) =====================
+  { name: "After Eden",     match: /\bafter\s+eden\b/i,   targetKey: "WaGro / After Eden" },
+  { name: "Charlie Choe",   match: /\bcharlie\s+choe\b/i, targetKey: "WaGro / Charlie Choe" },
+  { name: "Elbrina",        match: /\belbrina\b/i,        targetKey: "WaGro / Elbrina" },
+  { name: "HOM",            match: /\bhom\b/i,            targetKey: "WaGro / HOM" },
+  { name: "Mundo Unico",    match: /\bmundo\s+unico\b/i,  targetKey: "Wagro / Mundo Unico" },
+  { name: "Naturana Badmode",       match: /\bnaturana\s+badmode\b/i,       targetKey: "WaGro / Naturana Badmode" },
+  { name: "Naturana",       match: /\bnaturana\b/i,       targetKey: "WaGro / Naturana" },
+  { name: "Pastunette",     match: /\bpastunette\b/i,     targetKey: "WaGro / Pastunette" },
+  { name: "Q-Linn",         match: /\bq[\s-]*linn\b/i,    targetKey: "WaGro / Q-Linn" },
+  { name: "Rebelle",        match: /\brebelle\b/i,        targetKey: "WaGro / Rebelle" },
+  { name: "RJ Bodywear",    match: /\brj\s+bodywear\b/i,  targetKey: "WaGro / RJ Bodywear" },
+  { name: "Robson",         match: /\brobson\b/i,         targetKey: "WaGro / Robson" },
+  { name: "Sugar Candy",    match: /\bsugar\s+candy\b/i,  targetKey: "WaGro / Sugar Candy" },
+  { name: "Wacoal",         match: /\bwacoal\b/i,         targetKey: "WaGro / Wacoal" },
+];
+
 
   /**********************************************************************
    * STYLES
