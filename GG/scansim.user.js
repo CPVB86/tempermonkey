@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         GG | ScanSim
-// @version      1.5
+// @version      1.8
 // @description  Scan Simulater; leest barcodes uit klembord en activeert scannerloop + Stock Check preset (incoming)
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/incoming
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
@@ -18,6 +18,49 @@
   const isOutgoing = path === '/products/outgoing-products';
 
   if (!isIncoming && !isOutgoing) return;
+
+  // =========================
+  // Settings
+  // =========================
+  // 1) Voorkomt scroll-lock bij bulk (door $('html,body').animate({scrollTop...}))
+  const NEUTRALIZE_SCROLL_ANIMATE = true;
+
+  // 2) Buffering (OPTIONEEL) - standaard UIT om loops te voorkomen.
+  // Zet op true als je het wilt testen op incoming (outgoing blijft sowieso origineel).
+  const BUFFER_INCOMING = false;
+  const FLUSH_INTERVAL_MS = 50;
+  const BATCH_SIZE = 50;
+
+  // -------------------------
+  // Neutralize jQuery scroll animations on html/body
+  // -------------------------
+  (function neutralizeBodyScrollAnimate() {
+    if (!NEUTRALIZE_SCROLL_ANIMATE) return;
+
+    const $ = window.jQuery;
+    if (!$ || !$.fn || !$.fn.animate) return;
+
+    const origAnimate = $.fn.animate;
+
+    $.fn.animate = function (props, speed, easing, callback) {
+      try {
+        const isHtmlBody = this.is('html, body');
+        const isScrollTop = props && Object.prototype.hasOwnProperty.call(props, 'scrollTop');
+        if (isHtmlBody && isScrollTop) {
+          // Geen queue, geen lock: direct zetten
+          this.stop(true, false);
+          this.scrollTop(props.scrollTop);
+          if (typeof easing === 'function') easing.call(this);
+          if (typeof callback === 'function') callback.call(this);
+          return this;
+        }
+      } catch (_) {}
+
+      return origAnimate.apply(this, arguments);
+    };
+
+    console.log('[ScanSim] Neutralized jQuery html/body scrollTop animations');
+  })();
 
   // -------------------------
   // Font Awesome
@@ -96,10 +139,6 @@
 
   // -------------------------
   // Stock Check preset button (incoming)
-  //  - bulk_reason = other
-  //  - other_reason = "Stock Check"
-  //  - inbound_location = otherLocation
-  //  - otherLocation = "00. Extern"
   // -------------------------
   function addStockCheckButton() {
     if (!isIncoming) return;
@@ -158,76 +197,65 @@
   }
 
   function click(el) {
-  if (!el) return false;
-  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-  el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  return true;
-}
-
-function openFancyDropdown() {
-  // De clickable “input” is de hele fancy-input container (of value-holder)
-  const root = document.querySelector('#picklocationSelect .fancy-input');
-  if (!root) return false;
-  // Vaak toggelt dropdown op click op root/value-holder
-  return click(root.querySelector('.value-holder') || root);
-}
-
-async function applyStockCheckPreset() {
-  // 1) Reden => Anders (other) + omschrijving Stock Check
-  const bulkReason = document.querySelector('#bulk_reason');
-  const otherReason = document.querySelector('#other_reason');
-  const inboundLocation = document.querySelector('#inbound_location');
-
-  if (!bulkReason) throw new Error('#bulk_reason niet gevonden');
-  if (!inboundLocation) throw new Error('#inbound_location niet gevonden');
-
-  setSelectValueAndTrigger(bulkReason, 'other');
-  if (otherReason) setInputValue(otherReason, 'Stock Check');
-
-  // 2) Locatiekeuze => otherLocation (toon fancy-input blok)
-  setSelectValueAndTrigger(inboundLocation, 'otherLocation');
-
-  // 3) Wacht tot fancy dropdown opties geladen zijn (div.dropdown-item.option met data-key)
-  await waitFor(() => {
-    const wrap = document.querySelector('#picklocationSelect .dropdown-item-wrapper');
-    const loading = document.querySelector('#picklocationSelect .loader-wrapper');
-    const hasOptions = !!document.querySelector('#picklocationSelect .dropdown-item.option[data-key]');
-    const isLoading = loading && loading.style && loading.style.display !== 'none';
-    // We accepteren zodra er opties zijn én niet (meer) duidelijk aan het laden is
-    return wrap && hasOptions && !isLoading ? true : null;
-  }, { timeoutMs: 20000, intervalMs: 150 });
-
-  // 4) Open dropdown (als die dicht staat)
-  openFancyDropdown();
-
-  // 5) Zoek exact "00. Extern" en klik die
-  const externItem = await waitFor(() => {
-    return document.querySelector('#picklocationSelect .dropdown-item.option[data-key="00. Extern"]') || null;
-  }, { timeoutMs: 20000, intervalMs: 150 });
-
-  const externValue = externItem.getAttribute('data-value');
-  click(externItem);
-
-  // 6) Zorg dat hidden <select id="otherLocation"> óók goed staat (als site daarop leunt)
-  const otherLocationSelect = document.querySelector('#otherLocation');
-  if (otherLocationSelect && externValue) {
-    otherLocationSelect.value = externValue;
-    otherLocationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!el) return false;
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return true;
   }
 
-  // 7) Display text (value-holder) desnoods hard zetten
-  const holder = document.querySelector('#picklocationSelect .value-holder');
-  if (holder) holder.textContent = '00. Extern';
-}
+  function openFancyDropdown() {
+    const root = document.querySelector('#picklocationSelect .fancy-input');
+    if (!root) return false;
+    return click(root.querySelector('.value-holder') || root);
+  }
 
+  async function applyStockCheckPreset() {
+    const bulkReason = document.querySelector('#bulk_reason');
+    const otherReason = document.querySelector('#other_reason');
+    const inboundLocation = document.querySelector('#inbound_location');
+
+    if (!bulkReason) throw new Error('#bulk_reason niet gevonden');
+    if (!inboundLocation) throw new Error('#inbound_location niet gevonden');
+
+    setSelectValueAndTrigger(bulkReason, 'other');
+    if (otherReason) setInputValue(otherReason, 'Stock Check');
+
+    setSelectValueAndTrigger(inboundLocation, 'otherLocation');
+
+    await waitFor(() => {
+      const wrap = document.querySelector('#picklocationSelect .dropdown-item-wrapper');
+      const loading = document.querySelector('#picklocationSelect .loader-wrapper');
+      const hasOptions = !!document.querySelector('#picklocationSelect .dropdown-item.option[data-key]');
+      const isLoading = loading && loading.style && loading.style.display !== 'none';
+      return wrap && hasOptions && !isLoading ? true : null;
+    }, { timeoutMs: 20000, intervalMs: 150 });
+
+    openFancyDropdown();
+
+    const externItem = await waitFor(() => {
+      return document.querySelector('#picklocationSelect .dropdown-item.option[data-key="00. Extern"]') || null;
+    }, { timeoutMs: 20000, intervalMs: 150 });
+
+    const externValue = externItem.getAttribute('data-value');
+    click(externItem);
+
+    const otherLocationSelect = document.querySelector('#otherLocation');
+    if (otherLocationSelect && externValue) {
+      otherLocationSelect.value = externValue;
+      otherLocationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    const holder = document.querySelector('#picklocationSelect .value-holder');
+    if (holder) holder.textContent = '00. Extern';
+  }
 
   // -------------------------
-  // Barcode inject / processing
+  // Barcode inject / processing (ORIGINEEL gedrag)
   // -------------------------
   function injectScanTask(barcode) {
     if (isIncoming) {
-      // Cruciaal: gebruik site-functie zodat processing/registratie gebeurt
+      // Gebruik site-functie zodat processing/registratie gebeurt
       if (typeof window.addBarcodeToTasks === 'function') {
         window.addBarcodeToTasks(barcode);
         return;
@@ -236,7 +264,7 @@ async function applyStockCheckPreset() {
       return;
     }
 
-    // Outgoing: v1.1 gedrag (blijft exact)
+    // Outgoing: ORIGINEEL gedrag terug
     const tbody = document.querySelector('.scanned_tasks_body');
     if (!tbody) return;
 
@@ -254,24 +282,84 @@ async function applyStockCheckPreset() {
     tbody.prepend(tr);
   }
 
-  function processClipboard(text) {
-    const lines = text.trim().split('\n');
-    for (const line of lines) {
-      const [barcodeRaw, countRaw] = line.split('\t');
-      const barcode = (barcodeRaw || '').trim();
-      const count = Math.abs(parseInt(countRaw || '1', 10));
-      if (!barcode || Number.isNaN(count)) continue;
+    // -------------------------
+// Incoming: processing kick (debounced, voorkomt loops)
+// -------------------------
+let incomingKickTimer = null;
 
+function scheduleIncomingProcessKick() {
+  if (!isIncoming) return;
+  // alleen als tab echt actief is
+  if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
+
+  // debounce: steeds opnieuw plannen, maar uiteindelijk maar 1x uitvoeren
+  if (incomingKickTimer) clearTimeout(incomingKickTimer);
+  incomingKickTimer = setTimeout(() => {
+    incomingKickTimer = null;
+    if (typeof window.processScannedProducts === 'function') {
+      try {
+        window.processScannedProducts();
+        console.log('[ScanSim] processScannedProducts() kick');
+      } catch (e) {
+        console.warn('[ScanSim] processScannedProducts() kick failed', e);
+      }
+    } else {
+      console.warn('[ScanSim] processScannedProducts() niet gevonden');
+    }
+  }, 250);
+}
+
+  // -------------------------
+  // OPTIONAL buffering (incoming only)
+  // -------------------------
+  const scanQueue = [];
+  let flushTimer = null;
+
+  function enqueueScan(barcode, count = 1) {
+    for (let i = 0; i < count; i++) scanQueue.push(barcode);
+    scheduleFlush();
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(flushQueue, FLUSH_INTERVAL_MS);
+  }
+
+  function flushQueue() {
+    flushTimer = null;
+    if (!scanQueue.length) return;
+
+    const batch = scanQueue.splice(0, BATCH_SIZE);
+
+    // Alleen incoming bufferen. Outgoing blijft 1-op-1 origineel.
+    for (const bc of batch) injectScanTask(bc);
+
+    if (scanQueue.length) scheduleFlush();
+      if (isIncoming) scheduleIncomingProcessKick();
+
+  }
+
+function processClipboard(text) {
+  const lines = text.trim().split('\n');
+  for (const line of lines) {
+    const [barcodeRaw, countRaw] = line.split('\t');
+    const barcode = (barcodeRaw || '').trim();
+    const count = Math.abs(parseInt(countRaw || '1', 10));
+    if (!barcode || Number.isNaN(count)) continue;
+
+    if (isIncoming && BUFFER_INCOMING) {
+      enqueueScan(barcode, count);
+    } else {
       for (let i = 0; i < count; i++) injectScanTask(barcode);
     }
-
-    // Incoming: geef processing een “kick” (als site het aanbiedt)
-    if (isIncoming && typeof window.processScannedProducts === 'function') {
-      try { window.processScannedProducts(); } catch (_) {}
-    }
-
-    console.log('[ScanSim] Klembordverwerking klaar');
   }
+
+  // ✅ Belangrijk: 1x verwerking starten (debounced)
+  scheduleIncomingProcessKick();
+
+  console.log('[ScanSim] Klembordverwerking klaar');
+}
+
 
   // -------------------------
   // Barcode Button
@@ -320,7 +408,7 @@ async function applyStockCheckPreset() {
   }
 
   // -------------------------
-  // Outgoing scanner loop (v1.1 behouden)
+  // Outgoing scanner loop (TERUG NAAR ORIGINEEL)
   // -------------------------
   let scannerLoopStarted = false;
 
@@ -330,7 +418,7 @@ async function applyStockCheckPreset() {
 
     if (typeof window.executeTasks === 'function') {
       scannerLoopStarted = true;
-      console.log('[ScanSim] Start executeTasks loop');
+      console.log('[ScanSim] Start executeTasks loop (original behavior)');
       setInterval(() => {
         try {
           window.executeTasks();
