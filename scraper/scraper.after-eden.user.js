@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Scraper | After Eden
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.2.0
-// @description  Haal After Eden/Elbrina stock via bcg.fashionportal.shop/itemquantitycal (HTML) en vul #tabs-3 in (DDO admin). Haal EAN via Google Sheet (gid). Hotkey: Ctrl+Shift+A (autosave).
+// @version      1.2.3
+// @description  Haal After Eden/Elbrina stock via bcg.fashionportal.shop/itemquantitycal (HTML) en vul #tabs-3 in (DDO admin). Haal EAN via Google Sheet (gid). Hotkeys: Ctrl+Shift+A (all+autosave), Ctrl+Shift+E (EAN only), Ctrl+Shift+S (Stock only). Scoped op juiste kleur/variant via selectqty-wrap match op SKU.
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @grant        GM_xmlhttpRequest
 // @connect      bcg.fashionportal.shop
@@ -21,7 +21,9 @@
   const ON_ADMIN = location.hostname.includes('dutchdesignersoutlet.com');
   if (!ON_ADMIN) return;
 
-  // ========= Config =========
+  /******************************************************************
+   * CONFIG
+   ******************************************************************/
   const BASE = 'https://bcg.fashionportal.shop';
   const STOCK_URL = (itemNumber) =>
     `${BASE}/itemquantitycal?item_number=${encodeURIComponent(itemNumber)}&price_type=stockitem`;
@@ -34,10 +36,9 @@
 
   const BTN_ID = 'aftereden-stock-btn';
 
-  // Ctrl+Shift+A = autosave
-  const HOTKEY = { ctrl: true, shift: true, alt: false, key: 'a' };
-
-  // ========= Google Sheet (EAN) =========
+  /******************************************************************
+   * GOOGLE SHEET (EAN)
+   ******************************************************************/
   const SHEET_ID = '1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68';
   const SHEET_GID_BY_BRAND = {
     aftereden: '1291267370',
@@ -47,7 +48,9 @@
   const SHEET_CACHE_TTL_MS = 60 * 60 * 1000;
   const SHEET_AUTHUSER_KEY = 'afteredenSheetAuthUser';
 
-  // ========= Stock mapping =========
+  /******************************************************************
+   * STOCK MAPPING
+   ******************************************************************/
   // Rule:
   // 1) Trek altijd 4 af van remote inventory (min 0)
   // 2) Op adjusted waarde:
@@ -73,7 +76,9 @@
     return 5;
   }
 
-  // ========= Helpers =========
+  /******************************************************************
+   * HELPERS
+   ******************************************************************/
   const $ = (s, root = document) => root.querySelector(s);
 
   function gmGet(url, headers = {}) {
@@ -127,6 +132,15 @@
     return style.display !== 'none' && style.visibility !== 'hidden' && style.height !== '0px';
   }
 
+  function isTypingTarget(ev) {
+    const t = ev.target;
+    if (!t) return false;
+    const tag = (t.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+    if (t.isContentEditable) return true;
+    return false;
+  }
+
   function clickUpdateProductButton() {
     const saveBtn =
       document.querySelector('input[type="submit"][name="edit"]') ||
@@ -148,10 +162,7 @@
   function getBrandKey() {
     const t = getBrandTitle().toLowerCase();
 
-    // alles wat begint met after eden (ook "After Eden ..." varianten)
     if (t.startsWith('after eden') || t.includes('after eden')) return 'aftereden';
-
-    // elbrina
     if (t.startsWith('elbrina') || t.includes('elbrina')) return 'elbrina';
 
     return '';
@@ -172,26 +183,77 @@
     return pid; // item_number = exact supplier_pid
   }
 
-  // ========= Robust inventory read =========
-  // 3D: .qty-limit[data-inventory]
-  // 1D list (S/M/L/...): idem, maar soms is data-title op input betrouwbaarder
+  /******************************************************************
+   * FIX: Strict bra size parsing (AA ≠ A)
+   ******************************************************************/
+  function parseBraSizeKey(raw) {
+    const s = normalizeLocalSize(raw);
+    const m = s.match(/^(\d{2,3})([A-Z]+)$/);
+    if (!m) return null;
+    const band = m[1];
+    const cup  = m[2];
+    return { band, cup, key: `${band}|${cup}` };
+  }
+
+  function toBraKeyOrFallback(sizeRaw) {
+    const p = parseBraSizeKey(sizeRaw);
+    return p ? p.key : normalizeLocalSize(sizeRaw);
+  }
+
+  /******************************************************************
+   * FIX: Scope remote HTML to the correct selectqty-wrap (color/variant)
+   * - Response bevat meerdere selectqty-wrap blokken (018/017/019...)
+   * - We matchen op de zichtbare SKU in .pro-sku .nuMber
+   ******************************************************************/
+  function normalizeItemNumber(s) {
+    // maakt 80.04-0001-018 gelijk aan 80.04.0001-018
+    return String(s || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, ''); // alleen letters/cijfers
+  }
+
+  function findBestItemScope(doc, itemNumberRaw) {
+    const want = normalizeItemNumber(itemNumberRaw);
+
+    // 1) Betrouwbaar: match op de zichtbare SKU binnen elke selectqty-wrap
+    const wraps = [...doc.querySelectorAll('.selectqty-wrap')];
+    for (const w of wraps) {
+      const skuText = w.querySelector('.pro-sku .nuMber')?.textContent || '';
+      if (normalizeItemNumber(skuText) === want) return w;
+    }
+
+    // 2) Fallback: match op hidden parent_item_no
+    const hidden = doc.querySelector('input[name="parent_item_no"]')?.getAttribute('value') || '';
+    if (normalizeItemNumber(hidden) === want) {
+      // Vaak hoort de eerste wrap bij de parent (zoals in jouw voorbeeld)
+      return wraps[0] || null;
+    }
+
+    return null;
+  }
+
+  /******************************************************************
+   * ROBUST INVENTORY READ
+   ******************************************************************/
   function readRemoteInventoryFromBox(box) {
     const qtyLimit = box.querySelector('.qty-limit');
     const input = box.querySelector('input.quntity-input');
 
-    const invA = qtyLimit?.getAttribute('data-inventory'); // voorkeur
-    const invB = qtyLimit?.dataset?.inventory;             // tolerant
-    const invC = input?.getAttribute('data-title');        // fallback
-    const invD = input?.dataset?.title;                    // fallback
+    const invA = qtyLimit?.getAttribute('data-inventory');
+    const invB = qtyLimit?.dataset?.inventory;
+    const invC = input?.getAttribute('data-title');
+    const invD = input?.dataset?.title;
 
     const raw = (invA ?? invB ?? invC ?? invD ?? '0');
-
     const cleaned = String(raw).trim().replace(',', '.');
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : 0;
   }
 
-  // ========= Sheet cache =========
+  /******************************************************************
+   * SHEET CACHE
+   ******************************************************************/
   function sheetCacheKeyForGid(gid) {
     return `afteredenSheetCache:${SHEET_ID}:${gid}`;
   }
@@ -245,7 +307,9 @@
     throw new Error('Sheets: geen toegang. Log in met juiste Google-account of maak tabblad (tijdelijk) publiek.');
   }
 
-  // ========= EAN map (Sheet: Size | Ean | Supplier ID) =========
+  /******************************************************************
+   * EAN MAP (Sheet: Size | Ean | Supplier ID)
+   ******************************************************************/
   function buildEanMapFromRows_SimpleCols(rows, supplierPidRaw) {
     const eanMap = new Map();
     const pidWanted = normalizePid(supplierPidRaw);
@@ -282,26 +346,35 @@
     return eanMap;
   }
 
-  // ========= Stock HTML parsing =========
-  // We ondersteunen:
-  // A) 3D BH matrix: .qty-by-size-3D (band header + cup rows)
-  // B) 1D list (brief/broekjes): .qty-by-size.qty-by-size-list met .add-qty-box per maat (S/M/L/XL/XXL)
-  function parseHtmlToMaps(html) {
+  /******************************************************************
+   * STOCK HTML PARSING (scoped)
+   ******************************************************************/
+  function parseHtmlToMaps(html, { itemNumber = '' } = {}) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    const exactMap = new Map(); // "70C" etc
+    const scope = itemNumber ? findBestItemScope(doc, itemNumber) : null;
+    if (itemNumber && scope) {
+      const skuTxt = scope.querySelector('.pro-sku .nuMber')?.textContent?.trim();
+      console.log('[AfterEden] ✅ Scoped parse to:', skuTxt || '(unknown sku)');
+    } else if (itemNumber && !scope) {
+      console.warn('[AfterEden] ⚠️ No matching selectqty-wrap for itemNumber:', itemNumber, '→ parsing ALL (risk mismatch)');
+    }
+
+    const root = scope || doc;
+
+    const exactMap = new Map(); // BH: key = "band|cup"
     const oneDMap  = new Map(); // "S" "M" "L" etc
     const debugRows = [];
 
     // ---- A) 3D matrix ----
-    const headerRow = doc.querySelector('.qty-by-size-3D');
+    const headerRow = root.querySelector('.qty-by-size-3D');
     const bandSizes = headerRow
       ? [...headerRow.querySelectorAll('.size-for.text-center')]
           .map(el => el.textContent.trim())
           .filter(Boolean)
       : [];
 
-    const matrixRows = [...doc.querySelectorAll('.qty-by-size-3D')].slice(1);
+    const matrixRows = [...root.querySelectorAll('.qty-by-size-3D')].slice(1);
 
     if (bandSizes.length && matrixRows.length) {
       for (const row of matrixRows) {
@@ -321,15 +394,19 @@
           const status =
             cell.classList.contains('outofstock') || remoteInventory === 0 ? 'outofstock' : 'available';
 
-          const sizeKey = normalizeLocalSize(`${band}${cup}`);
+          const sizeRaw = `${band}${cup}`;
+          const braObj  = parseBraSizeKey(sizeRaw);
+          const braKey  = braObj ? braObj.key : normalizeLocalSize(sizeRaw);
+
           const adjusted = Math.max(0, (Number(remoteInventory) || 0) - 4);
           const mapped = mapAfterEdenInventoryToLocalStock(remoteInventory);
 
-          exactMap.set(sizeKey, { remoteInventory, adjusted, mapped, itemVarId, status });
+          exactMap.set(braKey, { remoteInventory, adjusted, mapped, itemVarId, status, __bra: braObj });
 
           debugRows.push({
             type: '3D',
-            size: sizeKey,
+            size: sizeRaw,
+            key: braKey,
             band,
             cup,
             remoteInventory,
@@ -342,9 +419,8 @@
       }
     }
 
-    // ---- B) 1D list sizes (S/M/L/XL/XXL etc) ----
-    // voorbeeld: .qty-by-size.qty-by-size-list ... .add-qty-box met .size-for = "M"
-    const listWraps = [...doc.querySelectorAll('.qty-by-size.qty-by-size-list, .qty-by-size-list')];
+    // ---- B) 1D list sizes ----
+    const listWraps = [...root.querySelectorAll('.qty-by-size.qty-by-size-list, .qty-by-size-list')];
 
     for (const wrap of listWraps) {
       const boxes = [...wrap.querySelectorAll('.add-qty-box')];
@@ -352,7 +428,7 @@
         const sizeRaw = box.querySelector('.size-for')?.textContent?.trim();
         if (!sizeRaw) continue;
 
-        const sizeKey = normalizeLocalSize(sizeRaw); // "S" "M" etc
+        const sizeKey = normalizeLocalSize(sizeRaw);
         const remoteInventory = readRemoteInventoryFromBox(box);
 
         const input = box.querySelector('input.quntity-input');
@@ -364,7 +440,6 @@
         const adjusted = Math.max(0, (Number(remoteInventory) || 0) - 4);
         const mapped = mapAfterEdenInventoryToLocalStock(remoteInventory);
 
-        // 1D-map: we willen best match per maat (meestal uniek)
         oneDMap.set(sizeKey, { remoteInventory, adjusted, mapped, itemVarId, status });
 
         debugRows.push({
@@ -386,13 +461,21 @@
     return { exactMap, oneDMap };
   }
 
-  // ========= Apply =========
-  function extractRowSizeKey(row) {
+  /******************************************************************
+   * APPLY
+   ******************************************************************/
+  function extractRowSizeInfo(row) {
     const sizeInput = row.querySelector('input.product_option_small');
-    return normalizeLocalSize(sizeInput?.value || '');
+    const raw = sizeInput?.value || '';
+    return {
+      raw,
+      normalized: normalizeLocalSize(raw),
+      bra: parseBraSizeKey(raw),
+      key: toBraKeyOrFallback(raw),
+    };
   }
 
-  function applyToTable(exactMap, oneDMap, eanMap) {
+  function applyToTable(exactMap, oneDMap, eanMap, { doEan = true, doStock = true } = {}) {
     const table = document.querySelector(TABLE_SELECTOR);
     if (!table) return { matched: 0, report: [] };
 
@@ -401,22 +484,36 @@
     const report = [];
 
     rows.forEach(row => {
-      const sizeKey = extractRowSizeKey(row);
+      const sizeInfo  = extractRowSizeInfo(row);
+      const sizeKey   = sizeInfo.key;
+
       const stockInput = row.querySelector('input[name^="options"][name$="[stock]"]');
       const eanInput   = row.querySelector('input[name^="options"][name$="[barcode]"]');
 
       const localBefore = stockInput ? Number(stockInput.value || 0) : 0;
 
-      // eerst exact (BH), anders 1D (S/M/L)
       const remoteObj =
         (sizeKey ? exactMap.get(sizeKey) : null) ||
-        (sizeKey ? oneDMap.get(sizeKey)  : null) ||
+        (sizeInfo.normalized ? oneDMap.get(sizeInfo.normalized) : null) ||
         null;
 
-      // ✅ maat ontbreekt remote -> NEGEREN (niet overschrijven)
       if (!remoteObj) {
-        report.push({ size: sizeKey || '(leeg)', local: localBefore, action: 'ignored (missing remote)' });
+        report.push({ size: sizeInfo.normalized || '(leeg)', local: localBefore, action: 'ignored (missing remote)' });
         return;
+      }
+
+      // 🧱 HARD BLOCK: AA mag NOOIT als A gematcht worden (of andersom)
+      if (sizeInfo.bra && remoteObj.__bra) {
+        const l = sizeInfo.bra;
+        const r = remoteObj.__bra;
+        if (l.band !== r.band || l.cup !== r.cup) {
+          report.push({
+            size: sizeInfo.normalized || '(leeg)',
+            local: localBefore,
+            action: `blocked (cup mismatch local ${l.band}${l.cup} vs remote ${r.band}${r.cup})`
+          });
+          return;
+        }
       }
 
       const remoteMapped = remoteObj.mapped;
@@ -424,11 +521,13 @@
       const adjusted     = remoteObj.adjusted;
       const remoteStatus = remoteObj.status || '';
 
-      const remoteEan = (sizeKey && eanMap && eanMap.get(sizeKey)) ? eanMap.get(sizeKey) : '';
+      const remoteEan = (sizeInfo.normalized && eanMap && eanMap.get(sizeInfo.normalized))
+        ? eanMap.get(sizeInfo.normalized)
+        : '';
 
       let changed = false;
 
-      if (stockInput) {
+      if (doStock && stockInput) {
         const newStock = String(remoteMapped);
         if (stockInput.value !== newStock) {
           stockInput.value = newStock;
@@ -437,7 +536,7 @@
         }
       }
 
-      if (eanInput && remoteEan) {
+      if (doEan && eanInput && remoteEan) {
         if (String(eanInput.value || '') !== String(remoteEan)) {
           eanInput.value = String(remoteEan);
           eanInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -448,7 +547,7 @@
       if (changed) matched++;
 
       report.push({
-        size: sizeKey || '(leeg)',
+        size: sizeInfo.normalized || '(leeg)',
         local: localBefore,
         remote: remoteInv,
         adjusted,
@@ -466,7 +565,9 @@
     return { matched, report };
   }
 
-  // ========= Button UI =========
+  /******************************************************************
+   * BUTTON UI
+   ******************************************************************/
   function setBtnState(opts = {}) {
     const btn = document.getElementById(BTN_ID);
     if (!btn) return;
@@ -491,11 +592,9 @@
     btn.disabled = !hasTable();
     btn.style.opacity = hasTable() ? '1' : '.55';
 
-    // label dynamisch (After Eden vs Elbrina)
     const bk = getBrandKey();
     const label = bk === 'elbrina' ? '⛏️ SS&E | Elbrina' : '⛏️ SS&E | After Eden';
     if (!btn.disabled && btn.textContent && btn.textContent.includes('SS&E')) {
-      // alleen aanpassen als hij in "idle" staat
       if (!/⏳|📦|⚠️|❌/u.test(btn.textContent)) btn.textContent = label;
     }
   }
@@ -518,19 +617,25 @@
       `;
       document.body.appendChild(btn);
 
-      btn.addEventListener('click', () => onScrapeClick(false));
+      // Button click = run all, no autosave
+      btn.addEventListener('click', () => run({ mode: 'all', autosave: false }));
     }
     updateButtonVisibility(btn);
   }
 
-  // ========= Runner =========
-  async function onScrapeClick(autoSaveThisRun) {
+  /******************************************************************
+   * RUNNER (MEY-style)
+   ******************************************************************/
+  async function run({ mode = 'all', autosave = false } = {}) {
     const btn = document.getElementById(BTN_ID);
     if (!btn || btn.disabled) return;
+
+    console.groupCollapsed(`[AfterEden] Run — ${mode}${autosave ? ' + autosave' : ''}`);
 
     if (!isTab3Active()) {
       setBtnState({ text: '❌ Open tab Maten/Opties', bg: '#e06666' });
       setTimeout(resetBtn, 2500);
+      console.groupEnd();
       return;
     }
 
@@ -539,6 +644,7 @@
     if (!brandKey || !gid) {
       setBtnState({ text: '❌ Geen gid voor dit merk', bg: '#e06666' });
       setTimeout(resetBtn, 2500);
+      console.groupEnd();
       return;
     }
 
@@ -547,12 +653,16 @@
     if (!itemNumber) {
       setBtnState({ text: '❌ Geen Supplier PID', bg: '#e06666' });
       setTimeout(resetBtn, 2500);
+      console.groupEnd();
       return;
     }
 
     const stockUrl = STOCK_URL(itemNumber);
     console.log('[AfterEden] brandKey:', brandKey, 'supplierPidRaw:', supplierPidRaw, 'itemNumber:', itemNumber);
     console.log('[AfterEden] Stock URL:', stockUrl);
+
+    const doEan = (mode === 'all' || mode === 'ean');
+    const doStock = (mode === 'all' || mode === 'stock');
 
     setBtnState({ text: `⏳ Stock laden (${brandKey})...`, bg: '#f1c40f', disabled: true, opacity: '.85' });
 
@@ -565,19 +675,23 @@
       const looksWrong = !html.includes('data-inventory=') && /login|sign in|unauthorized/i.test(html);
       if (looksWrong) throw new Error('LOGIN_REQUIRED');
 
-      const { exactMap, oneDMap } = parseHtmlToMaps(html);
+      // ✅ Scoped parsing: only correct selectqty-wrap for this itemNumber
+      const { exactMap, oneDMap } = parseHtmlToMaps(html, { itemNumber });
 
       // --- Sheet / EAN ---
-      setBtnState({ text: `⏳ Sheet (EAN) laden (gid ${gid})...`, bg: '#6c757d', disabled: true, opacity: '.85' });
+      let eanMap = new Map();
+      if (doEan) {
+        setBtnState({ text: `⏳ Sheet (EAN) laden (gid ${gid})...`, bg: '#6c757d', disabled: true, opacity: '.85' });
 
-      const raw  = await fetchSheetRawByGid(gid);
-      const rows = parseTsv(raw.text);
-      console.log('[AfterEden] Sheet rows:', rows.length, 'firstRow:', rows[0]);
+        const raw  = await fetchSheetRawByGid(gid);
+        const rows = parseTsv(raw.text);
+        console.log('[AfterEden] Sheet rows:', rows.length, 'firstRow:', rows[0]);
 
-      const eanMap = buildEanMapFromRows_SimpleCols(rows, supplierPidRaw);
+        eanMap = buildEanMapFromRows_SimpleCols(rows, supplierPidRaw);
+      }
 
       // --- Apply ---
-      const { matched } = applyToTable(exactMap, oneDMap, eanMap);
+      const { matched } = applyToTable(exactMap, oneDMap, eanMap, { doEan, doStock });
 
       setBtnState({
         text: matched ? `📦 ${matched} rijen gevuld` : '⚠️ 0 rijen gevuld',
@@ -587,40 +701,67 @@
       });
       setTimeout(resetBtn, 2500);
 
-      if (autoSaveThisRun && matched > 0) clickUpdateProductButton();
+      if (autosave && matched > 0) {
+        setTimeout(() => clickUpdateProductButton(), 150);
+      }
     } catch (e) {
       console.error('[AfterEden]', e);
       const msg = String(e?.message || e);
       if (/LOGIN_REQUIRED/i.test(msg)) alert('Login required. Log in op bcg.fashionportal.shop en probeer opnieuw.');
       setBtnState({ text: '❌ Fout bij ophalen', bg: '#e06666', disabled: false, opacity: '1' });
       setTimeout(resetBtn, 2500);
+    } finally {
+      console.groupEnd();
     }
   }
 
-  // ========= Hotkey =========
-  function onScrapeHotkey(e) {
-    const target = e.target;
-    const tag = target && target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || (target && target.isContentEditable)) return;
+  /******************************************************************
+   * HOTKEYS (MEY-style)
+   ******************************************************************/
+  function bindHotkeysOnce() {
+    if (window.__afterEdenHotkeysBound) return;
 
-    const key = (e.key || '').toLowerCase();
-    const match =
-      key === HOTKEY.key &&
-      !!e.ctrlKey === HOTKEY.ctrl &&
-      !!e.shiftKey === HOTKEY.shift &&
-      !!e.altKey === HOTKEY.alt;
+    window.addEventListener('keydown', (ev) => {
+      if (!document.querySelector('#tabs-3')) return;
+      if (isTypingTarget(ev)) return;
 
-    if (!match) return;
-    if (!isTab3Active()) return;
+      // alleen als brand ok is + tab3 actief + button zichtbaar/bruikbaar
+      if (!isAllowedBrand()) return;
+      if (!isTab3Active()) return;
 
-    const btn = document.getElementById(BTN_ID);
-    if (!btn || btn.style.display === 'none' || btn.disabled) return;
+      const btn = document.getElementById(BTN_ID);
+      if (!btn || btn.style.display === 'none' || btn.disabled) return;
 
-    e.preventDefault();
-    onScrapeClick(true);
+      const k = (ev.key || '').toLowerCase();
+
+      // Ctrl + Shift + A  → all + autosave
+      if (ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey && k === 'a') {
+        ev.preventDefault();
+        run({ mode: 'all', autosave: true });
+        return;
+      }
+
+      // Ctrl + Shift + E → EAN only
+      if (ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey && k === 'e') {
+        ev.preventDefault();
+        run({ mode: 'ean', autosave: false });
+        return;
+      }
+
+      // Ctrl + Shift + S → Stock only
+      if (ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey && k === 's') {
+        ev.preventDefault();
+        run({ mode: 'stock', autosave: false });
+        return;
+      }
+    }, true);
+
+    window.__afterEdenHotkeysBound = true;
   }
 
-  // ========= Boot =========
+  /******************************************************************
+   * BOOT
+   ******************************************************************/
   function bootAdmin() {
     ensureButton();
 
@@ -632,10 +773,7 @@
       if (btn) updateButtonVisibility(btn);
     }, 2000);
 
-    if (!window.__afterEdenHotkeyBound) {
-      document.addEventListener('keydown', onScrapeHotkey);
-      window.__afterEdenHotkeyBound = true;
-    }
+    bindHotkeysOnce();
   }
 
   bootAdmin();
