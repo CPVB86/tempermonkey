@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP | Mey
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1
-// @description  Vergelijk local stock met remote stock (mey) — knop/progress via StockKit, geen inline-overschrijvingen. BH via key parsing (D;38;75 => 75D). Tolerante PID parsing + skip ghost variants.
+// @version      1.2
+// @description  Vergelijk local stock met remote stock (mey) — knop/progress via StockKit. BH via key parsing (D;38;75 => 75D). Tolerante PID parsing + skip ghost variants. ✅ Kleurfilter ook voor BH keys + orderable-check via AssortmentDetail (fallback op OrderDetail).
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -95,9 +95,9 @@
     });
   }
 
-  function buildMeyUrl() {
+  function buildMeyUrl(endpointPath) {
     const uniq = `${Date.now()}r${Math.floor(Math.random() * 1000)}`;
-    return `https://meyb2b.com/b2bapi?-/${uniq}/OrderDetail/collection`;
+    return `https://meyb2b.com/b2bapi?-/${uniq}/${endpointPath}`;
   }
 
   // ✅ tolerant PID parse: supports "1230081-1718", "ME;NO;1230081;*;*/1718", etc.
@@ -130,12 +130,12 @@
     return String(raw || "").toUpperCase().trim().replace(/\s+/g, "");
   }
 
-  // remote count -> local (1..5)
+  // remote count -> local (0..5) (jouw bestaande mapping)
   function remoteToLocalStockLevel(remoteStock) {
     const n = Number(remoteStock);
-    if (!Number.isFinite(n) || n <= 0) return 0
-    if (n === 1) return 0
-    if (n === 2) return 1
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    if (n === 1) return 0;
+    if (n === 2) return 1;
     if (n === 3) return 3;
     if (n === 4) return 4;
     return 5;
@@ -158,9 +158,77 @@
     return size || "";
   }
 
-  // ✅ remoteMap: maatKey -> remoteStock (only real variants; skip ghost stock<=0 && no EAN)
-  async function fetchRemoteMap(styleid, colorKey) {
-    const url = buildMeyUrl();
+  // ✅ haal kleurKey uit de xvalues key (werkt voor BH: "B;210;85" en apparel: "*;210;XS")
+  function colorFromKey(k) {
+    const s = String(k || "");
+    const parts = s.split(";");
+    // apparel: "*;210;XS" -> kleur = parts[1]
+    // bra: "B;210;85" -> kleur = parts[1]
+    if (parts.length >= 3) return String(parts[1] || "").trim();
+    return "";
+  }
+
+  // Fallback orderable op basis van OrderDetail velden
+  function orderableFromOrderDetail(v) {
+    const stock = Number(v?.stock ?? 0);
+    const blocked = !!v?.blocked;
+    return !blocked && Number.isFinite(stock) && stock > 0;
+  }
+
+  // ---------- AssortmentDetail (allowed sizes) ----------
+  async function fetchAllowedSet(styleid, colorKey) {
+    if (!colorKey) return null;
+
+    const url = buildMeyUrl("AssortmentDetail/collection");
+    const payload = [{
+      _getparams: { "": "undefined" },
+      _webSocketUniqueId: MEY_CTX.webSocketUniqueId,
+      _url: "AssortmentDetail/collection",
+      _dataareaid: MEY_CTX.dataareaid,
+      _agentid: null,
+      _custid: String(MEY_CTX.custid),
+      _method: "read",
+      styles: [{
+        custareaid: "ME",
+        styleareaid: "NO",
+        styleid: String(styleid),
+        variantid: "*",
+        yattrib: String(colorKey),
+      }],
+      assortid: MEY_CTX.assortid,
+      ordertypeid: MEY_CTX.ordertypeid
+    }];
+
+    const text = await gmPost(url, payload);
+    const json = JSON.parse(text);
+
+    const resArr = json?.[0]?.result || [];
+    const allowed = new Set();
+
+    for (const item of resArr) {
+      const xvals = item?.detailData?.xvalues || {};
+      for (const k of Object.keys(xvals)) {
+        // key in assortmentdetail: "A;703;70" etc.
+        const m = String(k).match(/^([A-Z]{1,4})\;([^;]+)\;(\d{2,3})$/i);
+        if (!m) continue;
+
+        const cup = m[1].toUpperCase();
+        const col = String(m[2]).trim();
+        const band = m[3];
+
+        if (colorKey && col !== String(colorKey)) continue;
+        allowed.add(`${band}${cup}`); // 70A
+      }
+    }
+
+    // ✅ Cruciale safeguard: lege set is onbetrouwbaar → return null (fallback)
+    if (allowed.size === 0) return null;
+    return allowed;
+  }
+
+  // ---------- OrderDetail remoteMap ----------
+  async function fetchRemoteMap(styleid, colorKey, allowedSetOrNull) {
+    const url = buildMeyUrl("OrderDetail/collection");
 
     const payload = [{
       _getparams: { "": "undefined" },
@@ -187,28 +255,40 @@
     const res0 = json?.[0]?.result?.[0];
     const xvalues = res0?.xvalues || {};
 
-    const map = {}; // maat -> stock
+    // map: maat -> { stock, orderable, rawStock }
+    const map = {};
 
     for (const [k, v] of Object.entries(xvalues)) {
-      // apparel keys filteren op kleur: "*;1718;XS"
-      if (colorKey && String(k).startsWith("*;") && !String(k).includes(`;${colorKey};`)) continue;
+      // ✅ kleurfilter voor ALLE keys (bra + apparel)
+      if (colorKey) {
+        const ck = colorFromKey(k);
+        if (ck && ck !== String(colorKey)) continue;
+      }
 
-      const stock = Number(v?.stock ?? 0);
+      const rawStock = Number(v?.stock ?? 0);
       const ean = String(v?.ean || "").trim();
 
       // ✅ ghost variant skip
-      if ((!ean || ean.length < 8) && (!Number.isFinite(stock) || stock <= 0)) continue;
+      if ((!ean || ean.length < 8) && (!Number.isFinite(rawStock) || rawStock <= 0)) continue;
 
       const maat = keyToMaat(k, v);
       if (!maat) continue;
 
-      map[maat] = stock;
+      // ✅ orderable: eerst allowedSet (als aanwezig), anders fallback op OrderDetail
+      const orderable = (allowedSetOrNull instanceof Set)
+        ? allowedSetOrNull.has(maat)
+        : orderableFromOrderDetail(v);
+
+      // ✅ als niet-orderable: remote effectief 0 (zodat expected 0 wordt)
+      const effectiveStock = orderable ? rawStock : 0;
+
+      map[maat] = { stock: effectiveStock, orderable, rawStock };
     }
 
     return map;
   }
 
-  function applyRulesAndMark(localTable, remoteMap) {
+  function applyRulesAndMark(localTable, remoteMapObj) {
     const rows = localTable.querySelectorAll("tbody tr");
     const report = [];
 
@@ -220,9 +300,10 @@
       const local = parseInt(String(localCell?.textContent || "").trim(), 10) || 0;
 
       // alleen toepassen op maten die remote heeft
-      if (!Object.prototype.hasOwnProperty.call(remoteMap, maat)) return;
+      if (!Object.prototype.hasOwnProperty.call(remoteMapObj, maat)) return;
 
-      const remote = Number(remoteMap[maat] ?? 0);
+      const remoteInfo = remoteMapObj[maat] || {};
+      const remote = Number(remoteInfo.stock ?? 0);
       const expected = remoteToLocalStockLevel(remote);
 
       // reset visuals
@@ -250,14 +331,17 @@
         }
       }
 
-      report.push({ maat, local, remote, expected, actie });
+      // Extra hint in report (console)
+      const hint = remoteInfo.orderable === false ? "NOT-ORDERABLE (remote forced 0)" : "orderable";
+
+      report.push({ maat, local, remote, expected, actie, hint });
     });
 
     return report;
   }
 
-  function bepaalLogStatus(report, remoteMap) {
-    const remoteLeeg = !remoteMap || Object.keys(remoteMap).length === 0;
+  function bepaalLogStatus(report, remoteMapObj) {
+    const remoteLeeg = !remoteMapObj || Object.keys(remoteMapObj).length === 0;
     if (remoteLeeg) return "niet-gevonden";
 
     const diffs = report.filter(r => r.actie === "bijboeken" || r.actie === "uitboeken").length;
@@ -311,19 +395,32 @@
           continue;
         }
 
-        const remoteMap = await fetchRemoteMap(styleid, colorKey);
-        if (!remoteMap || Object.keys(remoteMap).length === 0) {
+        // 1) allowedSet (best-effort)
+        let allowedSet = null;
+        try {
+          allowedSet = await fetchAllowedSet(styleid, colorKey);
+          if (allowedSet) Logger.debug("allowed sizes", styleid, colorKey, [...allowedSet].sort());
+        } catch (e) {
+          // fallback silent
+          allowedSet = null;
+          Logger.debug("allowedSet failed", e);
+        }
+
+        // 2) OrderDetail map (kleurfilter + orderable)
+        const remoteMapObj = await fetchRemoteMap(styleid, colorKey, allowedSet);
+
+        if (!remoteMapObj || Object.keys(remoteMapObj).length === 0) {
           Logger.status(anchorId, "niet-gevonden");
           Logger.perMaat(anchorId, []);
           progress.setDone(idx);
           continue;
         }
 
-        const report = applyRulesAndMark(table, remoteMap);
+        const report = applyRulesAndMark(table, remoteMapObj);
         const diffs = report.filter(r => r.actie === "bijboeken" || r.actie === "uitboeken").length;
         totalMutations += diffs;
 
-        const status = bepaalLogStatus(report, remoteMap);
+        const status = bepaalLogStatus(report, remoteMapObj);
         Logger.status(anchorId, status);
         Logger.perMaat(anchorId, report);
 
