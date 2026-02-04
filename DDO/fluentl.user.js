@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         DDO | FluentL
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.9.0
+// @version      3.0.0
 // @description  DDO haar eigen Vertaalmachine
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=categories&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=brands&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit*
 // @match        https://www.dutchdesignersoutlet.com/admin.php?section=publisher&action=edit*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=news&action=edit*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
-// @connect      api.openai.com
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js
@@ -26,8 +26,8 @@
     LS_KEY: 'ddo-openai-key',
     LS_LANGS: 'ddo-fluentl-langs',
     MAX_CHARS: 120000,
-    MAXI_VIEW_DEFAULT: false,  // true = paneel zichtbaar; false = geminimaliseerd starten
-    STAY_ON_TAB_DEFAULT: true  // true = niet wisselen van tabbladen (standaard aangevinkt)
+    MAXI_VIEW_DEFAULT: false, // true = paneel zichtbaar; false = geminimaliseerd starten
+    STAY_ON_TAB_DEFAULT: true // true = niet wisselen van tabbladen (standaard aangevinkt)
   };
 
   // Huidige sectie uit URL
@@ -37,7 +37,6 @@
   }
 
   // Schema per sectie: tabs + veldmapping
-  // hideSeo: bepaal welke SEO-checks NIET getoond worden
   const SCHEMAS = {
     categories: {
       tabs: { NL: '#tabs-1', ML: '#tabs-2', SEO: '#tabs-3' },
@@ -116,7 +115,7 @@
         meta_keywords:    `[name="meta[${lang}][keywords]"]`,
         footer_content:   `[name="meta[${lang}][footer_content]"]`   // niet aanwezig
       }),
-      // Verzoek: meta description standaard UIT; Page/Header/Foot NIET tonen
+      // Verzoek: meta description standaard UIT; Page/Header NIET tonen
       defaults: { seoPage:false, seoHeader:false, seoDesc:false, seoFooter:false,
                   labels:{content:'Description', promo:'Summary'},
                   orderFields:['content','promo'] },
@@ -150,7 +149,58 @@
                   labels:{content:'Content', promo:'Summary'},
                   orderFields:['content','promo'] },
       hideSeo: ['footer']
-    }
+    },
+      news: {
+  // In de template: Edit news = #tabs-1, Multilanguage = #tabs-3, SEO = #tabs-4
+  tabs: { NL: '#tabs-1', ML: '#tabs-3', SEO: '#tabs-4' },
+
+  // NL velden zitten in Edit news (tabs-1): name/title/summary/content
+  nlFields: {
+    name:    '[name="name"]',
+    title:   '[name="title"]',
+    // Content is TinyMCE in deze template
+    content: 'textarea[name="content"], textarea.htmleditor, [name="content"]',
+    // “Summary” zit als plain textarea
+    promo:   'textarea[name="summary"], [name="summary"]'
+  },
+
+  // ML velden (tabs-3): title/summary/content
+  // Let op: er is géén lang[..][name] in deze template → we mappen name op title, maar zetten Name default UIT (zie defaults)
+  mlFields: (lang) => ({
+    name:    `[name="lang[${lang}][title]"]`,
+    title:   `[name="lang[${lang}][title]"]`,
+    content: `[name="lang[${lang}][content]"]`,
+    promo:   `[name="lang[${lang}][summary]"]`
+  }),
+
+  // SEO velden (tabs-4): page_title/header_title/description/keywords
+  seoFields: (lang) => ({
+    page_title:       `[name="meta[${lang}][page_title]"]`,
+    header_title:     `[name="meta[${lang}][header_title]"]`,
+    meta_description: `[name="meta[${lang}][description]"]`,
+    meta_keywords:    `[name="meta[${lang}][keywords]"]`,
+    // bestaat niet in news-template
+    footer_content:   `[name="meta[${lang}][footer_content]"]`
+  }),
+
+  defaults: {
+    // “Name” bestaat niet in ML → standaard uit om dubbel-vertalen te voorkomen
+    nameDefault: false,
+
+    // SEO meestal wél nuttig bij News
+    seoPage: true,
+    seoHeader: true,
+    seoDesc: true,
+    seoFooter: false,
+
+    labels: { content: 'Content', promo: 'Summary' },
+
+    // Bij news wil je vaak eerst Summary, dan Content
+    orderFields: ['promo', 'content']
+  },
+
+  hideSeo: ['footer']
+}
   };
 
   const CURRENT_SECTION = SCHEMAS[getSection()] || SCHEMAS.categories;
@@ -196,7 +246,7 @@
   document.head.appendChild(linkOrbitron);
 
   const css = `
-  #${CONFIG.UI_ID}{position:fixed;right:16px;bottom:16px;z-index:999999;width:460px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #${CONFIG.UI_ID}{position:fixed;right:16px;bottom:16px;z-index:999999;width:480px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   #${CONFIG.UI_ID} .card{background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:14px;box-shadow:0 12px 24px rgba(0,0,0,.25);overflow:hidden}
   #${CONFIG.UI_ID} header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#111827}
   #${CONFIG.UI_ID} h3{margin:0;font-size:16px;font-weight:800;font-family:'Orbitron',system-ui;letter-spacing:.5px;display:flex;align-items:center;gap:10px}
@@ -211,8 +261,8 @@
   #${CONFIG.UI_ID} .chip{background:#1f2937;border:1px solid #374151;border-radius:999px;padding:4px 8px;font-size:11px}
   #${CONFIG.UI_ID} .chip.status{display:inline-flex;align-items:center;gap:6px}
   #${CONFIG.UI_ID} .chip.status .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
-  #${CONFIG.UI_ID} .chip.status.ok .dot{background:#10b981}
-  #${CONFIG.UI_ID} .chip.status.err .dot{background:#ef4444}
+  #${CONFIG.UI_ID} .chip.status.ok .dot{background:#10b981}   /* groen */
+  #${CONFIG.UI_ID} .chip.status.err .dot{background:#ef4444}  /* rood  */
   #${CONFIG.UI_ID} .checks{display:flex;gap:12px;align-items:center}
   #${CONFIG.UI_ID} label{font-size:12px;display:flex;align-items:center;gap:6px}
   #${CONFIG.UI_ID} .tools{display:flex;gap:6px}
@@ -221,6 +271,19 @@
   #${CONFIG.UI_ID} .settings .formrow{display:flex;align-items:center;gap:6px;margin:8px 0}
   #${CONFIG.UI_ID} .settings input[type="password"],
   #${CONFIG.UI_ID} .settings input[type="text"]{flex:1 1 auto;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;padding:6px 8px;font-size:12px}
+  #${CONFIG.UI_ID} .settings .btns{display:flex;gap:8px;margin-top:8px}
+
+  /* badges */
+  #${CONFIG.UI_ID} .badge {
+    margin-left:6px; font-size:10px; padding:2px 6px; border-radius:999px;
+    border:1px solid #374151; background:#111827; display:inline-flex; align-items:center; gap:6px;
+  }
+  #${CONFIG.UI_ID} .badge .lang { opacity:.7; font-weight:600; letter-spacing:.2px; }
+  #${CONFIG.UI_ID} .badge.working { border-color:#60a5fa }
+  #${CONFIG.UI_ID} .badge.done    { border-color:#10b981 }
+  #${CONFIG.UI_ID} .badge.fail    { border-color:#ef4444 }
+  #${CONFIG.UI_ID} .badge.skip    { border-color:#6b7280 }
+
   #${CONFIG.OPENER_ID}{
     position:fixed;right:16px;bottom:16px;z-index:1000001;background:#0f172a;color:#e5e7eb;border:1px solid #334155;
     border-radius:999px;padding:10px 12px;font-size:14px;box-shadow:0 8px 18px rgba(0,0,0,.25);cursor:pointer;display:none
@@ -404,20 +467,21 @@
   // ---------- HTTP ----------
   function postJson(url, headers, body){
     return new Promise((resolve,reject)=>{
+      const handle = (text)=>{ try{ resolve(JSON.parse(text)); } catch(e){ reject(new Error('Kon JSON niet parsen: '+e.message)); } };
       if (typeof GM_xmlhttpRequest==='function'){
         GM_xmlhttpRequest({
-          method:'POST', url, headers, data: JSON.stringify(body),
-          onload: (resp)=>{
-            if (resp.status>=200 && resp.status<300) {
-              try { resolve(JSON.parse(resp.responseText)); }
-              catch(e){ reject(new Error('Kon JSON niet parsen: '+e.message)); }
-            } else reject(new Error('HTTP '+resp.status+': '+resp.responseText));
-          },
-          onerror:(e)=> reject(new Error('Netwerkfout (GM): '+(e.error||'unknown')))
+          method:'POST',
+          url,
+          headers,
+          data: JSON.stringify(body),
+          timeout: 60000, // 60s per taal-call
+          onload: (resp)=>{ if (resp.status>=200 && resp.status<300) handle(resp.responseText); else reject(new Error('HTTP '+resp.status+': '+resp.responseText)); },
+          onerror:(e)=> reject(new Error('Netwerkfout (GM): '+(e.error||'unknown'))),
+          ontimeout:()=> reject(new Error('Timeout bij vertaal-aanvraag'))
         });
       } else {
         fetch(url,{method:'POST', headers, body: JSON.stringify(body)})
-          .then(async r=>{ const t=await r.text(); if(!r.ok) throw new Error('HTTP '+r.status+': '+t); resolve(JSON.parse(t)); })
+          .then(async r=>{ const t=await r.text(); if(!r.ok) throw new Error('HTTP '+r.status+': '+t); handle(t); })
           .catch(reject);
       }
     });
@@ -432,13 +496,13 @@
     return s;
   }
 
-  async function translateBatch(opts) {
+  // Enkelvoudige taal-call
+  async function translateOne(lang, opts) {
     const {
       doName, doTitle, doContent, doPromo,
-      doSeoPage, doSeoHeader, doSeoDesc, /* doSeoKeys via keywordsEnabled */ doSeoFooter
+      doSeoPage, doSeoHeader, doSeoDesc, doSeoFooter
     } = opts;
 
-    const targets = activeLangs();
     const nl = getNLValues();
     const nlSeo = getNLSeoValues();
 
@@ -454,16 +518,16 @@
       footer_content:   doSeoFooter? (nlSeo.footer_content||'')   : ''
     };
 
+    // compacter (scheelt tokens/timeouts)
     const compact = {};
     Object.keys(payload).forEach(k=>{
-      compact[k] = (payload[k]||'').replace(/\s+/g,' ').trim();
+      const v = (payload[k]||'').replace(/\s+/g,' ').trim();
+      if (v) compact[k] = v;
     });
+    const totalChars = Object.values(compact).reduce((a,b)=>a+b.length,0);
+    if (!totalChars) return null;
 
-    const totalChars = Object.values(compact).reduce((a,b)=>a+(b?b.length:0),0);
-    if (!totalChars) throw new Error('Geen broninhoud geselecteerd.');
-    if (totalChars > CONFIG.MAX_CHARS) throw new Error('Inhoud te groot — splits even op.');
-
-    const cacheProbe = { model: CONFIG.MODEL, targets: targets.join(','), compact };
+    const cacheProbe = { model: CONFIG.MODEL, target: lang, compact };
     const cached = getCache(cacheProbe);
     if (cached) return cached;
 
@@ -472,17 +536,17 @@
 
     const system = [
       'You are a professional ecommerce translator for lingerie & fashion.',
-      'Translate Dutch (nl) to the requested target languages (EN/DE/FR).',
+      'Translate Dutch (nl) to the requested single target language.',
       'Preserve HTML structure and only translate visible text.',
       'Keep brand/product names and sizes as in source.',
-      'Return JSON keyed by language code (en,de,fr).',
-      'Each language object may contain: name, title, content, promo, page_title, header_title, meta_description, meta_keywords, footer_content.',
+      'Return JSON keyed by the target language code only.',
+      'Allowed keys per language object: name, title, content, promo, page_title, header_title, meta_description, meta_keywords, footer_content.',
       'For meta_keywords, return a comma-separated plain list.'
     ].join(' ');
 
     const user = [
       'Source language: nl',
-      `Targets: ${targets.join(', ') || '(none)'}`,
+      `Target: ${lang}`,
       'Fields JSON:',
       JSON.stringify(compact)
     ].join('\n');
@@ -492,7 +556,7 @@
       text: { format: { type: 'json_object' } },
       input: [
         { role: 'system', content: system },
-        { role: 'user', content: user + '\n\nReturn ONLY the requested targets as keys.' }
+        { role: 'user', content: user + '\n\nReturn ONLY this target as the single key.' }
       ]
     };
 
@@ -516,12 +580,67 @@
     const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/```$/,'').trim();
     let obj = JSON.parse(clean);
 
+    // normaliseer sleutel (en/de/fr)
     const norm = {};
     for (const k of Object.keys(obj||{})) {
       const nk = normalizeLangKey(k);
       norm[nk] = obj[k];
     }
-    return norm;
+    const pack = norm[lang] || null;
+    if (pack) setCache(cacheProbe, pack);
+    return pack;
+  }
+
+  // ---------- BADGE HELPERS ----------
+  const BADGE_MAP = {
+    name: 'chk-name',
+    title: 'chk-title',
+    content: 'chk-content',
+    promo: 'chk-promo',
+    seo_page: 'chk-seo-page',
+    seo_header: 'chk-seo-header',
+    seo_desc: 'chk-seo-desc',
+    seo_footer: 'chk-seo-footer',
+  };
+
+  function ensureBadges(){
+    Object.entries(BADGE_MAP).forEach(([key, chkId])=>{
+      const chk = document.getElementById(chkId);
+      if (!chk) return;
+      const label = chk.closest('label');
+      if (!label) return;
+      if (!document.getElementById('bdg-'+key)) {
+        const span = document.createElement('span');
+        span.className = 'badge';
+        span.id = 'bdg-'+key;
+        label.appendChild(span);
+      }
+    });
+  }
+
+  function setBadge(key, state='idle', lang=''){
+    const el = document.getElementById('bdg-'+key);
+    if (!el) return;
+    el.classList.remove('working','done','fail','skip');
+    let html = '';
+    if (state === 'work') {
+      el.classList.add('working');
+      html = `<i class="fa-solid fa-spinner fa-spin"></i>${lang?`<span class="lang">${lang.toUpperCase()}</span>`:''}`;
+    } else if (state === 'ok') {
+      el.classList.add('done');
+      html = `<i class="fa-solid fa-check"></i>${lang?`<span class="lang">${lang.toUpperCase()}</span>`:''}`;
+    } else if (state === 'fail') {
+      el.classList.add('fail');
+      html = `<i class="fa-solid fa-triangle-exclamation"></i>${lang?`<span class="lang">${lang.toUpperCase()}</span>`:''}`;
+    } else if (state === 'skip') {
+      el.classList.add('skip');
+      html = `<span>—</span>${lang?`<span class="lang">${lang.toUpperCase()}</span>`:''}`;
+    } else { html=''; }
+    el.innerHTML = html;
+  }
+
+  function resetAllBadges(){
+    Object.keys(BADGE_MAP).forEach(k => setBadge(k,'idle'));
   }
 
   // ---------- UI ----------
@@ -595,57 +714,46 @@
   `;
   document.body.appendChild(wrap);
 
-  // ---------- STATUS (gratis ping) ----------
+  // Helper: is er een API key?
   function hasApiKey(){ return !!(localStorage.getItem(CONFIG.LS_KEY)||'').trim(); }
 
-  function setStatus(isOnline){
+  // Render de online/offline badge
+  function renderStatus(){
     const el = $('#ddo-status');
     if (!el) return;
-    el.classList.toggle('ok', !!isOnline);
-    el.classList.toggle('err', !isOnline);
-    el.innerHTML = `<span class="dot"></span>${isOnline ? 'Online' : 'Offline'}`;
+    const online = hasApiKey();
+    el.classList.toggle('ok', online);
+    el.classList.toggle('err', !online);
+    el.innerHTML = `<span class="dot"></span>${online ? 'Online' : 'Offline'}`;
   }
 
-  function renderStatus(){ setStatus(hasApiKey()); }
-
-  function getStatusCode(url, headers){
-    return new Promise((resolve)=>{
-      if (typeof GM_xmlhttpRequest === 'function'){
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url,
-          headers,
-          onload: (resp)=> resolve(resp.status || 0),
-          onerror: ()=> resolve(0)
-        });
-      } else {
-        fetch(url, { method:'GET', headers })
-          .then(r=> resolve(r.status || 0))
-          .catch(()=> resolve(0));
-      }
+  const btnShow = $('#btn-showkey');
+  if (btnShow) {
+    btnShow.addEventListener('click', ()=>{
+      const inp = $('#inp-apikey');
+      const isPw = inp.type === 'password';
+      inp.type = isPw ? 'text' : 'password';
+      btnShow.querySelector('i').className = 'fa-solid ' + (isPw ? 'fa-eye' : 'fa-eye-slash');
     });
   }
 
-  async function pingStatus({ silent = true } = {}){
-    const key = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
-    if (!key){ setStatus(false); return false; }
-    const url = `https://api.openai.com/v1/models/${encodeURIComponent(CONFIG.MODEL)}`;
-    const status = await getStatusCode(url, { 'Authorization': 'Bearer ' + key });
-    const ok = status >= 200 && status < 300;
-    setStatus(ok);
-    if (!ok && !silent){
-      const msgEl = $('#ddo-msg');
-      if (msgEl){
-        msgEl.textContent = (status === 401 || status === 403)
-          ? 'API key ongeldig of geen toegang tot model.'
-          : 'Kan OpenAI niet bereiken.';
-        msgEl.style.display = 'inline-flex';
-      }
+  // Zet bestaande key (gemaskeerd) in het inputveld
+  (() => {
+    const saved = (localStorage.getItem(CONFIG.LS_KEY) || '').trim();
+    if (saved) $('#inp-apikey').value = saved;
+  })();
+
+  // settings toggler
+  const settingsEl = $('#ddo-settings');
+  function toggleSettings(show=null){
+    const willShow = (show===null)? (settingsEl.style.display!=='block') : show;
+    settingsEl.style.display = willShow ? 'block' : 'none';
+    if (willShow) {
+      const saved = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
+      if (saved) $('#inp-apikey').value = saved;
     }
-    return ok;
   }
 
-  // ---------- UI helpers ----------
   function setStat(msg){
     const msgEl = $('#ddo-msg');
     if (!msgEl) return;
@@ -658,35 +766,9 @@
     }
   }
 
-  // Show/hide key
-  const btnShow = $('#btn-showkey');
-  if (btnShow) {
-    btnShow.addEventListener('click', ()=>{
-      const inp = $('#inp-apikey');
-      const isPw = inp.type === 'password';
-      inp.type = isPw ? 'text' : 'password';
-      btnShow.querySelector('i').className = 'fa-solid ' + (isPw ? 'fa-eye' : 'fa-eye-slash');
-    });
-  }
+  renderStatus();
 
-  // Vul bestaand keyveld
-  (function preloadKey(){
-    const saved = (localStorage.getItem(CONFIG.LS_KEY) || '').trim();
-    if (saved) $('#inp-apikey').value = saved;
-  })();
-
-  // Eén settings toggle
-  const settings = $('#ddo-settings');
-  function toggleSettings(show=null){
-    const willShow = (show===null)? (settings.style.display!=='block') : show;
-    settings.style.display = willShow ? 'block' : 'none';
-    if (willShow){
-      const saved = (localStorage.getItem(CONFIG.LS_KEY)||'').trim();
-      if (saved) $('#inp-apikey').value = saved;
-    }
-  }
-
-  // Content/Summary in gewenste volgorde renderen (Description eerst, dan Summary)
+  // Content/Summary render (Description eerst, dan Summary)
   (function renderContentPromo(){
     const slot = $('#content-promoslot');
     const labels = CURRENT_SECTION.defaults.labels;
@@ -727,6 +809,10 @@
     });
   })();
 
+  // Badges aanmaken nadat labels er staan
+  ensureBadges();
+  resetAllBadges();
+
   // Flags render
   function renderFlags(){
     const host = $('#fluentl-flags');
@@ -765,13 +851,12 @@
 
   // Settings listeners
   $('#btn-close-settings').addEventListener('click', ()=> toggleSettings(false));
-  $('#btn-savekey').addEventListener('click', async ()=>{
+  $('#btn-savekey').addEventListener('click', ()=>{
     const v = sanitizeKey($('#inp-apikey').value);
     if (v) {
       localStorage.setItem(CONFIG.LS_KEY, v);
       setStat('API key opgeslagen');
-      renderStatus();
-      await pingStatus({ silent: true });
+      renderStatus(); // update groen/rood + tekst
     } else {
       setStat('Lege key — niets opgeslagen');
     }
@@ -796,14 +881,10 @@
     setStat(report.join(' — '));
   });
 
-  // Translate button
+  // ---------- TRANSLATE (sequentieel per taal) ----------
   $('#ddo-translate').addEventListener('click', async ()=>{
     try{
-      // check status zonder kosten
-      const ok = await pingStatus({ silent: false });
-      if (!ok) return;
-
-      const langs = activeLangs();
+      const langs = activeLangs(); // volgorde vlaggen: de, en, fr
       if (!langs.length) { setStat('Geen talen actief (vlaggen).'); return; }
 
       const doName    = $('#chk-name').checked;
@@ -816,6 +897,7 @@
       const doSeoDesc   = $('#chk-seo-desc')?.checked;
       const doSeoFooter = $('#chk-seo-footer')?.checked;
 
+      // preflight: input size check (op basis van NL content, 1x — ongeacht #talen)
       const base = getNLValues();
       const seo  = getNLSeoValues();
       const totalChars =
@@ -832,84 +914,141 @@
       if (!totalChars) { setStat('Geen broninhoud (NL) geselecteerd.'); return; }
       if (totalChars > CONFIG.MAX_CHARS) { setStat('Inhoud te groot — splits even op.'); return; }
 
-      setStat('Vertalen…');
-      const out = await translateBatch({
-        doName, doTitle, doContent, doPromo,
-        doSeoPage, doSeoHeader, doSeoDesc, doSeoFooter
-      });
-
-      // Vul ML
-      await ensureTabVisible(TABS.ML);
       let filled = 0;
       const touched = [];
-
-      for (const lang of langs) {
-        const pack = out[lang] || {};
-
-        if (doName && pack.name) {
-          const el = pickTarget(lang,'name');
-          if (setIntoEditor(el, pack.name)) { filled++; touched.push(`${lang}:name`); }
-        }
-        if (doTitle && pack.title) {
-          const elT = pickTarget(lang,'title');
-          if (setIntoEditor(elT, pack.title)) { filled++; touched.push(`${lang}:title`); }
-        }
-        if (doContent && pack.content) {
-          const elC = pickTarget(lang,'content');
-          if (setIntoEditor(elC, pack.content)) { filled++; touched.push(`${lang}:content`); }
-        }
-        if (doPromo && pack.promo) {
-          const elP = pickTarget(lang,'promo');
-          if (setIntoEditor(elP, pack.promo)) { filled++; touched.push(`${lang}:promo`); }
-        }
-      }
-
-      // Vul SEO
+      await ensureTabVisible(TABS.ML);
       await ensureTabVisible(TABS.SEO);
-      await waitForSeoEditors(langs);
+
+      // init badges
+      resetAllBadges();
 
       for (const lang of langs) {
-        const pack = out[lang] || {};
+        const L = lang;
+        setStat(`Vertalen… ${L.toUpperCase()}`);
 
-        if (doSeoPage && pack.page_title) {
-          const el = pickSeoTarget(lang,'page_title');
-          if (setIntoEditor(el, pack.page_title)) { filled++; touched.push(`${lang}:seo_page_title`); }
+        // zet 'work' op de aangevinkte velden voor deze taal
+        if (doName)    setBadge('name','work',L);
+        if (doTitle)   setBadge('title','work',L);
+        if (doContent) setBadge('content','work',L);
+        if (doPromo)   setBadge('promo','work',L);
+        if (doSeoPage)   setBadge('seo_page','work',L);
+        if (doSeoHeader) setBadge('seo_header','work',L);
+        if (doSeoDesc)   setBadge('seo_desc','work',L);
+        if (doSeoFooter) setBadge('seo_footer','work',L);
+
+        // 1 taal per call
+        let pack = null;
+        try {
+          pack = await translateOne(L, {
+            doName, doTitle, doContent, doPromo,
+            doSeoPage, doSeoHeader, doSeoDesc, doSeoFooter
+          });
+        } catch (err) {
+          console.error('Translate error for '+L+':', err);
+          if (doName)    setBadge('name','fail',L);
+          if (doTitle)   setBadge('title','fail',L);
+          if (doContent) setBadge('content','fail',L);
+          if (doPromo)   setBadge('promo','fail',L);
+          if (doSeoPage)   setBadge('seo_page','fail',L);
+          if (doSeoHeader) setBadge('seo_header','fail',L);
+          if (doSeoDesc)   setBadge('seo_desc','fail',L);
+          if (doSeoFooter) setBadge('seo_footer','fail',L);
+          continue;
         }
-        if (doSeoHeader && pack.header_title) {
-          const el = pickSeoTarget(lang,'header_title');
-          if (setIntoEditor(el, pack.header_title)) { filled++; touched.push(`${lang}:seo_header_title`); }
+        if (!pack) {
+          if (doName)    setBadge('name','skip',L);
+          if (doTitle)   setBadge('title','skip',L);
+          if (doContent) setBadge('content','skip',L);
+          if (doPromo)   setBadge('promo','skip',L);
+          if (doSeoPage)   setBadge('seo_page','skip',L);
+          if (doSeoHeader) setBadge('seo_header','skip',L);
+          if (doSeoDesc)   setBadge('seo_desc','skip',L);
+          if (doSeoFooter) setBadge('seo_footer','skip',L);
+          continue;
         }
-        if (doSeoDesc && pack.meta_description) {
-          const el = pickSeoTarget(lang,'meta_description');
-          if (setIntoEditor(el, pack.meta_description)) { filled++; touched.push(`${lang}:seo_meta_description`); }
+
+        // --- ML velden ---
+        if (doName) {
+          if (pack.name) {
+            const el = pickTarget(L,'name');
+            if (setIntoEditor(el, pack.name)) { filled++; touched.push(`${L}:name`); }
+            setBadge('name','ok',L);
+          } else setBadge('name','skip',L);
         }
+
+        if (doTitle) {
+          if (pack.title) {
+            const elT = pickTarget(L,'title');
+            if (setIntoEditor(elT, pack.title)) { filled++; touched.push(`${L}:title`); }
+            setBadge('title','ok',L);
+          } else setBadge('title','skip',L);
+        }
+
+        if (doContent) {
+          if (pack.content) {
+            const elC = pickTarget(L,'content');
+            if (setIntoEditor(elC, pack.content)) { filled++; touched.push(`${L}:content`); }
+            setBadge('content','ok',L);
+          } else setBadge('content','skip',L);
+        }
+
+        if (doPromo) {
+          if (pack.promo) {
+            const elP = pickTarget(L,'promo');
+            if (setIntoEditor(elP, pack.promo)) { filled++; touched.push(`${L}:promo`); }
+            setBadge('promo','ok',L);
+          } else setBadge('promo','skip',L);
+        }
+
+        // --- SEO velden ---
+        await waitForSeoEditors([L]);
+
+        if (doSeoPage) {
+          if (pack.page_title) {
+            const el = pickSeoTarget(L,'page_title');
+            if (setIntoEditor(el, pack.page_title)) { filled++; touched.push(`${L}:seo_page_title`); }
+            setBadge('seo_page','ok',L);
+          } else setBadge('seo_page','skip',L);
+        }
+
+        if (doSeoHeader) {
+          if (pack.header_title) {
+            const el = pickSeoTarget(L,'header_title');
+            if (setIntoEditor(el, pack.header_title)) { filled++; touched.push(`${L}:seo_header_title`); }
+            setBadge('seo_header','ok',L);
+          } else setBadge('seo_header','skip',L);
+        }
+
+        if (doSeoDesc) {
+          if (pack.meta_description) {
+            const el = pickSeoTarget(L,'meta_description');
+            if (setIntoEditor(el, pack.meta_description)) { filled++; touched.push(`${L}:seo_meta_description`); }
+            setBadge('seo_desc','ok',L);
+          } else setBadge('seo_desc','skip',L);
+        }
+
         if (keywordsEnabled && pack.meta_keywords) {
-          const el = pickSeoTarget(lang,'meta_keywords');
-          if (setIntoEditor(el, pack.meta_keywords)) { filled++; touched.push(`${lang}:seo_meta_keywords`); }
+          const el = pickSeoTarget(L,'meta_keywords');
+          setIntoEditor(el, pack.meta_keywords);
+          // geen aparte badge voor keywords
         }
-        if (doSeoFooter && pack.footer_content) {
-          const el = pickSeoTarget(lang,'footer_content');
-          if (setIntoEditor(el, pack.footer_content)) { filled++; touched.push(`${lang}:seo_footer_content`); }
-        }
-      }
 
-      if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
+        if (doSeoFooter) {
+          if (pack.footer_content) {
+            const el = pickSeoTarget(L,'footer_content');
+            if (setIntoEditor(el, pack.footer_content)) { filled++; touched.push(`${L}:seo_footer_content`); }
+            setBadge('seo_footer','ok',L);
+          } else setBadge('seo_footer','skip',L);
+        }
+
+        if (window.tinymce && typeof tinymce.triggerSave === 'function') tinymce.triggerSave();
+      }
 
       if (console && console.table) console.table(touched.map(x=>({changed:x})));
       setStat(`Klaar: ${filled} veld(en) gevuld • Actief: ${langs.map(x=>x.toUpperCase()).join('/')} • Sectie: ${getSection()||'categories'}`);
     } catch(e){
       console.error(e);
       setStat('Fout: '+(e.message||e));
-    }
-  });
-
-  // Init status + cross-tab updates
-  renderStatus();
-  pingStatus({ silent: true });
-  window.addEventListener('storage', (e)=>{
-    if (e.key === CONFIG.LS_KEY){
-      renderStatus();
-      pingStatus({ silent: true });
     }
   });
 
