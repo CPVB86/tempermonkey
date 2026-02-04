@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP - After Eden (+ Elbrina)
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1.1
-// @description  Vergelijk local stock met remote stock (After Eden/Elbrina) op basis van MAAT. Remote via itemquantitycal. Mapping: remoteQty-4 => 1..5 (remote ontbreekt: negeren; remote 0 maar aanwezig: 1).
+// @version      1.1.3
+// @description  Vergelijk local stock met remote stock (After Eden/Elbrina) op basis van MAAT. Remote via itemquantitycal. Mapping: remoteQty-4 => 1..5 (remote ontbreekt: negeren; remote 0 maar aanwezig: 1). Mapping maat: remote "ONE SIZE(S)" => local "1". Preorder items (item_type=preorder) worden als 0-stock behandeld.
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -22,7 +22,7 @@
   // ---------- Config ----------
   const TIMEOUT = 15000;
   const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
-  const CACHE_PREFIX = 'aftereden_html_cache_v3:'; // + itemNumber
+  const CACHE_PREFIX = 'aftereden_html_cache_v4:'; // ✅ bump: voorkom oude cache (v3 -> v4)
   const BASE = 'https://bcg.fashionportal.shop';
   const STOCK_URL = (itemNumber) =>
     `${BASE}/itemquantitycal?item_number=${encodeURIComponent(itemNumber)}&price_type=stockitem`;
@@ -60,7 +60,7 @@
         method: 'GET',
         url,
         responseType,
-        anonymous: false,                 // ✅ belangrijk: cookies mee (zoals je Scraper)
+        anonymous: false,                 // ✅ belangrijk: cookies mee
         timeout: TIMEOUT,
         headers: { 'Accept':'text/html,*/*;q=0.8' },
         onload: r => resolve(r),
@@ -104,7 +104,8 @@
     const hasInventorySignals =
       txt.includes('data-inventory') ||
       txt.includes('qty-by-size') ||
-      txt.includes('add-qty-box');
+      txt.includes('add-qty-box') ||
+      txt.includes('item_type');
 
     if (!hasInventorySignals) throw new Error('NO_INVENTORY_IN_HTML');
 
@@ -114,11 +115,17 @@
 
   // ---------- Normalizers ----------
   function normalizeSize(s) {
-    return String(s||'')
+    const cleaned = String(s||'')
       .trim()
       .toUpperCase()
-      .replace(/\s+/g,'')
-      .replace(/–|—/g,'-');
+      .replace(/\s+/g,'')     // "ONE SIZE" -> "ONESIZE"
+      .replace(/–|—/g,'-')
+      .replace(/_/g,'');
+
+    // ✅ Supplier "one sizes"/"one size" -> local maat "1"
+    if (/^ONESIZES?$/.test(cleaned)) return '1';
+
+    return cleaned;
   }
 
   // ---------- Mapping (zelfde als scraper) ----------
@@ -150,15 +157,11 @@
   }
 
   // ---------- Pick best 3D block ----------
-  // Sommige PIDs bevatten meerdere 3D matrices; de laatste kan "leeg" zijn en alles overschrijven.
-  // We kiezen de matrix met de meeste cellen met inventory > 0.
   function pickBest3DContainer(doc) {
-    // werkt bij diverse layouts; liever te breed dan te smal
     const containers = [
       ...doc.querySelectorAll('.row.qty-by-size.scroll-design, .qty-by-size.scroll-design')
     ];
 
-    // fallback: als er geen wrapper is, val terug op de "hele doc" (oude gedrag)
     if (!containers.length) return doc;
 
     let best = null;
@@ -180,16 +183,19 @@
       }
     }
 
-    // als alles 0 scoort, pak alsnog de eerste container om consistent te blijven
     return best || containers[0];
   }
 
-  // ---------- HTML -> Map(size -> {qty,mapped}) ----------
+  // ---------- HTML -> { map, isPreorder } ----------
   // Ondersteunt:
   // A) 3D BH matrix (.qty-by-size-3D)
-  // B) 1D lijst (S/M/L/XL/XXL) (.qty-by-size-list)
+  // B) 1D lijst (S/M/L/XL/XXL/One Size) (.qty-by-size-list)
+  // Preorder detect: <input name="item_type" value="preorder">
   function parseAfterEdenHTMLtoMap(htmlText) {
     const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+
+    const itemType = (doc.querySelector('input[name="item_type"]')?.value || '').trim().toLowerCase();
+    const isPreorder = itemType === 'preorder';
 
     const m = new Map();
     const dbg = [];
@@ -216,23 +222,23 @@
           const band = bandSizes[idx];
           if (!band) return;
 
-          const remoteQty = readRemoteInventoryFromBox(cell);
+          const remoteQtyRaw = readRemoteInventoryFromBox(cell);
+          const remoteQty = isPreorder ? 0 : remoteQtyRaw; // ✅ preorder => 0-stock
+
           const sizeKey = normalizeSize(`${band}${cup}`);
           const mapped = mapAfterEdenQty(remoteQty);
 
-          // ✅ niet laten overschrijven door latere matrices (die soms leeg zijn)
-          // Als we al een entry hebben met hogere qty, behouden we die.
           const prev = m.get(sizeKey);
           if (!prev || (Number(remoteQty) > Number(prev.qty))) {
             m.set(sizeKey, { qty: remoteQty, mapped });
           }
 
-          dbg.push({ type: '3D', size: sizeKey, band, cup, remoteQty, mapped });
+          dbg.push({ type: '3D', size: sizeKey, band, cup, remoteQty, mapped, isPreorder });
         });
       }
     }
 
-    // ---- B) 1D (brief/broekjes S/M/L/...) ----
+    // ---- B) 1D (brief/broekjes S/M/L/XL/XXL/One Size) ----
     const listWraps = [...doc.querySelectorAll('.qty-by-size.qty-by-size-list, .qty-by-size-list')];
     for (const wrap of listWraps) {
       const boxes = [...wrap.querySelectorAll('.add-qty-box')];
@@ -240,8 +246,9 @@
         const sizeRaw = box.querySelector('.size-for')?.textContent?.trim();
         if (!sizeRaw) continue;
 
-        const sizeKey = normalizeSize(sizeRaw); // S/M/L/XL/XXL
-        const remoteQty = readRemoteInventoryFromBox(box);
+        const sizeKey = normalizeSize(sizeRaw); // S/M/L/XL/XXL/One Size -> 1
+        const remoteQtyRaw = readRemoteInventoryFromBox(box);
+        const remoteQty = isPreorder ? 0 : remoteQtyRaw; // ✅ preorder => 0-stock
         const mapped = mapAfterEdenQty(remoteQty);
 
         const prev = m.get(sizeKey);
@@ -249,15 +256,16 @@
           m.set(sizeKey, { qty: remoteQty, mapped });
         }
 
-        dbg.push({ type: '1D', size: sizeKey, remoteQty, mapped });
+        dbg.push({ type: '1D', size: sizeKey, remoteQty, mapped, isPreorder });
       }
     }
 
     console.groupCollapsed('[AfterEden] Remote parsed (best 3D + 1D)');
     console.table(dbg);
+    console.log('[AfterEden] item_type:', itemType || '(unknown)', 'isPreorder:', isPreorder);
     console.groupEnd();
 
-    return m;
+    return { map: m, isPreorder };
   }
 
   // ---------- Rules & markering ----------
@@ -357,13 +365,14 @@
 
       try {
         const html = await fetchAfterEdenHTML(pid);
-        const remoteMap = parseAfterEdenHTMLtoMap(html);
+
+        const { map: remoteMap, isPreorder } = parseAfterEdenHTMLtoMap(html);
 
         const { changes, counts, report } = applyAfterEdenRulesOnTable(table, remoteMap);
         totalChanges += changes;
 
         const status = changes > 0 ? 'afwijking' : 'ok';
-        Logger.status(anchorId, status, counts);
+        Logger.status(anchorId, status + (isPreorder ? ' (preorder=0-stock)' : ''), counts);
         Logger.perMaat(anchorId, report);
 
         if (!firstDiffTable && changes > 0) firstDiffTable = table;
@@ -408,7 +417,6 @@
 
     const outputHasTables = ()=> !!document.querySelector('#output')?.querySelector('table');
 
-    // ✅ After Eden + Elbrina
     function isAfterEdenOrElbrinaSelected(){
       const el = document.querySelector('#leverancier-keuze');
       if (!el) return true;
