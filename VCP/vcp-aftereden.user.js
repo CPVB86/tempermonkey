@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP - After Eden (+ Elbrina)
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1.3
-// @description  Vergelijk local stock met remote stock (After Eden/Elbrina) op basis van MAAT. Remote via itemquantitycal. Mapping: remoteQty-4 => 1..5 (remote ontbreekt: negeren; remote 0 maar aanwezig: 1). Mapping maat: remote "ONE SIZE(S)" => local "1". Preorder items (item_type=preorder) worden als 0-stock behandeld.
+// @version      1.1.6
+// @description  Vergelijk local stock met remote stock (After Eden/Elbrina) op basis van MAAT. Remote via itemquantitycal. STRICT: alleen data-inventory telt. Geen preorder-logica. Mapping remote->local: 0..2=>1, 3=>2, 4=>3, >=5=>5. Kritiek: exact kleur/PID match via .selectqty-wrap .pro-sku .nuMber.
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -22,14 +22,39 @@
   // ---------- Config ----------
   const TIMEOUT = 15000;
   const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
-  const CACHE_PREFIX = 'aftereden_html_cache_v4:'; // ✅ bump: voorkom oude cache (v3 -> v4)
+  const CACHE_PREFIX = 'aftereden_html_cache_v7:'; // bump
   const BASE = 'https://bcg.fashionportal.shop';
   const STOCK_URL = (itemNumber) =>
     `${BASE}/itemquantitycal?item_number=${encodeURIComponent(itemNumber)}&price_type=stockitem`;
 
-  const $ = (s, r=document) => r.querySelector(s);
+  // ---------- Helpers ----------
+  function extractColorCode(pid){
+    const m = String(pid || '').trim().match(/-([A-Za-z0-9]{2,})$/);
+    return m ? m[1] : '';
+  }
 
-  // ---------- Logger (zoals Wacoal/Lisca) ----------
+  function normalizeSize(s) {
+    const cleaned = String(s||'')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g,'')
+      .replace(/–|—/g,'-')
+      .replace(/_/g,'');
+
+    if (/^ONESIZES?$/.test(cleaned)) return '1';
+    return cleaned;
+  }
+
+  // ---------- Mapping ----------
+  function mapAfterEdenQty(remoteQty){
+    const r = Number(remoteQty);
+    if (!Number.isFinite(r) || r <= 2) return 1;
+    if (r === 3) return 2;
+    if (r === 4) return 3;
+    return 5;
+  }
+
+  // ---------- Logger ----------
   const Logger = {
     lb(){ return (typeof unsafeWindow!=='undefined' && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek; },
     status(id, txt, extra){
@@ -41,14 +66,15 @@
     perMaat(id, report){
       console.groupCollapsed(`[AfterEden][${id}] maatvergelijking`);
       try{
-        const rows = report.map(r => ({
+        console.table(report.map(r => ({
+          pid: r.pid,
+          kleurcode: r.kleurcode,
           maat: r.maat,
           local: r.local,
           remote: (r.remotePresent ? r.remoteMapped : '—'),
           remoteQty: (r.remotePresent ? r.remoteQty : '—'),
           status: r.actie
-        }));
-        console.table(rows);
+        })));
       } finally { console.groupEnd(); }
     }
   };
@@ -60,7 +86,7 @@
         method: 'GET',
         url,
         responseType,
-        anonymous: false,                 // ✅ belangrijk: cookies mee
+        anonymous: false,
         timeout: TIMEOUT,
         headers: { 'Accept':'text/html,*/*;q=0.8' },
         onload: r => resolve(r),
@@ -96,16 +122,15 @@
       throw new Error(`AfterEden HTML HTTP ${r?.status || '??'}`);
     }
 
-    // login detect
     const looksLikeLogin = /login|sign in|unauthorized/i.test(txt);
     if (looksLikeLogin) throw new Error('LOGIN_REQUIRED');
 
-    // ✅ voorkom cachen van "lege template" responses
     const hasInventorySignals =
       txt.includes('data-inventory') ||
       txt.includes('qty-by-size') ||
       txt.includes('add-qty-box') ||
-      txt.includes('item_type');
+      txt.includes('selectqty-wrap') ||
+      txt.includes('nuMber');
 
     if (!hasInventorySignals) throw new Error('NO_INVENTORY_IN_HTML');
 
@@ -113,163 +138,151 @@
     return txt;
   }
 
-  // ---------- Normalizers ----------
-  function normalizeSize(s) {
-    const cleaned = String(s||'')
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g,'')     // "ONE SIZE" -> "ONESIZE"
-      .replace(/–|—/g,'-')
-      .replace(/_/g,'');
+  // ---------- STRICT inventory read ----------
+  // ✅ Alleen data-inventory telt. Geen data-title, geen price text.
+  function readRemoteInventoryFromBox_STRICT(box) {
+    // In jouw snippet staat data-inventory op .qty-limit.
+    // Maar: als HTML ooit wijzigt, mag het ook op een child staan.
+    const invEl = box.querySelector('.qty-limit[data-inventory]') || box.querySelector('[data-inventory]') || null;
 
-    // ✅ Supplier "one sizes"/"one size" -> local maat "1"
-    if (/^ONESIZES?$/.test(cleaned)) return '1';
+    const raw = invEl?.getAttribute('data-inventory') ?? invEl?.dataset?.inventory;
+    if (raw == null) return { present:false, qty:null };
 
-    return cleaned;
-  }
-
-  // ---------- Mapping (zelfde als scraper) ----------
-  function mapAfterEdenQty(remoteQty){
-    const r = Number(remoteQty) || 0;
-    if (r <= 0) return 1; // alleen gebruikt wanneer de maat "bestaat" in remote
-    const adjusted = Math.max(0, r - 4);
-    if (adjusted < 2) return 1;
-    if (adjusted === 2) return 2;
-    if (adjusted === 3) return 3;
-    if (adjusted === 4) return 4;
-    return 5;
-  }
-
-  // ---------- Robust inventory read ----------
-  function readRemoteInventoryFromBox(box) {
-    const qtyLimit = box.querySelector('.qty-limit');
-    const input = box.querySelector('input.quntity-input');
-
-    const invA = qtyLimit?.getAttribute('data-inventory'); // voorkeur
-    const invB = qtyLimit?.dataset?.inventory;             // tolerant
-    const invC = input?.getAttribute('data-title');        // fallback
-    const invD = input?.dataset?.title;                    // fallback
-
-    const raw = (invA ?? invB ?? invC ?? invD ?? '0');
     const cleaned = String(raw).trim().replace(',', '.');
     const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
+    if (!Number.isFinite(n)) return { present:false, qty:null };
+
+    return { present:true, qty:n };
   }
 
-  // ---------- Pick best 3D block ----------
-  function pickBest3DContainer(doc) {
-    const containers = [
-      ...doc.querySelectorAll('.row.qty-by-size.scroll-design, .qty-by-size.scroll-design')
-    ];
+  // ---------- Exact wrapper pick: PID match ----------
+  function findSelectWrapByExactPid(doc, pid){
+    const wraps = [...doc.querySelectorAll('.selectqty-wrap')];
+    const target = String(pid || '').trim();
 
-    if (!containers.length) return doc;
-
-    let best = null;
-    let bestScore = -1;
-
-    for (const c of containers) {
-      const cells = [...c.querySelectorAll('.add-qty-box')];
-      if (!cells.length) continue;
-
-      let score = 0;
-      for (const cell of cells) {
-        const inv = readRemoteInventoryFromBox(cell);
-        if (inv > 0) score++;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = c;
-      }
+    const hits = [];
+    for (const w of wraps) {
+      const n = w.querySelector('.pro-sku .nuMber')?.textContent || '';
+      const number = n.trim();
+      if (number === target) hits.push(w);
     }
 
-    return best || containers[0];
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) throw new Error(`AMBIGUOUS_PID_WRAP:${target}:${hits.length}`);
+    throw new Error(`PID_WRAP_NOT_FOUND:${target}`);
   }
 
-  // ---------- HTML -> { map, isPreorder } ----------
-  // Ondersteunt:
-  // A) 3D BH matrix (.qty-by-size-3D)
-  // B) 1D lijst (S/M/L/XL/XXL/One Size) (.qty-by-size-list)
-  // Preorder detect: <input name="item_type" value="preorder">
-  function parseAfterEdenHTMLtoMap(htmlText) {
-    const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+  function readKleurLabelFromWrap(wrap){
+    const p = wrap.querySelector('.pro-sku p')?.textContent?.trim() || '';
+    // bv "050 Red"
+    return p;
+  }
 
-    const itemType = (doc.querySelector('input[name="item_type"]')?.value || '').trim().toLowerCase();
-    const isPreorder = itemType === 'preorder';
-
+  // ---------- Parse within wrapper ----------
+  function parseWrapToMap(wrap, pid, kleurcode) {
     const m = new Map();
     const dbg = [];
 
-    // ---- A) 3D ----
-    const best3D = pickBest3DContainer(doc);
-
-    const headerRow = best3D.querySelector('.qty-by-size-3D');
-    const bandSizes = headerRow
-      ? [...headerRow.querySelectorAll('.size-for.text-center')]
-          .map(el => el.textContent.trim())
-          .filter(Boolean)
-      : [];
-
-    const rows3d = [...best3D.querySelectorAll('.qty-by-size-3D')].slice(1);
-
-    if (bandSizes.length && rows3d.length) {
-      for (const row of rows3d) {
-        const cup = row.querySelector('.size-for.cup-size')?.textContent?.trim();
-        if (!cup) continue;
-
-        const cells = [...row.querySelectorAll('.add-qty-box')];
-        cells.forEach((cell, idx) => {
-          const band = bandSizes[idx];
-          if (!band) return;
-
-          const remoteQtyRaw = readRemoteInventoryFromBox(cell);
-          const remoteQty = isPreorder ? 0 : remoteQtyRaw; // ✅ preorder => 0-stock
-
-          const sizeKey = normalizeSize(`${band}${cup}`);
-          const mapped = mapAfterEdenQty(remoteQty);
-
-          const prev = m.get(sizeKey);
-          if (!prev || (Number(remoteQty) > Number(prev.qty))) {
-            m.set(sizeKey, { qty: remoteQty, mapped });
-          }
-
-          dbg.push({ type: '3D', size: sizeKey, band, cup, remoteQty, mapped, isPreorder });
-        });
-      }
-    }
-
-    // ---- B) 1D (brief/broekjes S/M/L/XL/XXL/One Size) ----
-    const listWraps = [...doc.querySelectorAll('.qty-by-size.qty-by-size-list, .qty-by-size-list')];
-    for (const wrap of listWraps) {
-      const boxes = [...wrap.querySelectorAll('.add-qty-box')];
+    // ---- 1D ----
+    const list = wrap.querySelector('.qty-by-size.qty-by-size-list, .qty-by-size-list');
+    if (list) {
+      const boxes = [...list.querySelectorAll('.add-qty-box')];
       for (const box of boxes) {
         const sizeRaw = box.querySelector('.size-for')?.textContent?.trim();
         if (!sizeRaw) continue;
 
-        const sizeKey = normalizeSize(sizeRaw); // S/M/L/XL/XXL/One Size -> 1
-        const remoteQtyRaw = readRemoteInventoryFromBox(box);
-        const remoteQty = isPreorder ? 0 : remoteQtyRaw; // ✅ preorder => 0-stock
-        const mapped = mapAfterEdenQty(remoteQty);
+        const sizeKey = normalizeSize(sizeRaw);
+        const r = readRemoteInventoryFromBox_STRICT(box);
 
-        const prev = m.get(sizeKey);
-        if (!prev || (Number(remoteQty) > Number(prev.qty))) {
-          m.set(sizeKey, { qty: remoteQty, mapped });
+        if (!r.present) {
+          dbg.push({ pid, kleurcode, type:'1D', size:sizeKey, remotePresent:false, remoteQty:null, remoteMapped:null });
+          continue;
         }
 
-        dbg.push({ type: '1D', size: sizeKey, remoteQty, mapped, isPreorder });
+        const remoteQty = r.qty;
+        const mapped = mapAfterEdenQty(remoteQty);
+
+        m.set(sizeKey, { qty: remoteQty, mapped });
+        dbg.push({ pid, kleurcode, type:'1D', size:sizeKey, remotePresent:true, remoteQty, remoteMapped:mapped });
       }
     }
 
-    console.groupCollapsed('[AfterEden] Remote parsed (best 3D + 1D)');
+    // ---- 3D ----
+    const matrixContainer = wrap.querySelector('.row.qty-by-size.scroll-design, .qty-by-size.scroll-design, .qty-by-size');
+    if (matrixContainer && matrixContainer.querySelector('.qty-by-size-3D')) {
+      const headerRow = matrixContainer.querySelector('.qty-by-size-3D');
+      const bandSizes = headerRow
+        ? [...headerRow.querySelectorAll('.size-for.text-center')].map(el => el.textContent.trim()).filter(Boolean)
+        : [];
+
+      const rows3d = [...matrixContainer.querySelectorAll('.qty-by-size-3D')].slice(1);
+
+      if (bandSizes.length && rows3d.length) {
+        for (const row of rows3d) {
+          const cup = row.querySelector('.size-for.cup-size')?.textContent?.trim();
+          if (!cup) continue;
+
+          const cells = [...row.querySelectorAll('.add-qty-box')];
+          cells.forEach((cell, idx) => {
+            const band = bandSizes[idx];
+            if (!band) return;
+
+            const sizeKey = normalizeSize(`${band}${cup}`);
+            const r = readRemoteInventoryFromBox_STRICT(cell);
+
+            if (!r.present) {
+              dbg.push({ pid, kleurcode, type:'3D', size:sizeKey, remotePresent:false, remoteQty:null, remoteMapped:null });
+              return;
+            }
+
+            const remoteQty = r.qty;
+            const mapped = mapAfterEdenQty(remoteQty);
+
+            const prev = m.get(sizeKey);
+            if (!prev || remoteQty > prev.qty) {
+              m.set(sizeKey, { qty: remoteQty, mapped });
+            }
+
+            dbg.push({ pid, kleurcode, type:'3D', size:sizeKey, remotePresent:true, remoteQty, remoteMapped:mapped });
+          });
+        }
+      }
+    }
+
+    console.groupCollapsed('[AfterEden] Remote parsed (STRICT, exact PID wrap)');
     console.table(dbg);
-    console.log('[AfterEden] item_type:', itemType || '(unknown)', 'isPreorder:', isPreorder);
     console.groupEnd();
 
-    return { map: m, isPreorder };
+    console.groupCollapsed('[AfterEden] Remote FINAL map');
+    console.table([...m.entries()].map(([size, obj]) => ({ pid, kleurcode, size, qty: obj.qty, mapped: obj.mapped })));
+    console.groupEnd();
+
+    return m;
   }
 
-  // ---------- Rules & markering ----------
-  function applyAfterEdenRulesOnTable(table, remoteMap) {
+  function parseAfterEdenHTMLtoMap(htmlText, pid) {
+    const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+    const kleurcode = extractColorCode(pid);
+
+    // ✅ exact wrapper: nummer == pid
+    const wrap = findSelectWrapByExactPid(doc, pid);
+    const kleurLabel = readKleurLabelFromWrap(wrap);
+
+    // extra sanity: als label bestaat en kleurcode mismatch -> hard fail
+    // label voorbeeld: "050 Red"
+    if (kleurcode && kleurLabel) {
+      const labelCode = (kleurLabel.match(/^([A-Za-z0-9]+)/)?.[1] || '').trim();
+      if (labelCode && labelCode !== kleurcode) {
+        throw new Error(`KLEURCODE_MISMATCH:pid=${pid}:kleurcode=${kleurcode}:label=${labelCode}`);
+      }
+    }
+
+    const map = parseWrapToMap(wrap, pid, kleurcode);
+    return { map, kleurcode, kleurLabel };
+  }
+
+  // ---------- Apply rules ----------
+  function applyAfterEdenRulesOnTable(table, remoteMap, pid, kleurcode) {
     let changes = 0;
     const counts = { add:0, remove:0, ignored_missing_remote:0 };
     const rows = table.querySelectorAll('tbody tr');
@@ -287,13 +300,13 @@
 
       const maatRaw = (sizeTd.textContent || '').trim();
       const maat = normalizeSize(maatRaw);
-
       const local = parseInt((stockTd.textContent || '0').trim(), 10) || 0;
 
       const remoteObj = remoteMap.get(maat);
       if (!remoteObj) {
         counts.ignored_missing_remote++;
         report.push({
+          pid, kleurcode,
           maat: maatRaw,
           maatNorm: maat,
           local,
@@ -305,12 +318,11 @@
         return;
       }
 
-      const remoteMapped = remoteObj.mapped; // 1..5
       const remoteQty = remoteObj.qty;
+      const remoteMapped = remoteObj.mapped;
 
       let actie = 'none';
-
-      const remoteHasStock = remoteMapped > 1; // 2..5
+      const remoteHasStock = remoteMapped > 1;
       const remoteNoStock  = remoteMapped === 1;
 
       if (local > 0 && remoteNoStock) {
@@ -326,6 +338,7 @@
       }
 
       report.push({
+        pid, kleurcode,
         maat: maatRaw,
         maatNorm: maat,
         local,
@@ -363,25 +376,32 @@
         continue;
       }
 
+      const kleurcode = extractColorCode(pid);
+
       try {
         const html = await fetchAfterEdenHTML(pid);
+        const { map: remoteMap, kleurLabel } = parseAfterEdenHTMLtoMap(html, pid);
 
-        const { map: remoteMap, isPreorder } = parseAfterEdenHTMLtoMap(html);
-
-        const { changes, counts, report } = applyAfterEdenRulesOnTable(table, remoteMap);
+        const { changes, counts, report } = applyAfterEdenRulesOnTable(table, remoteMap, pid, kleurcode);
         totalChanges += changes;
 
         const status = changes > 0 ? 'afwijking' : 'ok';
-        Logger.status(anchorId, status + (isPreorder ? ' (preorder=0-stock)' : ''), counts);
+        Logger.status(anchorId, status, { ...counts, kleurcode, kleurLabel });
         Logger.perMaat(anchorId, report);
 
         if (!firstDiffTable && changes > 0) firstDiffTable = table;
       } catch (e) {
         console.error('[AfterEden] error for pid', pid, e);
         const msg = String(e?.message || e);
+
         if (/LOGIN_REQUIRED/i.test(msg)) alert('Login required. Log in op bcg.fashionportal.shop en probeer opnieuw.');
         if (/NO_INVENTORY_IN_HTML/i.test(msg)) alert('After Eden: geen inventory in HTML (mogelijk sessie/cookie issue). Log in en probeer opnieuw.');
-        Logger.status(anchorId, '❌ fout', { error: msg });
+
+        if (/PID_WRAP_NOT_FOUND|AMBIGUOUS_PID_WRAP|KLEURCODE_MISMATCH/i.test(msg)) {
+          alert(`After Eden: kleur/PID match faalt.\nPID: ${pid}\nKleurcode: ${kleurcode || '(none)'}\n${msg}`);
+        }
+
+        Logger.status(anchorId, '❌ fout', { error: msg, kleurcode });
       }
 
       progress.setDone(idx);
