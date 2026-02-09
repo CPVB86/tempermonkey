@@ -10,8 +10,8 @@
 // @grant        GM_addValueChangeListener
 // @grant        unsafeWindow
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-chantelle.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-chantelle.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-chantelle.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-chantelle.user.js
 // ==/UserScript==
 
 (function () {
