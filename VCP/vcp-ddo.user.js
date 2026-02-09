@@ -104,6 +104,7 @@
     'rj-bodywear': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=233', payload: basePayload() },
     'after-eden': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=235', payload: basePayload() },
     mey: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=236', payload: basePayload() },
+    chantelle: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=237', payload: basePayload() },
     'charlie-choe': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=204', payload: basePayload() }
   };
 
@@ -126,6 +127,7 @@
     'rj-bodywear': 'https://b2b.rjbodywear.com/customer/account/login',
     'after-eden':  'https://bcg.fashionportal.shop/',
     mey:  'https://meyb2b.com/',
+    chantelle:  'https://chantelle-lingerie.my.site.com/',
     // qlinn:      'https://…' // toevoegen zodra beschikbaar
   };
 
@@ -168,6 +170,7 @@
     if (/^(naturana|naturana-badmode)/.test(key)) return 'naturana';
     if (/^mundo-unico/.test(key)) return 'mundo-unico';
     if (/^mey/.test(key)) return 'mey';
+    if (/^chantelle/.test(key)) return 'chantelle';
     return null;
   }
   function getB2BUrlForKey(key){
