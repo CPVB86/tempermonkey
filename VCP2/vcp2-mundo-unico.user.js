@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         VCP2 | Mundo Unico
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1
-// @description  Vergelijk local stock met Colomoda (Mundo Unico) stock via JSON (search → product). Zonder heartbeat/badge.
+// @version      3.0
+// @description  Vergelijk local stock met die van de leverancier (remote).
+// @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://www.colomoda.eu/*
 // @grant        unsafeWindow
@@ -11,7 +12,6 @@
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
 // @run-at       document-start
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-mundo-unico.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-mundo-unico.user.js
 // ==/UserScript==
@@ -23,9 +23,6 @@
   const ON_COLOMODA = location.hostname.includes('colomoda.eu');
 
   const TIMEOUT_MS = 20000;
-
-  const uid  = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const norm = (s = '') => String(s).toLowerCase().trim().replace(/\s+/g, ' ');
 
   // =========================
   // 1) BRIDGE OP COLOMODA
@@ -52,105 +49,91 @@
     const tryParseJson = (t) => { try { return JSON.parse(t); } catch { return null; } };
 
     function collectProductCandidates(root) {
-  const out = [];
-  const seen = new Set();
+      const out = [];
+      const seen = new Set();
 
-  const looksLikeProduct = (o) =>
-    o && typeof o === 'object' && (
-      typeof o.url === 'string' ||
-      typeof o.fullurl === 'string' ||
-      typeof o.full_url === 'string' ||
-      typeof o.code === 'string' ||
-      typeof o.ean === 'string' ||
-      typeof o.sku === 'string'
-    );
+      const looksLikeProduct = (o) =>
+        o && typeof o === 'object' && (
+          typeof o.url === 'string' ||
+          typeof o.fullurl === 'string' ||
+          typeof o.full_url === 'string' ||
+          typeof o.code === 'string' ||
+          typeof o.ean === 'string' ||
+          typeof o.sku === 'string'
+        );
 
-  const walk = (node) => {
-    if (!node) return;
+      const walk = (node) => {
+        if (!node) return;
 
-    if (typeof node === 'object') {
-      if (seen.has(node)) return;
-      seen.add(node);
+        if (typeof node === 'object') {
+          if (seen.has(node)) return;
+          seen.add(node);
 
-      if (looksLikeProduct(node)) out.push(node);
+          if (looksLikeProduct(node)) out.push(node);
 
-      if (Array.isArray(node)) {
-        node.forEach(walk);
-      } else {
-        Object.keys(node).forEach(k => walk(node[k]));
+          if (Array.isArray(node)) node.forEach(walk);
+          else Object.keys(node).forEach(k => walk(node[k]));
+        }
+      };
+
+      walk(root);
+      return out;
+    }
+
+    function scoreCandidate(c, needleUpper) {
+      const code = String(c.code || '').toUpperCase();
+      const ean  = String(c.ean  || '').toUpperCase();
+      const sku  = String(c.sku  || '').toUpperCase();
+
+      let s = 0;
+
+      if (code === needleUpper) s += 100;
+      if (ean  === needleUpper) s += 90;
+      if (sku  === needleUpper) s += 80;
+
+      if (sku.startsWith(needleUpper))  s += 70;
+      if (code.startsWith(needleUpper)) s += 60;
+      if (ean.startsWith(needleUpper))  s += 50;
+
+      if (sku.includes(needleUpper)) s += 30;
+      if (code.includes(needleUpper)) s += 25;
+      if (ean.includes(needleUpper))  s += 20;
+
+      if (c.fullurl || c.full_url) s += 5;
+      if (c.url) s += 3;
+
+      return s;
+    }
+
+    function findBestHit(searchJson, needleUpper) {
+      const candidates = collectProductCandidates(searchJson);
+      let best = null;
+      let bestScore = 0;
+
+      for (const c of candidates) {
+        const sc = scoreCandidate(c, needleUpper);
+        if (sc > bestScore) {
+          bestScore = sc;
+          best = c;
+        }
+      }
+      return (best && bestScore >= 20) ? best : null;
+    }
+
+    function buildAbsoluteProductJsonUrl(hit) {
+      const full = hit?.fullurl || hit?.full_url || '';
+      const url  = hit?.url || '';
+      const candidate = String(full || url || '').trim();
+      if (!candidate) return '';
+
+      try {
+        const u = new URL(candidate, 'https://www.colomoda.eu/');
+        u.searchParams.set('format', 'json');
+        return u.href;
+      } catch {
+        return '';
       }
     }
-  };
-
-  walk(root);
-  return out;
-}
-
-function scoreCandidate(c, needleUpper) {
-  const code = String(c.code || '').toUpperCase();
-  const ean  = String(c.ean  || '').toUpperCase();
-  const sku  = String(c.sku  || '').toUpperCase();
-
-  let s = 0;
-
-  // hard hits
-  if (code === needleUpper) s += 100;
-  if (ean  === needleUpper) s += 90;
-  if (sku  === needleUpper) s += 80;
-
-  // common reality: sku heeft maat suffix (…L / …XL / …M)
-  if (sku.startsWith(needleUpper)) s += 70;
-  if (code.startsWith(needleUpper)) s += 60;
-  if (ean.startsWith(needleUpper))  s += 50;
-
-  // loose hits
-  if (sku.includes(needleUpper)) s += 30;
-  if (code.includes(needleUpper)) s += 25;
-  if (ean.includes(needleUpper))  s += 20;
-
-  // url aanwezig = handig
-  if (c.fullurl || c.full_url) s += 5;
-  if (c.url) s += 3;
-
-  return s;
-}
-
-function findBestHit(searchJson, needleUpper) {
-  const candidates = collectProductCandidates(searchJson);
-  let best = null;
-  let bestScore = 0;
-
-  for (const c of candidates) {
-    const sc = scoreCandidate(c, needleUpper);
-    if (sc > bestScore) {
-      bestScore = sc;
-      best = c;
-    }
-  }
-
-  // minimale score zodat we geen random dingen pakken
-  return (best && bestScore >= 20) ? best : null;
-}
-
-function buildAbsoluteProductJsonUrl(hit) {
-  const full = hit?.fullurl || hit?.full_url || '';
-  const url  = hit?.url || '';
-  const candidate = String(full || url || '').trim();
-  if (!candidate) return '';
-
-  // Colomoda geeft vaak slug zoals "jor-miro-joggingbroek.html"
-  // of "brands/..." (die willen we niet). We willen een product .html
-  let href = candidate;
-
-  try {
-    const u = new URL(href, 'https://www.colomoda.eu/');
-    // force json
-    u.searchParams.set('format', 'json');
-    return u.href;
-  } catch {
-    return '';
-  }
-}
 
     async function getProductJsonByCode(code) {
       const needle = String(code || '').trim();
@@ -164,7 +147,6 @@ function buildAbsoluteProductJsonUrl(hit) {
       if (!searchJson) throw new Error('SEARCH_JSON_PARSE');
 
       const hit = findBestHit(searchJson, needleUpper);
-
       if (!hit) throw new Error(`NO_RESULTS:${needle}`);
 
       const productJsonUrl = buildAbsoluteProductJsonUrl(hit);
@@ -186,7 +168,7 @@ function buildAbsoluteProductJsonUrl(hit) {
       })();
     });
 
-    console.info('[Colomoda-bridge] actief (no heartbeat) op', location.href);
+    console.info('[Colomoda-bridge] actief op', location.href);
     return;
   }
 
@@ -194,6 +176,18 @@ function buildAbsoluteProductJsonUrl(hit) {
   // 2) CLIENT OP TOOL
   // =========================
   if (!ON_TOOL) return;
+
+  const Core = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.VCPCore : window.VCPCore);
+  const SR   = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.StockRules : window.StockRules);
+
+  if (!Core) {
+    console.warn('[VCP2 Mundo] VCPCore ontbreekt op toolpagina. Laad vcp-core.js server-side.');
+    return;
+  }
+  if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
+    console.warn('[VCP2 Mundo] StockRules ontbreekt op toolpagina. Laad stockRules.js server-side.');
+    return;
+  }
 
   const Logger = {
     lb() {
@@ -214,276 +208,75 @@ function buildAbsoluteProductJsonUrl(hit) {
       console.groupCollapsed(`[MundoUnico][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
-          maat: r.maat, local: r.local,
+          maat: r.maat,
+          local: r.local,
           remote: Number.isFinite(r.remote) ? r.remote : '—',
-          stock:  Number.isFinite(r.stock)  ? r.stock  : '—',
+          target: Number.isFinite(r.target) ? r.target : '—',
+          delta: Number.isFinite(r.delta) ? r.delta : '—',
           status: r.actie
         })));
       } finally { console.groupEnd(); }
     }
   };
 
-  function bridgeGetProductJson(code, timeout = TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      const id = uid();
+  function buildStatusMapFromColomodaProduct(json, wantedCode) {
+    const map = {};
+    const want = String(wantedCode || '').trim().toUpperCase();
 
-      let handle = GM_addValueChangeListener('colomoda_bridge_resp', (_n, _o, msg) => {
-        if (!msg || msg.id !== id) return;
-        try { GM_removeValueChangeListener(handle); } catch {}
-        msg.ok ? resolve(msg.text) : reject(new Error(msg.error || 'bridge error'));
-      });
-
-      GM_setValue('colomoda_bridge_req', { id, code, timeout });
-
-      setTimeout(() => {
-        try { GM_removeValueChangeListener(handle); } catch {}
-        reject(new Error('bridge timeout'));
-      }, timeout + 1500);
-    });
-  }
-
-  function pLimit(n) {
-    const q = []; let a = 0;
-    const next = () => {
-      if (a >= n || !q.length) return;
-      a++;
-      const { fn, resolve, reject } = q.shift();
-      fn().then(resolve, reject).finally(() => { a--; next(); });
+    const cleanSize = (s) => {
+      let t = String(s || '').trim().toUpperCase();
+      t = t.replace(/^SIZE:\s*/i, '').trim();
+      return t;
     };
-    return fn => new Promise((resolve, reject) => { q.push({ fn, resolve, reject }); next(); });
-  }
 
-  const SIZE_ALIAS = {
-    '2XL':'XXL','XXL':'2XL',
-    '3XL':'XXXL','XXXL':'3XL',
-    '4XL':'XXXXL','XXXXL':'4XL',
-    'XS/S':'XS','S/M':'M','M/L':'L','L/XL':'XL','XL/2XL':'2XL'
-  };
+    const add = (sizeRaw, qtyRaw, statusRaw) => {
+      const size = cleanSize(sizeRaw);
+      if (!size) return;
 
-  function aliasCandidates(label) {
-    const raw = String(label || '').trim().toUpperCase();
-    const ns  = raw.replace(/\s+/g, '');
-    const set = new Set([raw, ns]);
+      const qty = Number.isFinite(Number(qtyRaw)) ? Number(qtyRaw) : 0;
+      const status = statusRaw || (qty > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
 
-    if (SIZE_ALIAS[raw]) set.add(SIZE_ALIAS[raw]);
-    if (SIZE_ALIAS[ns])  set.add(SIZE_ALIAS[ns]);
+      for (const key of Core.aliasCandidates(size)) {
+        const ex = map[key];
+        if (!ex) map[key] = { status, stock: qty };
+        else {
+          ex.stock = Math.max(ex.stock || 0, qty);
+          if (ex.status !== 'IN_STOCK' && status === 'IN_STOCK') ex.status = 'IN_STOCK';
+        }
+      }
+    };
 
-    if (raw.includes('/')) {
-      raw.split('/').map(s => s.trim()).forEach(x => {
-        if (!x) return;
-        set.add(x); set.add(x.replace(/\s+/g,''));
-        if (SIZE_ALIAS[x]) set.add(SIZE_ALIAS[x]);
+    const codeTop = String(json?.product?.code || '').trim().toUpperCase();
+    if (!want || !codeTop || codeTop === want) {
+      const variantsObj = json?.product?.variants;
+      if (variantsObj && typeof variantsObj === 'object') {
+        Object.values(variantsObj).forEach(v => {
+          if (!v || typeof v !== 'object') return;
+          const size = v.title || v.variant || v.option || '';
+          const lvl  = v.stock && v.stock.level;
+          const ok   = !!(v.stock && (v.stock.available || v.stock.on_stock)) || Number(lvl) > 0;
+          add(size, Number(lvl) || 0, ok ? 'IN_STOCK' : 'OUT_OF_STOCK');
+        });
+
+        if (Object.keys(map).length) return map;
+      }
+    }
+
+    const recent = json?.page?.recent;
+    if (recent && typeof recent === 'object') {
+      Object.values(recent).forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        const code = String(item.code || '').trim().toUpperCase();
+        if (want && code && code !== want) return;
+
+        const size = item.variant || item.title || '';
+        const ok   = item.available === true;
+        add(size, ok ? 5 : 0, ok ? 'IN_STOCK' : 'OUT_OF_STOCK');
       });
     }
-    return Array.from(set);
+
+    return map;
   }
-
-  function resolveRemote(map, label) {
-    for (const c of aliasCandidates(label)) if (map[c]) return map[c];
-    return undefined;
-  }
-
-function buildStatusMapFromColomodaProduct(json, wantedCode) {
-  const map = {};
-  const want = String(wantedCode || '').trim().toUpperCase();
-
-  const cleanSize = (s) => {
-    let t = String(s || '').trim().toUpperCase();
-    // komt soms voor als "Size: M"
-    t = t.replace(/^SIZE:\s*/i, '').trim();
-    return t;
-  };
-
-  const add = (sizeRaw, qtyRaw, statusRaw) => {
-    const size = cleanSize(sizeRaw);
-    if (!size) return;
-
-    const qty = Number.isFinite(Number(qtyRaw)) ? Number(qtyRaw) : 0;
-    const status = statusRaw || (qty > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK');
-
-    for (const key of aliasCandidates(size)) {
-      const ex = map[key];
-      if (!ex) map[key] = { status, stock: qty };
-      else {
-        ex.stock = Math.max(ex.stock || 0, qty);
-        if (ex.status !== 'IN_STOCK' && status === 'IN_STOCK') ex.status = 'IN_STOCK';
-      }
-    }
-  };
-
-  // ✅ 1) Product-variants (beste bron)
-  const codeTop = String(json?.product?.code || '').trim().toUpperCase();
-  if (!want || !codeTop || codeTop === want) {
-    const variantsObj = json?.product?.variants;
-    if (variantsObj && typeof variantsObj === 'object') {
-      Object.values(variantsObj).forEach(v => {
-        if (!v || typeof v !== 'object') return;
-        const size = v.title || v.variant || v.option || '';
-        const lvl  = v.stock && v.stock.level;
-        const ok   = !!(v.stock && (v.stock.available || v.stock.on_stock)) || Number(lvl) > 0;
-        add(size, Number(lvl) || 0, ok ? 'IN_STOCK' : 'OUT_OF_STOCK');
-      });
-
-      if (Object.keys(map).length) return map;
-    }
-  }
-
-  // 2) fallback: page.recent (soms alleen 1 maat)
-  const recent = json?.page?.recent;
-  if (recent && typeof recent === 'object') {
-    Object.values(recent).forEach(item => {
-      if (!item || typeof item !== 'object') return;
-      const code = String(item.code || '').trim().toUpperCase();
-      if (want && code && code !== want) return;
-
-      const size = item.variant || item.title || '';
-      const ok   = item.available === true;
-      add(size, ok ? 5 : 0, ok ? 'IN_STOCK' : 'OUT_OF_STOCK');
-    });
-  }
-
-  return map;
-}
-
-
-  function jumpFlash(el) {
-    if (!el) return;
-    try {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const old = el.style.boxShadow;
-      el.style.boxShadow = '0 0 0 2px rgba(255,255,0,.9), 0 0 12px rgba(255,255,0,.9)';
-      setTimeout(() => { el.style.boxShadow = old || ''; }, 650);
-    } catch {}
-  }
-
-function applyRulesAndMark(localTable, statusMap) {
-  const rows = localTable.querySelectorAll('tbody tr');
-  const report = [];
-  let firstMut = null;
-
-  // safety: als StockRules niet geladen is
-  const SR = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.StockRules : window.StockRules);
-  const hasSR = SR && typeof SR.mapRemoteToTarget === 'function' && typeof SR.reconcile === 'function';
-
-  rows.forEach(row => {
-    const maat  = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
-    const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
-
-    const remoteEntry = resolveRemote(statusMap, maat);
-    const supplierQty = Number(remoteEntry?.stock) || 0;
-    const st          = remoteEntry?.status; // 'IN_STOCK' | 'OUT_OF_STOCK' | undefined
-
-    // Reset UI
-    row.style.background = '';
-    row.style.transition = 'background-color .25s';
-    row.title = '';
-    row.classList.remove('status-green', 'status-red');
-    delete row.dataset.status;
-
-    // Fallback als StockRules ontbreekt: behoud oud gedrag (maar zonder mapping -> alleen avail check)
-    if (!hasSR) {
-      const effAvail = (st === 'IN_STOCK') && supplierQty > 0;
-
-      let actie = 'none';
-      if (local > 0 && !effAvail) {
-        row.style.background = '#f8d7da';
-        row.title = st ? 'Uitboeken (leverancier niet op voorraad)' : 'Uitboeken/Negeren (maat onbekend)';
-        row.dataset.status = 'remove';
-        row.classList.add('status-red');
-        actie = 'uitboeken';
-        if (!firstMut) firstMut = row;
-      } else if (local === 0 && effAvail) {
-        row.style.background = '#d4edda';
-        row.title = `Bijboeken (leverancier qty: ${supplierQty})`;
-        row.dataset.status = 'add';
-        row.classList.add('status-green');
-        actie = 'bijboeken';
-        if (!firstMut) firstMut = row;
-      } else if (local === 0 && !effAvail) {
-        row.title = st ? 'Negeren (leverancier niet op voorraad)' : 'Negeren (maat onbekend)';
-        actie = 'negeren';
-      }
-
-      report.push({ maat, local, remote: supplierQty, stock: NaN, actie });
-      return;
-    }
-
-    // === Nieuwe logica ===
-    // Bepaal target op basis van supplier status
-    // - IN_STOCK: target volgens mapping
-    // - OUT_OF_STOCK: target 0
-    // - onbekend: target null (policy hieronder)
-    let target = null;
-
-    if (st === 'IN_STOCK') {
-      target = SR.mapRemoteToTarget('mundo', supplierQty, 5); // default strategy of override
-    } else if (st === 'OUT_OF_STOCK') {
-      target = 0;
-    } else {
-      target = null; // onbekende maat/status
-    }
-
-    let actie = 'none';
-    let delta = 0;
-    let targetForReport = NaN;
-
-    if (target === null) {
-      // policy: onbekend -> als local > 0: uitboeken alles, anders negeren
-      if (local > 0) {
-        actie = 'uitboeken';
-        delta = local;
-
-        row.style.background = '#f8d7da';
-        row.title = `Uitboeken ${delta} (maat onbekend bij leverancier)`;
-        row.dataset.status = 'remove';
-        row.classList.add('status-red');
-        if (!firstMut) firstMut = row;
-      } else {
-        actie = 'negeren';
-        row.title = 'Negeren (maat onbekend bij leverancier)';
-      }
-
-    } else {
-      targetForReport = target;
-
-      const res = SR.reconcile(local, target, 5);
-      actie = (res.action === 'ok') ? 'none' : res.action;
-      delta = res.delta;
-
-      if (actie === 'uitboeken' && delta > 0) {
-        row.style.background = '#f8d7da';
-        row.title = `Uitboeken ${delta} (target ${target}, leverancier qty: ${supplierQty})`;
-        row.dataset.status = 'remove';
-        row.classList.add('status-red');
-        if (!firstMut) firstMut = row;
-
-      } else if (actie === 'bijboeken' && delta > 0) {
-        row.style.background = '#d4edda';
-        row.title = `Bijboeken ${delta} (target ${target}, leverancier qty: ${supplierQty})`;
-        row.dataset.status = 'add';
-        row.classList.add('status-green');
-        if (!firstMut) firstMut = row;
-
-      } else {
-        // none/ok
-        row.title = `OK (target ${target}, leverancier qty: ${supplierQty})`;
-      }
-    }
-
-    // Voor logging: remote = supplierQty, stock = target (jouw "local-doel")
-    report.push({
-      maat,
-      local,
-      remote: supplierQty,
-      stock: Number.isFinite(targetForReport) ? targetForReport : NaN,
-      actie: (actie === 'none' ? (target === null ? 'negeren' : 'ok') : actie),
-      delta
-    });
-  });
-
-  if (firstMut) jumpFlash(firstMut);
-  return report;
-}
 
   function bepaalLogStatus(report, statusMap) {
     const counts = report.reduce((a, r) => (a[r.actie] = (a[r.actie] || 0) + 1, a), {});
@@ -496,126 +289,139 @@ function applyRulesAndMark(localTable, statusMap) {
     return 'afwijking';
   }
 
+  function applyRulesAndMark(localTable, statusMap) {
+    const rows = localTable.querySelectorAll('tbody tr');
+    const report = [];
+    let firstMut = null;
+
+    rows.forEach(row => {
+      const maat  = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+
+      const remoteEntry = Core.resolveRemote(statusMap, maat);
+      const supplierQty = Number(remoteEntry?.stock) || 0;
+      const st          = remoteEntry?.status; // 'IN_STOCK' | 'OUT_OF_STOCK' | undefined
+
+      // reset row markers (incl effRemote/effRemove)
+      Core.clearRowMarks(row);
+
+      // target policy
+      let target = null;
+      if (st === 'IN_STOCK') target = SR.mapRemoteToTarget('mundo', supplierQty, 5);
+      else if (st === 'OUT_OF_STOCK') target = 0;
+      else target = null;
+
+      let actie = 'ok';
+      let delta = 0;
+
+      if (target === null) {
+        // onbekend: als local>0 -> alles uitboeken, anders negeren
+        if (local > 0) {
+          actie = 'uitboeken';
+          delta = local;
+          Core.markRow(row, { action: 'remove', delta, title: `Uitboeken ${delta} (maat onbekend bij leverancier)` });
+          if (!firstMut) firstMut = row;
+        } else {
+          actie = 'negeren';
+          Core.markRow(row, { action: 'none', delta: 0, title: 'Negeren (maat onbekend bij leverancier)' });
+        }
+
+        report.push({ maat, local, remote: supplierQty, target: NaN, actie, delta });
+        return;
+      }
+
+      // reconcile
+      const res = SR.reconcile(local, target, 5);
+      if (res.action === 'ok') {
+        actie = 'ok';
+        delta = 0;
+        Core.markRow(row, { action: 'none', delta: 0, title: `OK (target ${target}, leverancier qty: ${supplierQty})` });
+      } else if (res.action === 'bijboeken' && res.delta > 0) {
+        actie = 'bijboeken';
+        delta = res.delta;
+        Core.markRow(row, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, leverancier qty: ${supplierQty})` });
+        if (!firstMut) firstMut = row;
+      } else if (res.action === 'uitboeken' && res.delta > 0) {
+        actie = 'uitboeken';
+        delta = res.delta;
+        Core.markRow(row, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, leverancier qty: ${supplierQty})` });
+        if (!firstMut) firstMut = row;
+      }
+
+      report.push({ maat, local, remote: supplierQty, target, actie, delta });
+    });
+
+    if (firstMut) Core.jumpFlash(firstMut);
+    return report;
+  }
+
   async function runMundo(btn) {
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) return;
 
-    const progress = StockKit.makeProgress(btn);
-    progress.start(tables.length);
+    await Core.runTables({
+      btn,
+      tables,
+      concurrency: 3,
+      perTable: async (table) => {
+        const code = (table.id || '').trim();
+        const anchorId = code || 'onbekend';
 
-    const limit  = pLimit(3);
-    let idx      = 0;
-    let totalMut = 0;
-
-    await Promise.all(tables.map(table => limit(async () => {
-      const tableId  = (table.id || '').trim();
-      const anchorId = tableId || 'onbekend';
-      const code     = tableId;
-
-      if (!code) {
-        Logger.status(anchorId, 'niet-gevonden (geen code)');
-        Logger.perMaat(anchorId, []);
-        progress.setDone(++idx);
-        return;
-      }
-
-      try {
-        const text = await bridgeGetProductJson(code);
-        let json;
-        try { json = JSON.parse(text); } catch { json = null; }
-
-        if (!json) {
-          Logger.status(anchorId, 'afwijking (json parse)');
+        if (!code) {
+          Logger.status(anchorId, 'niet-gevonden (geen code)');
           Logger.perMaat(anchorId, []);
-          progress.setDone(++idx);
-          return;
+          return 0;
         }
 
-        const statusMap = buildStatusMapFromColomodaProduct(json, code);
+        try {
+          const resp = await Core.bridgeRequest('colomoda_bridge', { code }, TIMEOUT_MS);
+          let json;
+          try { json = JSON.parse(resp.text); } catch { json = null; }
 
+          if (!json) {
+            Logger.status(anchorId, 'afwijking (json parse)');
+            Logger.perMaat(anchorId, []);
+            return 0;
+          }
 
-        if (!statusMap || Object.keys(statusMap).length === 0) {
-          Logger.status(anchorId, 'niet-gevonden');
-          Logger.perMaat(anchorId, []);
-        } else {
+          const statusMap = buildStatusMapFromColomodaProduct(json, code);
+
+          if (!statusMap || Object.keys(statusMap).length === 0) {
+            Logger.status(anchorId, 'niet-gevonden');
+            Logger.perMaat(anchorId, []);
+            return 0;
+          }
+
           const report = applyRulesAndMark(table, statusMap);
-          totalMut += report.filter(r => (r.actie === 'uitboeken' || r.actie === 'bijboeken') && (r.delta > 0)).length;
+          const mutCount = report.filter(r => (r.actie === 'uitboeken' || r.actie === 'bijboeken') && r.delta > 0).length;
+
           Logger.status(anchorId, bepaalLogStatus(report, statusMap));
           Logger.perMaat(anchorId, report);
+
+          return mutCount;
+
+        } catch (e) {
+          const msg = String(e?.message || e);
+          if (msg.includes('HTTP 401') || msg.includes('HTTP 403')) Logger.status(anchorId, 'afwijking (auth/cookies op colomoda tab)');
+          else if (msg.includes('NO_RESULTS')) Logger.status(anchorId, 'niet-gevonden');
+          else if (msg.includes('bridge timeout')) Logger.status(anchorId, 'afwijking (bridge timeout)');
+          else Logger.status(anchorId, 'afwijking');
+
+          Logger.perMaat(anchorId, []);
+          return 0;
         }
-
-      } catch (e) {
-        const msg = String(e?.message || e);
-        if (msg.includes('HTTP 401') || msg.includes('HTTP 403')) Logger.status(anchorId, 'afwijking (auth/cookies op colomoda tab)');
-        else if (msg.includes('NO_RESULTS')) Logger.status(anchorId, 'niet-gevonden');
-        else if (msg.includes('bridge timeout')) Logger.status(anchorId, 'afwijking (bridge timeout)');
-        else Logger.status(anchorId, 'afwijking');
-
-        Logger.perMaat(anchorId, []);
-      } finally {
-        progress.setDone(++idx);
       }
-    })));
-
-    progress.success(totalMut);
-  }
-
-  function isMundoSelected() {
-    const sel = document.querySelector('#leverancier-keuze');
-    if (!sel) return false;
-    const val = norm(sel.value || '');
-    const txt = norm(sel.options[sel.selectedIndex]?.text || '');
-    const blob = `${val} ${txt}`;
-    return /\bmundo\b/i.test(blob) || /\bunico\b/i.test(blob) || /\bcolomoda\b/i.test(blob);
-  }
-
-  function ensureButton() {
-    let btn = document.getElementById('adv-mundo-btn');
-    if (btn) return btn;
-
-    btn = document.createElement('button');
-    btn.id = 'adv-mundo-btn';
-    btn.className = 'sk-btn';
-    btn.type = 'button';
-    btn.textContent = 'Check Mundo Unico Stock';
-
-    Object.assign(btn.style, {
-      position: 'fixed',
-      top: '8px',
-      right: '250px',
-      zIndex: '9999',
-      display: 'none'
     });
-
-    btn.addEventListener('click', () => runMundo(btn));
-    document.body.appendChild(btn);
-    return btn;
   }
 
-  function maybeMountOrRemove() {
-    const hasTables = !!document.querySelector('#output table');
-    const need      = isMundoSelected();
-    const existing  = document.getElementById('adv-mundo-btn');
-
-    if (need) {
-      const btn = ensureButton();
-      btn.style.display = hasTables ? 'block' : 'none';
-    } else if (existing) {
-      try { existing.remove(); } catch {}
-    }
-  }
-
-  function bootUI() {
-    const sel = document.querySelector('#leverancier-keuze');
-    if (sel) sel.addEventListener('change', maybeMountOrRemove);
-
-    const out = document.querySelector('#output');
-    if (out) new MutationObserver(maybeMountOrRemove).observe(out, { childList: true, subtree: true });
-
-    maybeMountOrRemove();
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootUI);
-  else bootUI();
+  // Mount button via VCPCore (geen eigen observers meer)
+  Core.mountSupplierButton({
+    id: 'adv-mundo-btn',
+    text: 'Check Mundo Unico Stock',
+    right: 250,
+    top: 8,
+    match: /\bmundo\b|\bunico\b|\bcolomoda\b/i,
+    onClick: (btn) => runMundo(btn)
+  });
 
 })();
