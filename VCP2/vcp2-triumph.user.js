@@ -2,7 +2,7 @@
 // @name         VCP2 | Triumph
 // @namespace    https://dutchdesignersoutlet.nl/
 // @version      3.0
-// @description  Vergelijk local stock met Triumph/Sloggi stock via grid-API (bridge + auth-capture in page-context).
+// @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://b2b.triumph.com/*
