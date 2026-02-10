@@ -258,14 +258,6 @@
       }
     }
 
-    console.groupCollapsed('[AfterEden] Remote parsed (STRICT, exact PID wrap)');
-    console.table(dbg);
-    console.groupEnd();
-
-    console.groupCollapsed('[AfterEden] Remote FINAL map (qty only)');
-    console.table([...m.entries()].map(([size, obj]) => ({ pid, kleurcode, size, qty: obj.qty })));
-    console.groupEnd();
-
     return m;
   }
 
