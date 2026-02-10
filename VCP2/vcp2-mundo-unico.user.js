@@ -429,7 +429,7 @@
 
   Core.mountSupplierButton({
     id: 'adv-mundo-btn',
-    text: 'Check Stock | Mundo Unico',
+    text: '🔍 Check Stock | Mundo Unico',
     right: 250,
     top: 8,
     match: /\bmundo\b|\bunico\b|\bcolomoda\b/i,
