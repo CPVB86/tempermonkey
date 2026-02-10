@@ -30,7 +30,44 @@
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
   const $ = (s, r = document) => r.querySelector(s);
   const normSize = (raw) => String(raw || "").toUpperCase().replace(/\s+/g, "").trim();
-  const isBraSizeLabel = (s) => /^\d{2,3}[A-Z]{1,4}$/.test(normSize(s));
+
+// Canonical key voor zowel Proxy als Worker
+function normalizeSizeKey(raw) {
+  let v = String(raw ?? "").trim();
+  if (!v) return "";
+
+  // Proxy kan combo’s hebben (M/L, S/M). Neem eerste als key.
+  v = v.split(/[|,]/)[0];
+  v = v.split("/")[0];
+
+  v = normSize(v);
+  if (!v) return "";
+
+  // BH: 070D -> 70D
+  let m = v.match(/^0*(\d{2,3})([A-Z]{1,4})$/);
+  if (m) return `${parseInt(m[1], 10)}${m[2]}`;
+
+  // Numeriek: 0100 -> 100 (maar geen 0)
+  if (/^0*\d{1,3}$/.test(v)) {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? String(n) : "";
+  }
+
+  // Alpha
+  if (/^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return v;
+
+  return v;
+}
+
+function isSizeLabel(s) {
+  const v = normalizeSizeKey(s);
+  if (!v) return false;
+  if (/^\d{2,3}[A-Z]{1,4}$/.test(v)) return true; // 70D / 100G
+  if (/^\d{1,3}$/.test(v)) return true;           // 34 / 100 / 105 / 1..10
+  if (/^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return true;
+  return false;
+}
+
   const extractFirst = (html, re) => (html.match(re)?.[1] || "");
 
   // -----------------------
@@ -83,18 +120,19 @@
   // -----------------------
   // PROXY: local tabel uitlezen
   // -----------------------
-  function readLocalTable(table) {
-    const rows = Array.from(table.querySelectorAll("tbody tr"));
-    const out = [];
-    for (const tr of rows) {
-      const maat = normSize(tr.dataset.size || tr.children?.[0]?.textContent || "");
-      if (!maat) continue;
+function readLocalTable(table) {
+  const rows = Array.from(table.querySelectorAll("tbody tr"));
+  const out = [];
+  for (const tr of rows) {
+    const maatRaw = tr.dataset.size || tr.children?.[0]?.textContent || "";
+    const maat = normalizeSizeKey(maatRaw);
+    if (!maat) continue;
 
-      const local = parseInt(String(tr.children?.[1]?.textContent || "").trim(), 10) || 0;
-      out.push({ tr, maat, local });
-    }
-    return out;
+    const local = parseInt(String(tr.children?.[1]?.textContent || "").trim(), 10) || 0;
+    out.push({ tr, maat, local });
   }
+  return out;
+}
 
   // SKU uit table.id of header (tolerant)
   function getSkuFromTable(table) {
@@ -217,7 +255,7 @@
         }
 
         const localRows = readLocalTable(table);
-        const sizes = localRows.map(r => r.maat).filter(isBraSizeLabel);
+        const sizes = localRows.map(r => r.maat).filter(isSizeLabel);
 
         const jobId = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
         const job = { id: jobId, sku, mode: "stock", sizes, createdAt: Date.now() };
@@ -561,20 +599,46 @@ function addButton() {
     }
 
     function parseStockMap(stockPayload) {
-      const sd = stockPayload?.stockData || {};
-      const out = {};
+  const sd = stockPayload?.stockData || {};
+  const out = {};
 
-      for (const [cupKey, cupObj] of Object.entries(sd)) {
-        const cup = String(cupObj?.cupsize || cupKey || "").trim().toUpperCase();
-        const values = cupObj?.values || {};
-        for (const [bandKey, info] of Object.entries(values)) {
-          const band = String(bandKey).trim();
-          const raw = String(info?.stockValue ?? "").trim();
-          out[`${band}${cup}`] = (!raw || raw === "-" || raw === " - ") ? "" : raw;
-        }
-      }
-      return out;
+  // 1D: sd.values = { "34": {...}, "M": {...}, "0100": {...} }
+  if (sd?.values && typeof sd.values === "object") {
+    for (const [sizeKey, info] of Object.entries(sd.values)) {
+      const key = normalizeSizeKey(sizeKey);
+      if (!isSizeLabel(key)) continue;
+
+      const raw = String(info?.stockValue ?? "").trim();
+      out[key] = (!raw || raw === "-" || raw === " - ") ? "" : raw;
     }
+    return out;
+  }
+
+  // 2D: sd = { cupKey: { cupsize, values:{ band: {...} } } }
+  for (const [cupKey, cupObj] of Object.entries(sd)) {
+    const cup = String(cupObj?.cupsize || cupKey || "").trim().toUpperCase();
+    const values = cupObj?.values || {};
+
+    for (const [bandKey, info] of Object.entries(values)) {
+      const bandNorm = normalizeSizeKey(bandKey);
+      if (!bandNorm) continue;
+
+      // ✅ Dummy cup "-" => treat as 1D alpha matrix (S/M/L => S/M/L)
+      const isDummyCup = !cup || cup === "-" || cup === "—";
+
+      const key = isDummyCup
+        ? bandNorm
+        : normalizeSizeKey(`${bandNorm}${cup}`); // 70 + D => 70D
+
+      if (!isSizeLabel(key)) continue;
+
+      const raw = String(info?.stockValue ?? "").trim();
+      out[key] = (!raw || raw === "-" || raw === " - ") ? "" : raw;
+    }
+  }
+
+  return out;
+}
 
     async function fetchStock(ctx, sku) {
       const price =
@@ -622,10 +686,10 @@ function addButton() {
         const stockMapFull = parseStockMap(stockPayload);
 
         // stuur alleen maten terug die Proxy vroeg (scheelt payload)
-        const wanted = new Set((job.sizes || []).map(normSize).filter(isBraSizeLabel));
-        const stockMap = Object.fromEntries(
-          Object.entries(stockMapFull).filter(([k]) => wanted.has(normSize(k)))
-        );
+const wanted = new Set((job.sizes || []).map(normalizeSizeKey).filter(isSizeLabel));
+const stockMap = Object.fromEntries(
+  Object.entries(stockMapFull).filter(([k]) => wanted.has(normalizeSizeKey(k)))
+);
 
         respond(id, { ok: true, stockMap });
 
