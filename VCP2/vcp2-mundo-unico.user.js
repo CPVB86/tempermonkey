@@ -23,9 +23,10 @@
   const ON_COLOMODA = location.hostname.includes('colomoda.eu');
 
   const TIMEOUT_MS = 20000;
+  const uid  = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   // =========================
-  // 1) BRIDGE OP COLOMODA
+  // 1) BRIDGE OP COLOMODA (blijft hier, vanwege GM_*)
   // =========================
   if (ON_COLOMODA) {
     async function fetchText(url, timeout = TIMEOUT_MS) {
@@ -86,7 +87,6 @@
       const sku  = String(c.sku  || '').toUpperCase();
 
       let s = 0;
-
       if (code === needleUpper) s += 100;
       if (ean  === needleUpper) s += 90;
       if (sku  === needleUpper) s += 80;
@@ -140,7 +140,6 @@
       if (!needle) throw new Error('NO_CODE');
 
       const needleUpper = needle.toUpperCase();
-
       const searchUrl  = `https://www.colomoda.eu/search/${encodeURIComponent(needle)}/?format=json`;
       const searchText = await fetchText(searchUrl);
       const searchJson = tryParseJson(searchText);
@@ -180,12 +179,9 @@
   const Core = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.VCPCore : window.VCPCore);
   const SR   = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.StockRules : window.StockRules);
 
-  if (!Core) {
-    console.warn('[VCP2 Mundo] VCPCore ontbreekt op toolpagina. Laad vcp-core.js server-side.');
-    return;
-  }
+  if (!Core) { console.warn('[VCP2 Mundo] VCPCore ontbreekt. Laad vcp-core.js op toolpagina.'); return; }
   if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
-    console.warn('[VCP2 Mundo] StockRules ontbreekt op toolpagina. Laad stockRules.js server-side.');
+    console.warn('[VCP2 Mundo] StockRules ontbreekt. Laad stockRules.js op toolpagina.');
     return;
   }
 
@@ -218,6 +214,26 @@
       } finally { console.groupEnd(); }
     }
   };
+
+  // ✅ Bridge call moet in userscript context blijven (GM_*)
+  function bridgeGetProductJson(code, timeout = TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      const id = uid();
+
+      let handle = GM_addValueChangeListener('colomoda_bridge_resp', (_n, _o, msg) => {
+        if (!msg || msg.id !== id) return;
+        try { GM_removeValueChangeListener(handle); } catch {}
+        msg.ok ? resolve(msg.text) : reject(new Error(msg.error || 'bridge error'));
+      });
+
+      GM_setValue('colomoda_bridge_req', { id, code, timeout });
+
+      setTimeout(() => {
+        try { GM_removeValueChangeListener(handle); } catch {}
+        reject(new Error('bridge timeout'));
+      }, timeout + 1500);
+    });
+  }
 
   function buildStatusMapFromColomodaProduct(json, wantedCode) {
     const map = {};
@@ -257,7 +273,6 @@
           const ok   = !!(v.stock && (v.stock.available || v.stock.on_stock)) || Number(lvl) > 0;
           add(size, Number(lvl) || 0, ok ? 'IN_STOCK' : 'OUT_OF_STOCK');
         });
-
         if (Object.keys(map).length) return map;
       }
     }
@@ -300,12 +315,10 @@
 
       const remoteEntry = Core.resolveRemote(statusMap, maat);
       const supplierQty = Number(remoteEntry?.stock) || 0;
-      const st          = remoteEntry?.status; // 'IN_STOCK' | 'OUT_OF_STOCK' | undefined
+      const st          = remoteEntry?.status;
 
-      // reset row markers (incl effRemote/effRemove)
       Core.clearRowMarks(row);
 
-      // target policy
       let target = null;
       if (st === 'IN_STOCK') target = SR.mapRemoteToTarget('mundo', supplierQty, 5);
       else if (st === 'OUT_OF_STOCK') target = 0;
@@ -315,7 +328,6 @@
       let delta = 0;
 
       if (target === null) {
-        // onbekend: als local>0 -> alles uitboeken, anders negeren
         if (local > 0) {
           actie = 'uitboeken';
           delta = local;
@@ -330,8 +342,8 @@
         return;
       }
 
-      // reconcile
       const res = SR.reconcile(local, target, 5);
+
       if (res.action === 'ok') {
         actie = 'ok';
         delta = 0;
@@ -374,9 +386,10 @@
         }
 
         try {
-          const resp = await Core.bridgeRequest('colomoda_bridge', { code }, TIMEOUT_MS);
+          const text = await bridgeGetProductJson(code, TIMEOUT_MS);
+
           let json;
-          try { json = JSON.parse(resp.text); } catch { json = null; }
+          try { json = JSON.parse(text); } catch { json = null; }
 
           if (!json) {
             Logger.status(anchorId, 'afwijking (json parse)');
@@ -414,10 +427,9 @@
     });
   }
 
-  // Mount button via VCPCore (geen eigen observers meer)
   Core.mountSupplierButton({
     id: 'adv-mundo-btn',
-    text: 'Check Mundo Unico Stock',
+    text: 'Check Stock | Mundo Unico',
     right: 250,
     top: 8,
     match: /\bmundo\b|\bunico\b|\bcolomoda\b/i,
