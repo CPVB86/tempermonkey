@@ -12,8 +12,6 @@
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
 // @run-at       document-start
-// @require      https://lingerieoutlet.nl/tools/stock/common/vcp-core.js
-// @require      https://lingerieoutlet.nl/tools/stock/common/stockrules.js
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-triumph.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-triumph.user.js
 // ==/UserScript==
