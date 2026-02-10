@@ -565,7 +565,7 @@
   // Button + heartbeat dot
   const { btn } = Core.mountSupplierButton({
     id: 'vcp2-triumph-btn',
-    text: '🔍 Check Stock | Triumph',
+    text: '🔍 Check Stock | Triumph/Sloggi',
     right: 250,
     top: 8,
     match: (blob) => /\btriumph\b/i.test(blob) || /\bsloggi\b/i.test(blob),
