@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         GG | ScanSim Pro
-// @version      2.4
-// @description  Scan Simulater; leest barcodes uit klembord en activeert scannerloop + Stock Check preset (incoming). + Batch module (EAN\tAANTAL) per 50 met commit bij "Ontvangst registreren".
+// @version      2.7
+// @description  Scan Simulator; leest barcodes uit klembord. Incoming: batch + preset. Anti-double: single-instance + clipboard dedupe + NETWORK dedupe ONLY for commit/register (prevents double booking, allows repeated scans).
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/incoming*
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
 // @grant        none
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/scansim-pro.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/scansim-pro.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/scansim.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/scansim.user.js
 // ==/UserScript==
 
 (function () {
@@ -16,17 +16,12 @@
   const path = location.pathname;
   const isIncoming = path === '/products/incoming';
   const isOutgoing = path === '/products/outgoing-products';
-
   if (!isIncoming && !isOutgoing) return;
 
   // =========================
   // Single-instance guard
   // =========================
-  // Prevents duplicate injection (SPA nav / TM quirks / double execution)
-  if (window.__scansimInstanceActive) {
-    console.warn('[ScanSim] Instance already active — aborting duplicate load');
-    return;
-  }
+  if (window.__scansimInstanceActive) return;
   window.__scansimInstanceActive = true;
   window.addEventListener('beforeunload', () => {
     try { delete window.__scansimInstanceActive; } catch (_) {}
@@ -37,10 +32,7 @@
   // =========================
   const NEUTRALIZE_SCROLL_ANIMATE = true;
 
-  // Incoming fast bulk (optioneel). Voor mega aantallen is Batch module de oplossing.
   const INCOMING_FAST_BULK = true;
-
-  // Freeze render tijdens fast bulk
   const FREEZE_RENDER = true;
   const NO_CHUNK_YIELD = true;
   const CHUNK_SIZE = 200;
@@ -48,19 +40,16 @@
 
   const PROCESS_DEBOUNCE_MS = 250;
 
-  // Legacy buffering (UIT)
   const BUFFER_INCOMING = false;
   const FLUSH_INTERVAL_MS = 50;
   const BATCH_SIZE = 50;
 
-  // Batch module
   const SCANSIM_BATCH = {
     enabled: true,
     batchSize: 50,
     storageKey: 'scansim_incoming_batch_v1'
   };
 
-  // Freeze heuristics
   const FREEZE_TARGET_SELECTORS = [
     '.scanned_tasks_body',
     '#scanned_tasks_body',
@@ -79,7 +68,7 @@
   const FREEZE_OVERRIDE_SELECTOR = null;
 
   // =========================
-  // Anti double-scan guards (GLOBAL)
+  // Global anti-double processing guard (UI triggers)
   // =========================
   let __scansimProcessing = false;
   let __lastClipboardSig = '';
@@ -90,60 +79,189 @@
     return `${location.pathname}|${t.length}|${t.slice(0, 80)}|${t.slice(-80)}`;
   }
 
-  async function withGlobalProcessGuard({ kind = 'generic', clipboardText = null, sameClipboardWindowMs = 1500 } = {}, fn) {
+  async function withGlobalProcessGuard({ clipboardText = null, sameClipboardWindowMs = 1500 } = {}, fn) {
     const now = Date.now();
+    if (__scansimProcessing) return;
 
-    // 1) Re-entrancy lock
-    if (__scansimProcessing) {
-      console.warn(`[ScanSim] Processing already running — skipped (${kind})`);
-      return;
-    }
-
-    // 2) Same clipboard content in short window (double-click / handler dup)
     if (typeof clipboardText === 'string') {
       const sig = makeClipboardSig(clipboardText);
-      if (sig === __lastClipboardSig && (now - __lastClipboardAt) < sameClipboardWindowMs) {
-        console.warn(`[ScanSim] Same clipboard signature within ${sameClipboardWindowMs}ms — skipped (${kind})`);
-        return;
-      }
+      if (sig === __lastClipboardSig && (now - __lastClipboardAt) < sameClipboardWindowMs) return;
       __lastClipboardSig = sig;
       __lastClipboardAt = now;
     }
 
     __scansimProcessing = true;
-    try {
-      await fn();
-    } finally {
-      __scansimProcessing = false;
+    try { await fn(); } finally { __scansimProcessing = false; }
+  }
+
+  // =========================
+  // HARD FIX: Network dedupe (ONLY for commit/register)
+  // =========================
+  const NET_DEDUPE_WINDOW_MS = 15000;
+  const netRecent = new Map(); // sig -> ts
+
+  function pruneNetRecent(now) {
+    for (const [k, ts] of netRecent) {
+      if (now - ts > NET_DEDUPE_WINDOW_MS) netRecent.delete(k);
     }
+  }
+
+  function normalizeUrl(url) {
+    try {
+      const u = new URL(url, location.origin);
+      return u.pathname + (u.search || '');
+    } catch {
+      return String(url || '');
+    }
+  }
+
+  function looksLikeScanAdd(url, body) {
+    // These requests are allowed to repeat many times (ean x 5 should be 5 POSTs)
+    const u = (url || '').toLowerCase();
+    const b = (body || '').toLowerCase();
+
+    // common patterns for "add a scanned barcode"
+    const bodyHasBarcode = /\b(ean|barcode|bar_code|code|scan|scanned)\b\s*=/.test(b);
+    const urlHasScan = /(scan|scanned|barcode|ean|task)/.test(u);
+
+    // BUT: commit/register often also contains "scanned" words — we filter those in commit check below.
+    return bodyHasBarcode || urlHasScan;
+  }
+
+  function looksLikeCommitRegister(url, body) {
+    const u = (url || '').toLowerCase();
+    const b = (body || '').toLowerCase();
+
+    // Strong hints for "Ontvangst registreren" action
+    return (
+      u.includes('attach_scanned') ||
+      u.includes('attach') ||
+      u.includes('register') ||
+      u.includes('incoming/attach') ||
+      b.includes('attach_scanned_products') ||
+      b.includes('attach_scanned') ||
+      b.includes('ontvangst') ||
+      b.includes('register')
+    );
+  }
+
+  function shouldDedupeRequest(method, url, bodyText) {
+    const m = String(method || 'GET').toUpperCase();
+    if (m !== 'POST') return false;
+
+    const u = normalizeUrl(url);
+    const body = (bodyText || '').trim();
+    if (!body) return false;
+
+    // ✅ Only dedupe the commit/register action.
+    // 🚫 Never dedupe the per-scan "add barcode" calls.
+    const isCommit = looksLikeCommitRegister(u, body);
+    if (!isCommit) return false;
+
+    // If it ALSO looks like a scan add, do NOT dedupe (safety net)
+    if (looksLikeScanAdd(u, body)) return false;
+
+    const sig = `${m}|${u}|${body.slice(0, 4000)}`; // cap
+    const now = Date.now();
+    pruneNetRecent(now);
+
+    const prev = netRecent.get(sig);
+    if (prev && (now - prev) < NET_DEDUPE_WINDOW_MS) {
+      console.warn('[ScanSim] BLOCKED duplicate COMMIT/REGISTER POST:', u);
+      return true;
+    }
+
+    netRecent.set(sig, now);
+    return false;
+  }
+
+  function installFetchDedupe() {
+    if (window.__scansimFetchDedupeInstalled) return;
+    window.__scansimFetchDedupeInstalled = true;
+
+    const origFetch = window.fetch;
+    if (typeof origFetch !== 'function') return;
+
+    window.fetch = async function (input, init = {}) {
+      try {
+        const url = (typeof input === 'string') ? input : (input?.url || '');
+        const method = init?.method || (typeof input !== 'string' ? input?.method : 'GET') || 'GET';
+
+        let bodyText = '';
+        const b = init?.body;
+
+        if (typeof b === 'string') bodyText = b;
+        else if (b instanceof URLSearchParams) bodyText = b.toString();
+        else if (b && typeof b === 'object' && !(b instanceof FormData)) {
+          try { bodyText = JSON.stringify(b); } catch (_) {}
+        }
+
+        if (shouldDedupeRequest(method, url, bodyText)) {
+          // fake "ok" response so app doesn't crash
+          return new Response(JSON.stringify({ scansim: 'deduped_commit', ok: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+      } catch (_) {}
+
+      return origFetch.apply(this, arguments);
+    };
+  }
+
+  function installXhrDedupe() {
+    if (window.__scansimXhrDedupeInstalled) return;
+    window.__scansimXhrDedupeInstalled = true;
+
+    const XHR = window.XMLHttpRequest;
+    if (!XHR) return;
+
+    const origOpen = XHR.prototype.open;
+    const origSend = XHR.prototype.send;
+
+    XHR.prototype.open = function (method, url) {
+      this.__scansimMethod = method;
+      this.__scansimUrl = url;
+      return origOpen.apply(this, arguments);
+    };
+
+    XHR.prototype.send = function (body) {
+      try {
+        let bodyText = '';
+        if (typeof body === 'string') bodyText = body;
+        else if (body instanceof URLSearchParams) bodyText = body.toString();
+        if (body instanceof FormData) bodyText = ''; // can't reliably dedupe
+
+        if (bodyText && shouldDedupeRequest(this.__scansimMethod, this.__scansimUrl, bodyText)) {
+          try { this.abort(); } catch (_) {}
+          return;
+        }
+      } catch (_) {}
+
+      return origSend.apply(this, arguments);
+    };
   }
 
   // =========================
   // Internal keys for commit workflow
   // =========================
-  const PENDING_KEY = SCANSIM_BATCH.storageKey + '_pending'; // pending batch that is INJECTED but not yet committed
+  const PENDING_KEY = SCANSIM_BATCH.storageKey + '_pending';
 
   function loadPending() {
     try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; }
   }
-  function savePending(p) {
-    localStorage.setItem(PENDING_KEY, JSON.stringify(p));
-  }
-  function clearPending() {
-    localStorage.removeItem(PENDING_KEY);
-  }
+  function savePending(p) { localStorage.setItem(PENDING_KEY, JSON.stringify(p)); }
+  function clearPending() { localStorage.removeItem(PENDING_KEY); }
 
   // -------------------------
-  // Neutralize jQuery scroll animations on html/body
+  // Neutralize jQuery scroll animations
   // -------------------------
   (function neutralizeBodyScrollAnimate() {
     if (!NEUTRALIZE_SCROLL_ANIMATE) return;
-
     const $ = window.jQuery;
     if (!$ || !$.fn || !$.fn.animate) return;
 
     const origAnimate = $.fn.animate;
-
     $.fn.animate = function (props, speed, easing, callback) {
       try {
         const isHtmlBody = this.is('html, body');
@@ -158,8 +276,6 @@
       } catch (_) {}
       return origAnimate.apply(this, arguments);
     };
-
-    console.log('[ScanSim] Neutralized jQuery html/body scrollTop animations');
   })();
 
   // -------------------------
@@ -167,7 +283,6 @@
   // -------------------------
   function injectFontAwesome() {
     if (document.querySelector('link[href*="font-awesome"], link[href*="fontawesome"]')) return;
-
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css';
@@ -175,7 +290,7 @@
   }
 
   // -------------------------
-  // Tiny wait helper
+  // Helpers
   // -------------------------
   function waitFor(fn, { timeoutMs = 15000, intervalMs = 100 } = {}) {
     return new Promise((resolve, reject) => {
@@ -183,59 +298,38 @@
       const t = setInterval(() => {
         try {
           const res = fn();
-          if (res) {
-            clearInterval(t);
-            resolve(res);
-            return;
-          }
-          if (Date.now() - start > timeoutMs) {
-            clearInterval(t);
-            reject(new Error('timeout'));
-          }
-        } catch (e) {
-          clearInterval(t);
-          reject(e);
-        }
+          if (res) { clearInterval(t); resolve(res); return; }
+          if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error('timeout')); }
+        } catch (e) { clearInterval(t); reject(e); }
       }, intervalMs);
     });
   }
-
-  function sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
-  }
-
-  function isTabActive() {
-    return document.visibilityState === 'visible' && document.hasFocus();
-  }
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const isTabActive = () => document.visibilityState === 'visible' && document.hasFocus();
 
   // -------------------------
-  // Prevent cross-tab scanning on incoming
+  // Focus guard (quiet)
   // -------------------------
   function wrapIncomingFunctionsToRequireFocus() {
     if (!isIncoming) return;
-
     const guard = () => isTabActive();
 
-    if (typeof window.addBarcodeToTasks === 'function' && !window.addBarcodeToTasks.__scansimWrapped) {
+    if (typeof window.addBarcodeToTasks === 'function' && !window.addBarcodeToTasks.__scansimWrappedFocus) {
       const original = window.addBarcodeToTasks.bind(window);
-      const wrapped = function (...args) {
+      window.addBarcodeToTasks = function (...args) {
         if (!guard()) return;
         return original(...args);
       };
-      wrapped.__scansimWrapped = true;
-      window.addBarcodeToTasks = wrapped;
-      console.log('[ScanSim] Wrapped addBarcodeToTasks() with focus-guard');
+      window.addBarcodeToTasks.__scansimWrappedFocus = true;
     }
 
-    if (typeof window.processScannedProducts === 'function' && !window.processScannedProducts.__scansimWrapped) {
+    if (typeof window.processScannedProducts === 'function' && !window.processScannedProducts.__scansimWrappedFocus) {
       const original = window.processScannedProducts.bind(window);
-      const wrapped = function (...args) {
+      window.processScannedProducts = function (...args) {
         if (!guard()) return;
         return original(...args);
       };
-      wrapped.__scansimWrapped = true;
-      window.processScannedProducts = wrapped;
-      console.log('[ScanSim] Wrapped processScannedProducts() with focus-guard');
+      window.processScannedProducts.__scansimWrappedFocus = true;
     }
   }
 
@@ -251,21 +345,12 @@
     btn.type = 'button';
     btn.title = 'Preset: Stock Check + locatie 00. Extern';
     btn.innerHTML = `<i class="fa-solid fa-boxes-stacked"></i>`;
-
     Object.assign(btn.style, {
-      position: 'fixed',
-      bottom: '20px',
-      right: '80px',
-      zIndex: 9999,
-      padding: '10px 12px',
-      fontSize: '16px',
-      backgroundColor: '#343a40',
-      color: '#fff',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
+      position: 'fixed', bottom: '20px', right: '80px', zIndex: 9999,
+      padding: '10px 12px', fontSize: '16px',
+      backgroundColor: '#343a40', color: '#fff',
+      border: 'none', borderRadius: '6px',
+      cursor: 'pointer', display: 'flex', alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
@@ -273,16 +358,9 @@
     btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#343a40'));
 
     btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
-
-      // Guard: avoid double firing
-      await withGlobalProcessGuard({ kind: 'stockcheck' }, async () => {
-        try {
-          await applyStockCheckPreset();
-          console.log('[ScanSim] Stock Check preset toegepast');
-        } catch (err) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      await withGlobalProcessGuard({}, async () => {
+        try { await applyStockCheckPreset(); } catch (err) {
           console.error('[ScanSim] Stock Check preset faalde', err);
           alert('Stock Check preset faalde. Open console voor details.');
         }
@@ -297,14 +375,12 @@
     selectEl.value = value;
     selectEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
-
   function setInputValue(inputEl, value) {
     if (!inputEl) return;
     inputEl.value = value;
     inputEl.dispatchEvent(new Event('input', { bubbles: true }));
     inputEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
-
   function click(el) {
     if (!el) return false;
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -312,7 +388,6 @@
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     return true;
   }
-
   function openFancyDropdown() {
     const root = document.querySelector('#picklocationSelect .fancy-input');
     if (!root) return false;
@@ -360,19 +435,14 @@
   }
 
   // -------------------------
-  // Barcode inject / processing
+  // Inject scan task
   // -------------------------
   function injectScanTask(barcode) {
     if (isIncoming) {
-      if (typeof window.addBarcodeToTasks === 'function') {
-        window.addBarcodeToTasks(barcode);
-        return;
-      }
-      console.warn('[ScanSim] addBarcodeToTasks() niet gevonden (nog niet geladen?)');
+      if (typeof window.addBarcodeToTasks === 'function') window.addBarcodeToTasks(barcode);
       return;
     }
 
-    // Outgoing original
     const tbody = document.querySelector('.scanned_tasks_body');
     if (!tbody) return;
 
@@ -394,7 +464,6 @@
   // Incoming: processing kick (debounced)
   // -------------------------
   let incomingKickTimer = null;
-
   function scheduleIncomingProcessKick() {
     if (!isIncoming) return;
     if (!isTabActive()) return;
@@ -403,38 +472,13 @@
     incomingKickTimer = setTimeout(() => {
       incomingKickTimer = null;
       if (typeof window.processScannedProducts === 'function') {
-        try {
-          window.processScannedProducts();
-          console.log('[ScanSim] processScannedProducts() kick');
-        } catch (e) {
-          console.warn('[ScanSim] processScannedProducts() kick failed', e);
-        }
+        try { window.processScannedProducts(); } catch (_) {}
       }
     }, PROCESS_DEBOUNCE_MS);
   }
 
   // -------------------------
-  // Bulk-mode: skip processScannedProducts during bulk
-  // -------------------------
-  let scansimBulkMode = false;
-
-  function wrapProcessToSkipDuringBulk() {
-    if (!isIncoming) return;
-    if (typeof window.processScannedProducts !== 'function') return;
-    if (window.processScannedProducts.__scansimBulkWrapped) return;
-
-    const orig = window.processScannedProducts.bind(window);
-    const wrapped = function (...args) {
-      if (scansimBulkMode) return;
-      return orig(...args);
-    };
-    wrapped.__scansimBulkWrapped = true;
-    window.processScannedProducts = wrapped;
-    console.log('[ScanSim] Wrapped processScannedProducts() to skip during bulk');
-  }
-
-  // -------------------------
-  // OPTIONAL buffering (legacy)
+  // Legacy buffering (optional)
   // -------------------------
   const scanQueue = [];
   let flushTimer = null;
@@ -443,12 +487,10 @@
     for (let i = 0; i < count; i++) scanQueue.push(barcode);
     scheduleFlush();
   }
-
   function scheduleFlush() {
     if (flushTimer) return;
     flushTimer = setTimeout(flushQueue, FLUSH_INTERVAL_MS);
   }
-
   function flushQueue() {
     flushTimer = null;
     if (!scanQueue.length) return;
@@ -461,7 +503,7 @@
   }
 
   // -------------------------
-  // UI Freeze helpers
+  // UI Freeze
   // -------------------------
   let freezeStyleEl = null;
   let frozenTargets = [];
@@ -488,13 +530,10 @@
 
   function freezeUI() {
     if (!FREEZE_RENDER) return;
-
     if (!freezeStyleEl) {
       freezeStyleEl = document.createElement('style');
       freezeStyleEl.id = 'scansim-freeze-style';
-      freezeStyleEl.textContent = `
-        .scansim-freeze * { transition:none !important; animation:none !important; caret-color:transparent !important; }
-      `;
+      freezeStyleEl.textContent = `.scansim-freeze * { transition:none !important; animation:none !important; caret-color:transparent !important; }`;
       document.head.appendChild(freezeStyleEl);
     }
     document.documentElement.classList.add('scansim-freeze');
@@ -524,7 +563,7 @@
   }
 
   // -------------------------
-  // Fast incoming bulk (kleine aantallen)
+  // Fast incoming bulk
   // -------------------------
   function parseClipboardLinesToExpanded(text) {
     const lines = (text || '').trim().split('\n');
@@ -543,18 +582,15 @@
     if (!expanded.length) return;
     if (!isTabActive()) return;
 
-    await withGlobalProcessGuard({ kind: 'fastIncomingInsert' }, async () => {
+    await withGlobalProcessGuard({}, async () => {
       if (typeof window.addBarcodeToTasks !== 'function') {
         await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
       }
 
       wrapIncomingFunctionsToRequireFocus();
-      wrapProcessToSkipDuringBulk();
 
-      scansimBulkMode = true;
       try {
         freezeUI();
-
         const useNoYield = (typeof NO_CHUNK_YIELD === 'undefined') ? true : NO_CHUNK_YIELD;
 
         if (useNoYield) {
@@ -567,7 +603,6 @@
           }
         }
       } finally {
-        scansimBulkMode = false;
         unfreezeUI();
       }
 
@@ -594,11 +629,8 @@
       const count = Math.abs(parseInt(countRaw || '1', 10));
       if (!barcode || Number.isNaN(count)) continue;
 
-      if (isIncoming && BUFFER_INCOMING) {
-        enqueueScan(barcode, count);
-      } else {
-        for (let i = 0; i < count; i++) injectScanTask(barcode);
-      }
+      if (isIncoming && BUFFER_INCOMING) enqueueScan(barcode, count);
+      else for (let i = 0; i < count; i++) injectScanTask(barcode);
     }
     scheduleIncomingProcessKick();
   }
@@ -615,19 +647,11 @@
     btn.innerHTML = `<i class="fa-solid fa-barcode"></i>`;
 
     Object.assign(btn.style, {
-      position: 'fixed',
-      bottom: '20px',
-      right: '20px',
-      zIndex: 9999,
-      padding: '10px 15px',
-      fontSize: '16px',
-      backgroundColor: '#007bff',
-      color: '#fff',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
+      position: 'fixed', bottom: '20px', right: '20px', zIndex: 9999,
+      padding: '10px 15px', fontSize: '16px',
+      backgroundColor: '#007bff', color: '#fff',
+      border: 'none', borderRadius: '6px',
+      cursor: 'pointer', display: 'flex', alignItems: 'center',
       transition: 'background-color 0.2s',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
@@ -636,16 +660,13 @@
     btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#007bff'));
 
     btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
 
       if (!isTabActive()) {
         alert('Tab is niet actief. Klik eerst in dit tabblad en probeer opnieuw.');
         return;
       }
 
-      // Disable button to avoid human double-click
       const prevDisabled = btn.disabled;
       btn.disabled = true;
       btn.style.opacity = '0.6';
@@ -664,13 +685,7 @@
       }
 
       try {
-        await withGlobalProcessGuard(
-          { kind: 'barcodeButton', clipboardText: content, sameClipboardWindowMs: 1500 },
-          () => processClipboard(content)
-        );
-      } catch (err) {
-        console.error('[ScanSim] Processing failed', err);
-        alert('Scans verwerken mislukt (niet het klembord). Zie console.');
+        await withGlobalProcessGuard({ clipboardText: content, sameClipboardWindowMs: 1500 }, () => processClipboard(content));
       } finally {
         btn.disabled = prevDisabled;
         btn.style.opacity = '';
@@ -681,25 +696,8 @@
     document.body.appendChild(btn);
   }
 
-  // -------------------------
-  // Outgoing scanner loop (origineel)
-  // -------------------------
-  let scannerLoopStarted = false;
-
-  function activateOutgoingScannerLoop() {
-    if (!isOutgoing) return;
-    if (scannerLoopStarted) return;
-
-    if (typeof window.executeTasks === 'function') {
-      scannerLoopStarted = true;
-      setInterval(() => {
-        try { window.executeTasks(); } catch (e) { console.error('[ScanSim] executeTasks fout', e); }
-      }, 1000);
-    }
-  }
-
   // =====================================================================
-  // BATCH MODULE (incoming) — paste 1000 regels (EAN\tAANTAL) -> per 50 injecteren -> COMMIT pas bij "Ontvangst registreren"
+  // BATCH MODULE (incoming)
   // =====================================================================
 
   function loadBatchState() {
@@ -707,28 +705,20 @@
       const raw = localStorage.getItem(SCANSIM_BATCH.storageKey);
       if (!raw) return null;
       return JSON.parse(raw);
-    } catch (_) {
-      return null;
-    }
+    } catch (_) { return null; }
   }
-  function saveBatchState(state) {
-    localStorage.setItem(SCANSIM_BATCH.storageKey, JSON.stringify(state));
-  }
-  function clearBatchState() {
-    localStorage.removeItem(SCANSIM_BATCH.storageKey);
-  }
+  function saveBatchState(state) { localStorage.setItem(SCANSIM_BATCH.storageKey, JSON.stringify(state)); }
+  function clearBatchState() { localStorage.removeItem(SCANSIM_BATCH.storageKey); }
 
   function countRemainingLines(items) {
     return (items || []).reduce((n, it) => n + ((it.remaining || 0) > 0 ? 1 : 0), 0);
   }
-
   function getProgressLines(state) {
     const total = state?.meta?.totalLines ?? (state?.items?.length ?? 0);
     const remaining = countRemainingLines(state?.items || []);
     const done = Math.max(0, total - remaining);
     return { done, total, remaining };
   }
-
   function countTotalRemaining(items) {
     return (items || []).reduce((n, it) => n + (it.remaining || 0), 0);
   }
@@ -750,9 +740,7 @@
     const pending = [];
     for (const it of state.items) {
       if (pending.length >= maxUniqueLines) break;
-      if ((it.remaining || 0) > 0) {
-        pending.push({ ean: it.ean, qty: it.remaining });
-      }
+      if ((it.remaining || 0) > 0) pending.push({ ean: it.ean, qty: it.remaining });
     }
     return pending;
   }
@@ -770,17 +758,10 @@
 
   function initBatchModule() {
     if (!isIncoming || !SCANSIM_BATCH.enabled) return;
-
     addBatchButtons();
     installCommitOnRegisterButton();
-
     const state = loadBatchState();
     if (state?.items?.length) showContinueBadge(state);
-
-    const pend = loadPending();
-    if (pend?.pending?.length) {
-      console.log(`[ScanSim] Pending batch waiting: ${pend.total} scans. Klik "Ontvangst registreren".`);
-    }
   }
 
   function addBatchButtons() {
@@ -791,21 +772,12 @@
     btn.type = 'button';
     btn.title = 'Batch scanner: plak EAN\\tAANTAL, injecteer per batch. Commit pas bij "Ontvangst registreren".';
     btn.innerHTML = `<i class="fa-solid fa-layer-group"></i>`;
-
     Object.assign(btn.style, {
-      position: 'fixed',
-      bottom: '20px',
-      right: '140px',
-      zIndex: 9999,
-      padding: '10px 12px',
-      fontSize: '16px',
-      backgroundColor: '#6f42c1',
-      color: '#fff',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
+      position: 'fixed', bottom: '20px', right: '140px', zIndex: 9999,
+      padding: '10px 12px', fontSize: '16px',
+      backgroundColor: '#6f42c1', color: '#fff',
+      border: 'none', borderRadius: '6px',
+      cursor: 'pointer', display: 'flex', alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
@@ -813,9 +785,7 @@
     btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#6f42c1'));
 
     btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
       openBatchModal();
     });
 
@@ -831,15 +801,11 @@
 
     const modal = document.createElement('div');
     modal.id = 'scansim-batch-modal';
-
     Object.assign(modal.style, {
-      position: 'fixed',
-      inset: '0',
+      position: 'fixed', inset: '0',
       background: 'rgba(0,0,0,0.45)',
       zIndex: 10000,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '20px'
     });
 
@@ -858,10 +824,9 @@
 
     const textarea = document.createElement('textarea');
     textarea.id = 'scansim-batch-textarea';
-    textarea.placeholder = `Plak hier je regels:\n1234567890123\t10\n9876543210987\t3\n...\n\nTip: 1000+ regels is prima.`;
+    textarea.placeholder = `Plak hier je regels:\n1234567890123\t10\n9876543210987\t3\n...`;
     Object.assign(textarea.style, {
-      width: '100%',
-      height: '300px',
+      width: '100%', height: '300px',
       padding: '10px',
       borderRadius: '8px',
       border: '1px solid #ddd',
@@ -895,17 +860,12 @@
 
     btnStart.addEventListener('click', async (e) => {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-
       const text = textarea.value || '';
       const items = parseEanCountLinesToItems(text);
-      if (!items.length) {
-        setBatchInfo('Geen geldige regels gevonden. Gebruik: EAN<TAB>AANTAL', true);
-        return;
-      }
+      if (!items.length) { setBatchInfo('Geen geldige regels. Gebruik: EAN<TAB>AANTAL', true); return; }
       saveBatchState({ items, meta: { createdAt: Date.now(), totalLines: items.length } });
       setBatchInfo(`Opgeslagen: ${countTotalRemaining(items)} scans totaal. Injecteren...`);
       showContinueBadge({ items, meta: { totalLines: items.length } });
-
       await runNextBatch();
     });
 
@@ -930,10 +890,7 @@
     row.append(btnStart, btnContinue, btnClear, btnClose);
     card.append(title, textarea, row, info);
     modal.append(card);
-
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.style.display = 'none';
-    });
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
 
     document.body.appendChild(modal);
     refreshBatchInfo();
@@ -980,17 +937,12 @@
 
   function showContinueBadge(state) {
     if (!isIncoming) return;
-
     const prog = getProgressLines(state);
     if (!prog.total) return;
 
     const existing = document.getElementById('scansim-batch-continue');
     const label = `Volgende ${SCANSIM_BATCH.batchSize} regels · ${prog.done}/${prog.total}`;
-
-    if (existing) {
-      existing.textContent = label;
-      return;
-    }
+    if (existing) { existing.textContent = label; return; }
 
     const btn = document.createElement('button');
     btn.id = 'scansim-batch-continue';
@@ -998,83 +950,52 @@
     btn.textContent = label;
 
     Object.assign(btn.style, {
-      position: 'fixed',
-      bottom: '20px',
-      right: '260px',
-      zIndex: 9999,
-      padding: '10px 12px',
-      fontSize: '13px',
-      backgroundColor: '#0d6efd',
-      color: '#fff',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
+      position: 'fixed', bottom: '20px', right: '260px', zIndex: 9999,
+      padding: '10px 12px', fontSize: '13px',
+      backgroundColor: '#0d6efd', color: '#fff',
+      border: 'none', borderRadius: '6px',
+      cursor: 'pointer', display: 'flex', alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
     btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
       await runNextBatch();
     });
 
     document.body.appendChild(btn);
   }
 
-  function hideContinueBadge() {
-    document.getElementById('scansim-batch-continue')?.remove();
-  }
+  function hideContinueBadge() { document.getElementById('scansim-batch-continue')?.remove(); }
 
   async function runNextBatch() {
     if (!isIncoming) return;
-
-    if (!isTabActive()) {
-      setBatchInfo('Tab is niet actief. Klik eerst in het tabblad en probeer opnieuw.', true);
-      return;
-    }
-
-    // Guard: no double-run while another injection runs
-    if (__scansimProcessing) {
-      setBatchInfo('Er loopt al een injectie/scan. Even geduld, bitte.', true);
-      return;
-    }
+    if (!isTabActive()) { setBatchInfo('Tab is niet actief.', true); return; }
+    if (__scansimProcessing) { setBatchInfo('Er loopt al een injectie/scan.', true); return; }
 
     const state = loadBatchState();
-    if (!state?.items?.length) {
-      setBatchInfo('Geen batch opgeslagen. Plak eerst je regels en klik "Opslaan & injecteer".', true);
-      hideContinueBadge();
-      return;
-    }
+    if (!state?.items?.length) { setBatchInfo('Geen batch opgeslagen.', true); hideContinueBadge(); return; }
 
-    // Als er nog pending staat: eerst registreren
     const alreadyPending = loadPending();
     if (alreadyPending?.pending?.length) {
-      setBatchInfo(`Er staat nog een batch klaar om te registreren (${alreadyPending.total} scans). Klik eerst "Ontvangst registreren".`, true);
+      setBatchInfo(`Er staat nog een batch klaar (${alreadyPending.total} scans). Klik eerst "Ontvangst registreren".`, true);
       return;
     }
 
     await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
-
     wrapIncomingFunctionsToRequireFocus();
-    wrapProcessToSkipDuringBulk();
 
     const pending = takePendingFromState(state, SCANSIM_BATCH.batchSize);
     if (!pending.length) {
-      clearBatchState();
-      hideContinueBadge();
-      setBatchInfo('Batch is leeg ✅', false);
+      clearBatchState(); hideContinueBadge(); setBatchInfo('Batch is leeg ✅', false);
       return;
     }
 
     const total = pending.reduce((s, p) => s + p.qty, 0);
     savePending({ pending, total, createdAt: Date.now() });
 
-    await withGlobalProcessGuard({ kind: 'batchInject' }, async () => {
+    await withGlobalProcessGuard({}, async () => {
       try { freezeUI(); } catch (_) {}
-      scansimBulkMode = true;
 
       let inserted = 0;
       try {
@@ -1085,15 +1006,11 @@
           }
         }
       } finally {
-        scansimBulkMode = false;
         try { unfreezeUI(); } catch (_) {}
       }
 
       scheduleIncomingProcessKick();
-      setBatchInfo(`Batch ingevoerd: ${inserted} scans ✅ Klik nu "Ontvangst registreren" om te committen.`, false);
-      console.log(`[ScanSim] Pending batch inserted=${inserted}. Waiting for "Ontvangst registreren".`);
-
-      // badge blijft remaining tonen tot commit
+      setBatchInfo(`Batch ingevoerd: ${inserted} scans ✅ Klik nu "Ontvangst registreren".`, false);
       showContinueBadge(state);
     });
   }
@@ -1103,7 +1020,6 @@
     if (window.__scansimCommitHookInstalled) return;
     window.__scansimCommitHookInstalled = true;
 
-    // Capturing: commit voordat site redirect/triggers uitvoert
     document.addEventListener('click', (e) => {
       const btn = e.target?.closest?.('button.attach_scanned_products');
       if (!btn) return;
@@ -1117,55 +1033,186 @@
 
         commitPendingToState(state, pend.pending);
 
-        if (state.items.length) {
-          saveBatchState(state);
-          showContinueBadge(state);
-        } else {
-          clearBatchState();
-          hideContinueBadge();
-        }
+        if (state.items.length) saveBatchState(state);
+        else clearBatchState();
 
         clearPending();
-        console.log('[ScanSim] Committed pending batch on "Ontvangst registreren".');
+        refreshBatchInfo();
       } catch (err) {
         console.error('[ScanSim] Commit failed', err);
       }
-      // niet blokkeren: site mag gewoon doorgaan met opslaan/redirect
     }, true);
   }
+
+  // -------------------------
+  // Barcode Button
+  // -------------------------
+  function addBarcodeButton() {
+    if (document.getElementById('simuleer-scan-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'simuleer-scan-btn';
+    btn.type = 'button';
+    btn.innerHTML = `<i class="fa-solid fa-barcode"></i>`;
+
+    Object.assign(btn.style, {
+      position: 'fixed', bottom: '20px', right: '20px', zIndex: 9999,
+      padding: '10px 15px', fontSize: '16px',
+      backgroundColor: '#007bff', color: '#fff',
+      border: 'none', borderRadius: '6px',
+      cursor: 'pointer', display: 'flex', alignItems: 'center',
+      transition: 'background-color 0.2s',
+      boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
+    });
+
+    btn.addEventListener('mouseenter', () => (btn.style.backgroundColor = '#28a745'));
+    btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#007bff'));
+
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      if (!isTabActive()) { alert('Tab is niet actief. Klik eerst in dit tabblad.'); return; }
+
+      const prevDisabled = btn.disabled;
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btn.style.cursor = 'not-allowed';
+
+      let content = '';
+      try {
+        content = await navigator.clipboard.readText();
+      } catch (err) {
+        console.error('[ScanSim] Clipboard readText failed', err);
+        alert('Klembord lezen mislukt. Zie console.');
+        btn.disabled = prevDisabled;
+        btn.style.opacity = '';
+        btn.style.cursor = 'pointer';
+        return;
+      }
+
+      try {
+        await withGlobalProcessGuard({ clipboardText: content, sameClipboardWindowMs: 1500 }, () => processClipboard(content));
+      } finally {
+        btn.disabled = prevDisabled;
+        btn.style.opacity = '';
+        btn.style.cursor = 'pointer';
+      }
+    });
+
+    document.body.appendChild(btn);
+  }
+
+  // -------------------------
+  // Clipboard processing
+  // -------------------------
+  async function processClipboard(text) {
+    if (!isTabActive()) return;
+
+    if (isIncoming && INCOMING_FAST_BULK) {
+      const expanded = parseClipboardLinesToExpanded(text);
+      await fastIncomingInsert(expanded);
+      return;
+    }
+
+    const lines = (text || '').trim().split('\n');
+    for (const line of lines) {
+      const [barcodeRaw, countRaw] = line.split('\t');
+      const barcode = (barcodeRaw || '').trim();
+      const count = Math.abs(parseInt(countRaw || '1', 10));
+      if (!barcode || Number.isNaN(count)) continue;
+
+      if (isIncoming && BUFFER_INCOMING) enqueueScan(barcode, count);
+      else for (let i = 0; i < count; i++) injectScanTask(barcode);
+    }
+    scheduleIncomingProcessKick();
+  }
+
+  // -------------------------
+  // Fast incoming bulk
+  // -------------------------
+  function parseClipboardLinesToExpanded(text) {
+    const lines = (text || '').trim().split('\n');
+    const expanded = [];
+    for (const line of lines) {
+      const [barcodeRaw, countRaw] = line.split('\t');
+      const barcode = (barcodeRaw || '').trim();
+      const count = Math.abs(parseInt(countRaw || '1', 10));
+      if (!barcode || Number.isNaN(count) || count < 1) continue;
+      for (let i = 0; i < count; i++) expanded.push(barcode);
+    }
+    return expanded;
+  }
+
+  async function fastIncomingInsert(expanded) {
+    if (!expanded.length) return;
+    if (!isTabActive()) return;
+
+    await withGlobalProcessGuard({}, async () => {
+      if (typeof window.addBarcodeToTasks !== 'function') {
+        await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
+      }
+
+      wrapIncomingFunctionsToRequireFocus();
+
+      try {
+        freezeUI();
+        const useNoYield = (typeof NO_CHUNK_YIELD === 'undefined') ? true : NO_CHUNK_YIELD;
+
+        if (useNoYield) {
+          for (const bc of expanded) injectScanTask(bc);
+        } else {
+          for (let i = 0; i < expanded.length; i += CHUNK_SIZE) {
+            const chunk = expanded.slice(i, i + CHUNK_SIZE);
+            for (const bc of chunk) injectScanTask(bc);
+            await sleep(YIELD_MS);
+          }
+        }
+      } finally {
+        unfreezeUI();
+      }
+
+      scheduleIncomingProcessKick();
+    });
+  }
+
+// -------------------------
+// Outgoing scanner loop (origineel)
+// -------------------------
+let scannerLoopStarted = false;
+
+function activateOutgoingScannerLoop() {
+  if (!isOutgoing) return;
+  if (scannerLoopStarted) return;
+
+  if (typeof window.executeTasks === 'function') {
+    scannerLoopStarted = true;
+    setInterval(() => {
+      try { window.executeTasks(); }
+      catch (e) { console.error('[ScanSim] executeTasks fout', e); }
+    }, 1000);
+  }
+}
 
   // -------------------------
   // Init
   // -------------------------
   function init() {
+    installFetchDedupe();
+    installXhrDedupe();
+
     injectFontAwesome();
     addBarcodeButton();
     addStockCheckButton();
     activateOutgoingScannerLoop();
 
-    // Batch module init
     initBatchModule();
 
-    // Incoming wrappers
     if (isIncoming) {
       waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000 })
-        .then(() => {
-          wrapIncomingFunctionsToRequireFocus();
-          wrapProcessToSkipDuringBulk();
-        })
-        .catch(() => console.warn('[ScanSim] addBarcodeToTasks niet gevonden binnen timeout'));
-
-      const t = setInterval(() => {
-        wrapIncomingFunctionsToRequireFocus();
-        wrapProcessToSkipDuringBulk();
-      }, 500);
-      setTimeout(() => clearInterval(t), 20000);
+        .then(() => wrapIncomingFunctionsToRequireFocus())
+        .catch(() => {});
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
 })();
