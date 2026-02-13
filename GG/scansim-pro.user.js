@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG | ScanSim Pro
-// @version      2.7
-// @description  Scan Simulator; leest barcodes uit klembord. Incoming: batch + preset. Anti-double: single-instance + clipboard dedupe + NETWORK dedupe ONLY for commit/register (prevents double booking, allows repeated scans).
+// @version      2.8.1
+// @description  Scan Simulator; primary: read barcodes from clipboard on button click. Incoming + Outgoing: Batch (EAN\tAANTAL) per 50. Incoming commit bij "Ontvangst registreren". Outgoing direct verwerken. Anti-double booking: network dedupe ONLY for incoming register/attach.
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/incoming*
 // @match        https://fm-e-warehousing.goedgepickt.nl/products/outgoing-products
 // @grant        none
@@ -32,7 +32,10 @@
   // =========================
   const NEUTRALIZE_SCROLL_ANIMATE = true;
 
+  // Incoming fast bulk (optioneel). Voor mega aantallen is Batch module de oplossing.
   const INCOMING_FAST_BULK = true;
+
+  // Freeze render tijdens bulk inject
   const FREEZE_RENDER = true;
   const NO_CHUNK_YIELD = true;
   const CHUNK_SIZE = 200;
@@ -40,16 +43,26 @@
 
   const PROCESS_DEBOUNCE_MS = 250;
 
+  // Legacy buffering (UIT)
   const BUFFER_INCOMING = false;
   const FLUSH_INTERVAL_MS = 50;
-  const BATCH_SIZE = 50;
+  const LEGACY_BATCH_SIZE = 50;
 
-  const SCANSIM_BATCH = {
+  // Batch module (incoming)
+  const SCANSIM_BATCH_INCOMING = {
     enabled: true,
     batchSize: 50,
-    storageKey: 'scansim_incoming_batch_v1'
+    storageKey: 'scansim_incoming_batch_v2'
   };
 
+  // Batch module (outgoing)
+  const SCANSIM_BATCH_OUTGOING = {
+    enabled: true,
+    batchSize: 50,
+    storageKey: 'scansim_outgoing_batch_v2'
+  };
+
+  // Freeze heuristics
   const FREEZE_TARGET_SELECTORS = [
     '.scanned_tasks_body',
     '#scanned_tasks_body',
@@ -68,7 +81,7 @@
   const FREEZE_OVERRIDE_SELECTOR = null;
 
   // =========================
-  // Global anti-double processing guard (UI triggers)
+  // Global anti-double UI processing guard
   // =========================
   let __scansimProcessing = false;
   let __lastClipboardSig = '';
@@ -95,7 +108,7 @@
   }
 
   // =========================
-  // HARD FIX: Network dedupe (ONLY for commit/register)
+  // Network dedupe ONLY for incoming register/commit
   // =========================
   const NET_DEDUPE_WINDOW_MS = 15000;
   const netRecent = new Map(); // sig -> ts
@@ -116,36 +129,40 @@
   }
 
   function looksLikeScanAdd(url, body) {
-    // These requests are allowed to repeat many times (ean x 5 should be 5 POSTs)
+    // Per-scan calls must NEVER be deduped
     const u = (url || '').toLowerCase();
     const b = (body || '').toLowerCase();
-
-    // common patterns for "add a scanned barcode"
     const bodyHasBarcode = /\b(ean|barcode|bar_code|code|scan|scanned)\b\s*=/.test(b);
     const urlHasScan = /(scan|scanned|barcode|ean|task)/.test(u);
-
-    // BUT: commit/register often also contains "scanned" words — we filter those in commit check below.
     return bodyHasBarcode || urlHasScan;
   }
 
-  function looksLikeCommitRegister(url, body) {
+  function looksLikeIncomingCommit(url, body) {
     const u = (url || '').toLowerCase();
     const b = (body || '').toLowerCase();
 
-    // Strong hints for "Ontvangst registreren" action
-    return (
+    // Strong hints for "Ontvangst registreren" / attach scanned products
+    const urlHints =
       u.includes('attach_scanned') ||
-      u.includes('attach') ||
-      u.includes('register') ||
+      u.includes('attach_scanned_products') ||
       u.includes('incoming/attach') ||
+      u.includes('incoming/register') ||
+      u.includes('register_scanned') ||
+      (u.includes('attach') && u.includes('incoming'));
+
+    const bodyHints =
       b.includes('attach_scanned_products') ||
       b.includes('attach_scanned') ||
       b.includes('ontvangst') ||
-      b.includes('register')
-    );
+      b.includes('register');
+
+    return urlHints || bodyHints;
   }
 
   function shouldDedupeRequest(method, url, bodyText) {
+    // IMPORTANT: outgoing should not be deduped (it can execute multiple times)
+    if (!isIncoming) return false;
+
     const m = String(method || 'GET').toUpperCase();
     if (m !== 'POST') return false;
 
@@ -153,21 +170,19 @@
     const body = (bodyText || '').trim();
     if (!body) return false;
 
-    // ✅ Only dedupe the commit/register action.
-    // 🚫 Never dedupe the per-scan "add barcode" calls.
-    const isCommit = looksLikeCommitRegister(u, body);
+    const isCommit = looksLikeIncomingCommit(u, body);
     if (!isCommit) return false;
 
-    // If it ALSO looks like a scan add, do NOT dedupe (safety net)
+    // Safety net: never dedupe scan-add
     if (looksLikeScanAdd(u, body)) return false;
 
-    const sig = `${m}|${u}|${body.slice(0, 4000)}`; // cap
+    const sig = `${m}|${u}|${body.slice(0, 4000)}`;
     const now = Date.now();
     pruneNetRecent(now);
 
     const prev = netRecent.get(sig);
     if (prev && (now - prev) < NET_DEDUPE_WINDOW_MS) {
-      console.warn('[ScanSim] BLOCKED duplicate COMMIT/REGISTER POST:', u);
+      console.warn('[ScanSim] BLOCKED duplicate INCOMING COMMIT POST:', u);
       return true;
     }
 
@@ -197,7 +212,7 @@
         }
 
         if (shouldDedupeRequest(method, url, bodyText)) {
-          // fake "ok" response so app doesn't crash
+          // fake OK response so app doesn't crash
           return new Response(JSON.stringify({ scansim: 'deduped_commit', ok: true }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -230,7 +245,7 @@
         let bodyText = '';
         if (typeof body === 'string') bodyText = body;
         else if (body instanceof URLSearchParams) bodyText = body.toString();
-        if (body instanceof FormData) bodyText = ''; // can't reliably dedupe
+        if (body instanceof FormData) bodyText = ''; // can't serialize reliably
 
         if (bodyText && shouldDedupeRequest(this.__scansimMethod, this.__scansimUrl, bodyText)) {
           try { this.abort(); } catch (_) {}
@@ -243,25 +258,31 @@
   }
 
   // =========================
-  // Internal keys for commit workflow
+  // Pending key (incoming commit workflow)
   // =========================
-  const PENDING_KEY = SCANSIM_BATCH.storageKey + '_pending';
+  const INCOMING_PENDING_KEY = SCANSIM_BATCH_INCOMING.storageKey + '_pending';
 
-  function loadPending() {
-    try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; }
+  function loadIncomingPending() {
+    try { return JSON.parse(localStorage.getItem(INCOMING_PENDING_KEY) || 'null'); } catch { return null; }
   }
-  function savePending(p) { localStorage.setItem(PENDING_KEY, JSON.stringify(p)); }
-  function clearPending() { localStorage.removeItem(PENDING_KEY); }
+  function saveIncomingPending(p) {
+    localStorage.setItem(INCOMING_PENDING_KEY, JSON.stringify(p));
+  }
+  function clearIncomingPending() {
+    localStorage.removeItem(INCOMING_PENDING_KEY);
+  }
 
   // -------------------------
-  // Neutralize jQuery scroll animations
+  // Neutralize jQuery scroll animations on html/body
   // -------------------------
   (function neutralizeBodyScrollAnimate() {
     if (!NEUTRALIZE_SCROLL_ANIMATE) return;
+
     const $ = window.jQuery;
     if (!$ || !$.fn || !$.fn.animate) return;
 
     const origAnimate = $.fn.animate;
+
     $.fn.animate = function (props, speed, easing, callback) {
       try {
         const isHtmlBody = this.is('html, body');
@@ -283,6 +304,7 @@
   // -------------------------
   function injectFontAwesome() {
     if (document.querySelector('link[href*="font-awesome"], link[href*="fontawesome"]')) return;
+
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css';
@@ -300,18 +322,23 @@
           const res = fn();
           if (res) { clearInterval(t); resolve(res); return; }
           if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error('timeout')); }
-        } catch (e) { clearInterval(t); reject(e); }
+        } catch (e) {
+          clearInterval(t);
+          reject(e);
+        }
       }, intervalMs);
     });
   }
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  const isTabActive = () => document.visibilityState === 'visible' && document.hasFocus();
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function isTabActive() { return document.visibilityState === 'visible' && document.hasFocus(); }
 
   // -------------------------
-  // Focus guard (quiet)
+  // Focus guard for incoming functions
   // -------------------------
   function wrapIncomingFunctionsToRequireFocus() {
     if (!isIncoming) return;
+
     const guard = () => isTabActive();
 
     if (typeof window.addBarcodeToTasks === 'function' && !window.addBarcodeToTasks.__scansimWrappedFocus) {
@@ -345,12 +372,21 @@
     btn.type = 'button';
     btn.title = 'Preset: Stock Check + locatie 00. Extern';
     btn.innerHTML = `<i class="fa-solid fa-boxes-stacked"></i>`;
+
     Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '80px', zIndex: 9999,
-      padding: '10px 12px', fontSize: '16px',
-      backgroundColor: '#343a40', color: '#fff',
-      border: 'none', borderRadius: '6px',
-      cursor: 'pointer', display: 'flex', alignItems: 'center',
+      position: 'fixed',
+      bottom: '20px',
+      right: '80px',
+      zIndex: 9999,
+      padding: '10px 12px',
+      fontSize: '16px',
+      backgroundColor: '#343a40',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
@@ -358,9 +394,15 @@
     btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#343a40'));
 
     btn.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+
       await withGlobalProcessGuard({}, async () => {
-        try { await applyStockCheckPreset(); } catch (err) {
+        try {
+          await applyStockCheckPreset();
+          console.log('[ScanSim] Stock Check preset toegepast');
+        } catch (err) {
           console.error('[ScanSim] Stock Check preset faalde', err);
           alert('Stock Check preset faalde. Open console voor details.');
         }
@@ -375,12 +417,14 @@
     selectEl.value = value;
     selectEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
   function setInputValue(inputEl, value) {
     if (!inputEl) return;
     inputEl.value = value;
     inputEl.dispatchEvent(new Event('input', { bubbles: true }));
     inputEl.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
   function click(el) {
     if (!el) return false;
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -388,6 +432,7 @@
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     return true;
   }
+
   function openFancyDropdown() {
     const root = document.querySelector('#picklocationSelect .fancy-input');
     if (!root) return false;
@@ -435,14 +480,19 @@
   }
 
   // -------------------------
-  // Inject scan task
+  // Barcode inject / processing
   // -------------------------
   function injectScanTask(barcode) {
     if (isIncoming) {
-      if (typeof window.addBarcodeToTasks === 'function') window.addBarcodeToTasks(barcode);
+      if (typeof window.addBarcodeToTasks === 'function') {
+        window.addBarcodeToTasks(barcode);
+        return;
+      }
+      console.warn('[ScanSim] addBarcodeToTasks() niet gevonden (nog niet geladen?)');
       return;
     }
 
+    // Outgoing: add row to table like original behavior
     const tbody = document.querySelector('.scanned_tasks_body');
     if (!tbody) return;
 
@@ -472,7 +522,10 @@
     incomingKickTimer = setTimeout(() => {
       incomingKickTimer = null;
       if (typeof window.processScannedProducts === 'function') {
-        try { window.processScannedProducts(); } catch (_) {}
+        try {
+          window.processScannedProducts();
+          console.log('[ScanSim] processScannedProducts() kick');
+        } catch (e) {}
       }
     }, PROCESS_DEBOUNCE_MS);
   }
@@ -487,15 +540,17 @@
     for (let i = 0; i < count; i++) scanQueue.push(barcode);
     scheduleFlush();
   }
+
   function scheduleFlush() {
     if (flushTimer) return;
     flushTimer = setTimeout(flushQueue, FLUSH_INTERVAL_MS);
   }
+
   function flushQueue() {
     flushTimer = null;
     if (!scanQueue.length) return;
 
-    const batch = scanQueue.splice(0, BATCH_SIZE);
+    const batch = scanQueue.splice(0, LEGACY_BATCH_SIZE);
     for (const bc of batch) injectScanTask(bc);
 
     if (scanQueue.length) scheduleFlush();
@@ -503,7 +558,7 @@
   }
 
   // -------------------------
-  // UI Freeze
+  // UI Freeze helpers
   // -------------------------
   let freezeStyleEl = null;
   let frozenTargets = [];
@@ -530,10 +585,13 @@
 
   function freezeUI() {
     if (!FREEZE_RENDER) return;
+
     if (!freezeStyleEl) {
       freezeStyleEl = document.createElement('style');
       freezeStyleEl.id = 'scansim-freeze-style';
-      freezeStyleEl.textContent = `.scansim-freeze * { transition:none !important; animation:none !important; caret-color:transparent !important; }`;
+      freezeStyleEl.textContent = `
+        .scansim-freeze * { transition:none !important; animation:none !important; caret-color:transparent !important; }
+      `;
       document.head.appendChild(freezeStyleEl);
     }
     document.documentElement.classList.add('scansim-freeze');
@@ -563,7 +621,7 @@
   }
 
   // -------------------------
-  // Fast incoming bulk
+  // Fast incoming bulk (kleine aantallen)
   // -------------------------
   function parseClipboardLinesToExpanded(text) {
     const lines = (text || '').trim().split('\n');
@@ -578,44 +636,41 @@
     return expanded;
   }
 
+  // NOTE: guard is intentionally NOT nested here (same simple flow as outgoing)
   async function fastIncomingInsert(expanded) {
     if (!expanded.length) return;
     if (!isTabActive()) return;
 
-    await withGlobalProcessGuard({}, async () => {
-      if (typeof window.addBarcodeToTasks !== 'function') {
-        await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
-      }
+    if (typeof window.addBarcodeToTasks !== 'function') {
+      await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
+    }
 
-      wrapIncomingFunctionsToRequireFocus();
+    wrapIncomingFunctionsToRequireFocus();
 
-      try {
-        freezeUI();
-        const useNoYield = (typeof NO_CHUNK_YIELD === 'undefined') ? true : NO_CHUNK_YIELD;
+    try {
+      freezeUI();
+      const useNoYield = (typeof NO_CHUNK_YIELD === 'undefined') ? true : NO_CHUNK_YIELD;
 
-        if (useNoYield) {
-          for (const bc of expanded) injectScanTask(bc);
-        } else {
-          for (let i = 0; i < expanded.length; i += CHUNK_SIZE) {
-            const chunk = expanded.slice(i, i + CHUNK_SIZE);
-            for (const bc of chunk) injectScanTask(bc);
-            await sleep(YIELD_MS);
-          }
+      if (useNoYield) {
+        for (const bc of expanded) injectScanTask(bc);
+      } else {
+        for (let i = 0; i < expanded.length; i += CHUNK_SIZE) {
+          const chunk = expanded.slice(i, i + CHUNK_SIZE);
+          for (const bc of chunk) injectScanTask(bc);
+          await sleep(YIELD_MS);
         }
-      } finally {
-        unfreezeUI();
       }
+    } finally {
+      unfreezeUI();
+    }
 
-      scheduleIncomingProcessKick();
-    });
+    scheduleIncomingProcessKick();
   }
 
   // -------------------------
   // Clipboard processing
   // -------------------------
   async function processClipboard(text) {
-    if (!isTabActive()) return;
-
     if (isIncoming && INCOMING_FAST_BULK) {
       const expanded = parseClipboardLinesToExpanded(text);
       await fastIncomingInsert(expanded);
@@ -629,10 +684,17 @@
       const count = Math.abs(parseInt(countRaw || '1', 10));
       if (!barcode || Number.isNaN(count)) continue;
 
-      if (isIncoming && BUFFER_INCOMING) enqueueScan(barcode, count);
-      else for (let i = 0; i < count; i++) injectScanTask(barcode);
+      if (isIncoming && BUFFER_INCOMING) {
+        enqueueScan(barcode, count);
+      } else {
+        for (let i = 0; i < count; i++) injectScanTask(barcode);
+      }
     }
-    scheduleIncomingProcessKick();
+
+    if (isIncoming) scheduleIncomingProcessKick();
+    if (isOutgoing) {
+      try { window.executeTasks?.(); } catch (_) {}
+    }
   }
 
   // -------------------------
@@ -647,11 +709,19 @@
     btn.innerHTML = `<i class="fa-solid fa-barcode"></i>`;
 
     Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '20px', zIndex: 9999,
-      padding: '10px 15px', fontSize: '16px',
-      backgroundColor: '#007bff', color: '#fff',
-      border: 'none', borderRadius: '6px',
-      cursor: 'pointer', display: 'flex', alignItems: 'center',
+      position: 'fixed',
+      bottom: '20px',
+      right: '20px',
+      zIndex: 9999,
+      padding: '10px 15px',
+      fontSize: '16px',
+      backgroundColor: '#007bff',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
       transition: 'background-color 0.2s',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
@@ -660,36 +730,26 @@
     btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#007bff'));
 
     btn.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
 
       if (!isTabActive()) {
         alert('Tab is niet actief. Klik eerst in dit tabblad en probeer opnieuw.');
         return;
       }
 
-      const prevDisabled = btn.disabled;
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
-      btn.style.cursor = 'not-allowed';
-
-      let content = '';
+      // Primary: 1-click clipboard read (fast path, no Ctrl+V)
       try {
-        content = await navigator.clipboard.readText();
-      } catch (err) {
-        console.error('[ScanSim] Clipboard readText failed', err);
-        alert('Klembord lezen mislukt (browser policy/focus). Zie console.');
-        btn.disabled = prevDisabled;
-        btn.style.opacity = '';
-        btn.style.cursor = 'pointer';
+        const content = await navigator.clipboard.readText();
+        await withGlobalProcessGuard(
+          { clipboardText: content, sameClipboardWindowMs: 1500 },
+          () => processClipboard(content)
+        );
         return;
-      }
-
-      try {
-        await withGlobalProcessGuard({ clipboardText: content, sameClipboardWindowMs: 1500 }, () => processClipboard(content));
-      } finally {
-        btn.disabled = prevDisabled;
-        btn.style.opacity = '';
-        btn.style.cursor = 'pointer';
+      } catch (err) {
+        console.warn('[ScanSim] clipboard.readText blocked', err);
+        alert('Clipboard lezen is geblokt door de browser. Sta clipboard-permissie toe en probeer opnieuw.');
       }
     });
 
@@ -697,28 +757,19 @@
   }
 
   // =====================================================================
-  // BATCH MODULE (incoming)
+  // BATCH MODULE - shared helpers
   // =====================================================================
-
-  function loadBatchState() {
-    try {
-      const raw = localStorage.getItem(SCANSIM_BATCH.storageKey);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch (_) { return null; }
-  }
-  function saveBatchState(state) { localStorage.setItem(SCANSIM_BATCH.storageKey, JSON.stringify(state)); }
-  function clearBatchState() { localStorage.removeItem(SCANSIM_BATCH.storageKey); }
-
   function countRemainingLines(items) {
     return (items || []).reduce((n, it) => n + ((it.remaining || 0) > 0 ? 1 : 0), 0);
   }
+
   function getProgressLines(state) {
     const total = state?.meta?.totalLines ?? (state?.items?.length ?? 0);
     const remaining = countRemainingLines(state?.items || []);
     const done = Math.max(0, total - remaining);
     return { done, total, remaining };
   }
+
   function countTotalRemaining(items) {
     return (items || []).reduce((n, it) => n + (it.remaining || 0), 0);
   }
@@ -738,7 +789,7 @@
 
   function takePendingFromState(state, maxUniqueLines) {
     const pending = [];
-    for (const it of state.items) {
+    for (const it of (state?.items || [])) {
       if (pending.length >= maxUniqueLines) break;
       if ((it.remaining || 0) > 0) pending.push({ ean: it.ean, qty: it.remaining });
     }
@@ -756,28 +807,63 @@
     state.items = state.items.filter(it => it.remaining > 0);
   }
 
-  function initBatchModule() {
-    if (!isIncoming || !SCANSIM_BATCH.enabled) return;
-    addBatchButtons();
-    installCommitOnRegisterButton();
-    const state = loadBatchState();
-    if (state?.items?.length) showContinueBadge(state);
+  // =====================================================================
+  // BATCH MODULE - state (incoming/outgoing)
+  // =====================================================================
+  function loadBatchIncoming() {
+    try {
+      const raw = localStorage.getItem(SCANSIM_BATCH_INCOMING.storageKey);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) { return null; }
+  }
+  function saveBatchIncoming(state) {
+    localStorage.setItem(SCANSIM_BATCH_INCOMING.storageKey, JSON.stringify(state));
+  }
+  function clearBatchIncoming() {
+    localStorage.removeItem(SCANSIM_BATCH_INCOMING.storageKey);
   }
 
+  function loadBatchOutgoing() {
+    try {
+      const raw = localStorage.getItem(SCANSIM_BATCH_OUTGOING.storageKey);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) { return null; }
+  }
+  function saveBatchOutgoing(state) {
+    localStorage.setItem(SCANSIM_BATCH_OUTGOING.storageKey, JSON.stringify(state));
+  }
+  function clearBatchOutgoing() {
+    localStorage.removeItem(SCANSIM_BATCH_OUTGOING.storageKey);
+  }
+
+  // =====================================================================
+  // Shared batch UI
+  // =====================================================================
   function addBatchButtons() {
     if (document.getElementById('scansim-batch-btn')) return;
 
     const btn = document.createElement('button');
     btn.id = 'scansim-batch-btn';
     btn.type = 'button';
-    btn.title = 'Batch scanner: plak EAN\\tAANTAL, injecteer per batch. Commit pas bij "Ontvangst registreren".';
+    btn.title = 'Batch scanner: plak EAN\\tAANTAL, injecteer per batch.';
     btn.innerHTML = `<i class="fa-solid fa-layer-group"></i>`;
+
     Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '140px', zIndex: 9999,
-      padding: '10px 12px', fontSize: '16px',
-      backgroundColor: '#6f42c1', color: '#fff',
-      border: 'none', borderRadius: '6px',
-      cursor: 'pointer', display: 'flex', alignItems: 'center',
+      position: 'fixed',
+      bottom: '20px',
+      right: '140px',
+      zIndex: 9999,
+      padding: '10px 12px',
+      fontSize: '16px',
+      backgroundColor: '#6f42c1',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
@@ -785,115 +871,13 @@
     btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#6f42c1'));
 
     btn.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
       openBatchModal();
     });
 
     document.body.appendChild(btn);
-  }
-
-  function openBatchModal() {
-    if (document.getElementById('scansim-batch-modal')) {
-      document.getElementById('scansim-batch-modal').style.display = 'flex';
-      refreshBatchInfo();
-      return;
-    }
-
-    const modal = document.createElement('div');
-    modal.id = 'scansim-batch-modal';
-    Object.assign(modal.style, {
-      position: 'fixed', inset: '0',
-      background: 'rgba(0,0,0,0.45)',
-      zIndex: 10000,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '20px'
-    });
-
-    const card = document.createElement('div');
-    Object.assign(card.style, {
-      width: 'min(900px, 96vw)',
-      background: '#fff',
-      borderRadius: '10px',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
-      padding: '14px'
-    });
-
-    const title = document.createElement('div');
-    title.textContent = `Batch scanner (incoming) — formaat: EAN<TAB>AANTAL`;
-    Object.assign(title.style, { fontWeight: '700', marginBottom: '8px' });
-
-    const textarea = document.createElement('textarea');
-    textarea.id = 'scansim-batch-textarea';
-    textarea.placeholder = `Plak hier je regels:\n1234567890123\t10\n9876543210987\t3\n...`;
-    Object.assign(textarea.style, {
-      width: '100%', height: '300px',
-      padding: '10px',
-      borderRadius: '8px',
-      border: '1px solid #ddd',
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      fontSize: '12px',
-      resize: 'vertical'
-    });
-
-    const row = document.createElement('div');
-    Object.assign(row.style, { display: 'flex', gap: '10px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' });
-
-    const btnStart = document.createElement('button');
-    btnStart.textContent = `Opslaan & injecteer volgende ${SCANSIM_BATCH.batchSize}`;
-    styleModalBtn(btnStart, '#6f42c1');
-
-    const btnContinue = document.createElement('button');
-    btnContinue.textContent = `Injecteer volgende ${SCANSIM_BATCH.batchSize} (uit opslag)`;
-    styleModalBtn(btnContinue, '#0d6efd');
-
-    const btnClear = document.createElement('button');
-    btnClear.textContent = `Reset batch (verwijder opslag)`;
-    styleModalBtn(btnClear, '#dc3545');
-
-    const btnClose = document.createElement('button');
-    btnClose.textContent = `Sluiten`;
-    styleModalBtn(btnClose, '#6c757d');
-
-    const info = document.createElement('div');
-    info.id = 'scansim-batch-info';
-    Object.assign(info.style, { marginTop: '10px', color: '#333', fontSize: '13px' });
-
-    btnStart.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      const text = textarea.value || '';
-      const items = parseEanCountLinesToItems(text);
-      if (!items.length) { setBatchInfo('Geen geldige regels. Gebruik: EAN<TAB>AANTAL', true); return; }
-      saveBatchState({ items, meta: { createdAt: Date.now(), totalLines: items.length } });
-      setBatchInfo(`Opgeslagen: ${countTotalRemaining(items)} scans totaal. Injecteren...`);
-      showContinueBadge({ items, meta: { totalLines: items.length } });
-      await runNextBatch();
-    });
-
-    btnContinue.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      await runNextBatch();
-    });
-
-    btnClear.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      clearBatchState();
-      clearPending();
-      setBatchInfo('Batch opslag verwijderd.');
-      hideContinueBadge();
-    });
-
-    btnClose.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      modal.style.display = 'none';
-    });
-
-    row.append(btnStart, btnContinue, btnClear, btnClose);
-    card.append(title, textarea, row, info);
-    modal.append(card);
-    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
-
-    document.body.appendChild(modal);
-    refreshBatchInfo();
   }
 
   function styleModalBtn(btn, bg) {
@@ -915,84 +899,260 @@
     el.style.color = isError ? '#b00020' : '#333';
   }
 
-  function refreshBatchInfo() {
-    const state = loadBatchState();
-    const pend = loadPending();
-
-    if (pend?.pending?.length) {
-      setBatchInfo(`Er staat een geïnjecteerde batch klaar: ${pend.pending.length} regels. Klik nu "Ontvangst registreren".`, true);
-      if (state?.items?.length) showContinueBadge(state);
+  function openBatchModal() {
+    const existing = document.getElementById('scansim-batch-modal');
+    if (existing) {
+      existing.style.display = 'flex';
+      refreshBatchInfo();
       return;
     }
 
-    if (state?.items?.length) {
-      const prog = getProgressLines(state);
-      setBatchInfo(`Voortgang: ${prog.done}/${prog.total} regels. Volgende batch: ${SCANSIM_BATCH.batchSize} regels.`);
-      showContinueBadge(state);
+    const modal = document.createElement('div');
+    modal.id = 'scansim-batch-modal';
+    Object.assign(modal.style, {
+      position: 'fixed',
+      inset: '0',
+      background: 'rgba(0,0,0,0.45)',
+      zIndex: 10000,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '20px'
+    });
+
+    const card = document.createElement('div');
+    Object.assign(card.style, {
+      width: 'min(900px, 96vw)',
+      background: '#fff',
+      borderRadius: '10px',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+      padding: '14px'
+    });
+
+    const title = document.createElement('div');
+    title.textContent = `Batch scanner (${isIncoming ? 'incoming' : 'outgoing'}) — formaat: EAN<TAB>AANTAL`;
+    Object.assign(title.style, { fontWeight: '700', marginBottom: '8px' });
+
+    const textarea = document.createElement('textarea');
+    textarea.id = 'scansim-batch-textarea';
+    textarea.placeholder = `Plak hier je regels:\n1234567890123\t10\n9876543210987\t3\n...\n\nTip: 1000+ regels is prima.`;
+    Object.assign(textarea.style, {
+      width: '100%',
+      height: '300px',
+      padding: '10px',
+      borderRadius: '8px',
+      border: '1px solid #ddd',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontSize: '12px',
+      resize: 'vertical'
+    });
+
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', gap: '10px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' });
+
+    const bs = isIncoming ? SCANSIM_BATCH_INCOMING.batchSize : SCANSIM_BATCH_OUTGOING.batchSize;
+
+    const btnStart = document.createElement('button');
+    btnStart.textContent = `Opslaan & injecteer volgende ${bs}`;
+    styleModalBtn(btnStart, '#6f42c1');
+
+    const btnContinue = document.createElement('button');
+    btnContinue.textContent = `Injecteer volgende ${bs} (uit opslag)`;
+    styleModalBtn(btnContinue, '#0d6efd');
+
+    const btnClear = document.createElement('button');
+    btnClear.textContent = `Reset batch (verwijder opslag)`;
+    styleModalBtn(btnClear, '#dc3545');
+
+    const btnClose = document.createElement('button');
+    btnClose.textContent = `Sluiten`;
+    styleModalBtn(btnClose, '#6c757d');
+
+    const info = document.createElement('div');
+    info.id = 'scansim-batch-info';
+    Object.assign(info.style, { marginTop: '10px', color: '#333', fontSize: '13px' });
+
+    btnStart.addEventListener('click', async (e) => {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+
+      const text = textarea.value || '';
+      const items = parseEanCountLinesToItems(text);
+      if (!items.length) {
+        setBatchInfo('Geen geldige regels gevonden. Gebruik: EAN<TAB>AANTAL', true);
+        return;
+      }
+
+      const stateObj = { items, meta: { createdAt: Date.now(), totalLines: items.length } };
+
+      if (isIncoming) {
+        saveBatchIncoming(stateObj);
+        setBatchInfo(`Opgeslagen: ${countTotalRemaining(items)} scans totaal. Injecteren...`);
+        showContinueBadgeIncoming(stateObj);
+        await runNextBatchIncoming();
+      } else {
+        saveBatchOutgoing(stateObj);
+        setBatchInfo(`Opgeslagen: ${countTotalRemaining(items)} scans totaal. Injecteren (outgoing)...`);
+        showContinueBadgeOutgoing(stateObj);
+        await runNextBatchOutgoing();
+      }
+    });
+
+    btnContinue.addEventListener('click', async (e) => {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      if (isIncoming) await runNextBatchIncoming();
+      else await runNextBatchOutgoing();
+    });
+
+    btnClear.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+
+      if (isIncoming) {
+        clearBatchIncoming();
+        clearIncomingPending();
+        hideContinueBadgeIncoming();
+      } else {
+        clearBatchOutgoing();
+        hideContinueBadgeOutgoing();
+      }
+      setBatchInfo('Batch opslag verwijderd.');
+    });
+
+    btnClose.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+      modal.style.display = 'none';
+    });
+
+    row.append(btnStart, btnContinue, btnClear, btnClose);
+    card.append(title, textarea, row, info);
+    modal.append(card);
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.style.display = 'none';
+    });
+
+    document.body.appendChild(modal);
+    refreshBatchInfo();
+  }
+
+  function refreshBatchInfo() {
+    if (isIncoming) {
+      const state = loadBatchIncoming();
+      const pend = loadIncomingPending();
+
+      if (pend?.pending?.length) {
+        setBatchInfo(`Er staat een geïnjecteerde batch klaar: ${pend.pending.length} regels. Klik nu "Ontvangst registreren".`, true);
+        if (state?.items?.length) showContinueBadgeIncoming(state);
+        return;
+      }
+
+      if (state?.items?.length) {
+        const prog = getProgressLines(state);
+        setBatchInfo(`Voortgang: ${prog.done}/${prog.total} regels. Volgende batch: ${SCANSIM_BATCH_INCOMING.batchSize} regels.`);
+        showContinueBadgeIncoming(state);
+      } else {
+        setBatchInfo('Nog niets opgeslagen.');
+        hideContinueBadgeIncoming();
+      }
     } else {
-      setBatchInfo('Nog niets opgeslagen.');
-      hideContinueBadge();
+      const state = loadBatchOutgoing();
+      if (state?.items?.length) {
+        const prog = getProgressLines(state);
+        setBatchInfo(`Voortgang (outgoing): ${prog.done}/${prog.total} regels. Volgende batch: ${SCANSIM_BATCH_OUTGOING.batchSize} regels.`);
+        showContinueBadgeOutgoing(state);
+      } else {
+        setBatchInfo('Nog niets opgeslagen.');
+        hideContinueBadgeOutgoing();
+      }
     }
   }
 
-  function showContinueBadge(state) {
+  // =====================================================================
+  // Incoming: badge + runNextBatch + commit hook
+  // =====================================================================
+  function showContinueBadgeIncoming(state) {
     if (!isIncoming) return;
+
     const prog = getProgressLines(state);
     if (!prog.total) return;
 
-    const existing = document.getElementById('scansim-batch-continue');
-    const label = `Volgende ${SCANSIM_BATCH.batchSize} regels · ${prog.done}/${prog.total}`;
-    if (existing) { existing.textContent = label; return; }
+    const existing = document.getElementById('scansim-batch-continue-incoming');
+    const label = `Incoming: volgende ${SCANSIM_BATCH_INCOMING.batchSize} regels · ${prog.done}/${prog.total}`;
+
+    if (existing) {
+      existing.textContent = label;
+      return;
+    }
 
     const btn = document.createElement('button');
-    btn.id = 'scansim-batch-continue';
+    btn.id = 'scansim-batch-continue-incoming';
     btn.type = 'button';
     btn.textContent = label;
 
     Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '260px', zIndex: 9999,
-      padding: '10px 12px', fontSize: '13px',
-      backgroundColor: '#0d6efd', color: '#fff',
-      border: 'none', borderRadius: '6px',
-      cursor: 'pointer', display: 'flex', alignItems: 'center',
+      position: 'fixed',
+      bottom: '20px',
+      right: '260px',
+      zIndex: 9999,
+      padding: '10px 12px',
+      fontSize: '13px',
+      backgroundColor: '#0d6efd',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
     btn.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      await runNextBatch();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      await runNextBatchIncoming();
     });
 
     document.body.appendChild(btn);
   }
 
-  function hideContinueBadge() { document.getElementById('scansim-batch-continue')?.remove(); }
+  function hideContinueBadgeIncoming() {
+    document.getElementById('scansim-batch-continue-incoming')?.remove();
+  }
 
-  async function runNextBatch() {
-    if (!isIncoming) return;
-    if (!isTabActive()) { setBatchInfo('Tab is niet actief.', true); return; }
-    if (__scansimProcessing) { setBatchInfo('Er loopt al een injectie/scan.', true); return; }
+  async function runNextBatchIncoming() {
+    if (!isIncoming || !SCANSIM_BATCH_INCOMING.enabled) return;
 
-    const state = loadBatchState();
-    if (!state?.items?.length) { setBatchInfo('Geen batch opgeslagen.', true); hideContinueBadge(); return; }
+    if (!isTabActive()) {
+      setBatchInfo('Tab is niet actief. Klik eerst in het tabblad en probeer opnieuw.', true);
+      return;
+    }
 
-    const alreadyPending = loadPending();
+    const state = loadBatchIncoming();
+    if (!state?.items?.length) {
+      setBatchInfo('Geen batch opgeslagen. Plak eerst je regels en klik "Opslaan & injecteer".', true);
+      hideContinueBadgeIncoming();
+      return;
+    }
+
+    const alreadyPending = loadIncomingPending();
     if (alreadyPending?.pending?.length) {
-      setBatchInfo(`Er staat nog een batch klaar (${alreadyPending.total} scans). Klik eerst "Ontvangst registreren".`, true);
+      setBatchInfo(`Er staat nog een batch klaar om te registreren (${alreadyPending.total} scans). Klik eerst "Ontvangst registreren".`, true);
       return;
     }
 
     await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
     wrapIncomingFunctionsToRequireFocus();
 
-    const pending = takePendingFromState(state, SCANSIM_BATCH.batchSize);
+    const pending = takePendingFromState(state, SCANSIM_BATCH_INCOMING.batchSize);
     if (!pending.length) {
-      clearBatchState(); hideContinueBadge(); setBatchInfo('Batch is leeg ✅', false);
+      clearBatchIncoming();
+      hideContinueBadgeIncoming();
+      setBatchInfo('Incoming batch is leeg ✅', false);
       return;
     }
 
     const total = pending.reduce((s, p) => s + p.qty, 0);
-    savePending({ pending, total, createdAt: Date.now() });
+    saveIncomingPending({ pending, total, createdAt: Date.now() });
 
     await withGlobalProcessGuard({}, async () => {
       try { freezeUI(); } catch (_) {}
@@ -1010,8 +1170,8 @@
       }
 
       scheduleIncomingProcessKick();
-      setBatchInfo(`Batch ingevoerd: ${inserted} scans ✅ Klik nu "Ontvangst registreren".`, false);
-      showContinueBadge(state);
+      setBatchInfo(`Incoming batch ingevoerd: ${inserted} scans ✅ Klik nu "Ontvangst registreren" om te committen.`, false);
+      showContinueBadgeIncoming(state);
     });
   }
 
@@ -1024,173 +1184,158 @@
       const btn = e.target?.closest?.('button.attach_scanned_products');
       if (!btn) return;
 
-      const pend = loadPending();
+      const pend = loadIncomingPending();
       if (!pend?.pending?.length) return;
 
       try {
-        const state = loadBatchState();
+        const state = loadBatchIncoming();
         if (!state?.items?.length) return;
 
         commitPendingToState(state, pend.pending);
 
-        if (state.items.length) saveBatchState(state);
-        else clearBatchState();
+        if (state.items.length) {
+          saveBatchIncoming(state);
+          showContinueBadgeIncoming(state);
+        } else {
+          clearBatchIncoming();
+          hideContinueBadgeIncoming();
+        }
 
-        clearPending();
+        clearIncomingPending();
         refreshBatchInfo();
+
+        console.log('[ScanSim] Committed pending incoming batch on "Ontvangst registreren".');
       } catch (err) {
         console.error('[ScanSim] Commit failed', err);
       }
     }, true);
   }
 
-  // -------------------------
-  // Barcode Button
-  // -------------------------
-  function addBarcodeButton() {
-    if (document.getElementById('simuleer-scan-btn')) return;
+  // =====================================================================
+  // Outgoing: badge + runNextBatch (direct commit)
+  // =====================================================================
+  function showContinueBadgeOutgoing(state) {
+    if (!isOutgoing) return;
+
+    const prog = getProgressLines(state);
+    if (!prog.total) return;
+
+    const existing = document.getElementById('scansim-batch-continue-outgoing');
+    const label = `Outgoing: volgende ${SCANSIM_BATCH_OUTGOING.batchSize} regels · ${prog.done}/${prog.total}`;
+
+    if (existing) {
+      existing.textContent = label;
+      return;
+    }
 
     const btn = document.createElement('button');
-    btn.id = 'simuleer-scan-btn';
+    btn.id = 'scansim-batch-continue-outgoing';
     btn.type = 'button';
-    btn.innerHTML = `<i class="fa-solid fa-barcode"></i>`;
+    btn.textContent = label;
 
     Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '20px', zIndex: 9999,
-      padding: '10px 15px', fontSize: '16px',
-      backgroundColor: '#007bff', color: '#fff',
-      border: 'none', borderRadius: '6px',
-      cursor: 'pointer', display: 'flex', alignItems: 'center',
-      transition: 'background-color 0.2s',
+      position: 'fixed',
+      bottom: '20px',
+      right: '260px',
+      zIndex: 9999,
+      padding: '10px 12px',
+      fontSize: '13px',
+      backgroundColor: '#0d6efd',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
       boxShadow: '0 6px 20px rgba(0,0,0,0.2)'
     });
 
-    btn.addEventListener('mouseenter', () => (btn.style.backgroundColor = '#28a745'));
-    btn.addEventListener('mouseleave', () => (btn.style.backgroundColor = '#007bff'));
-
     btn.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      if (!isTabActive()) { alert('Tab is niet actief. Klik eerst in dit tabblad.'); return; }
-
-      const prevDisabled = btn.disabled;
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
-      btn.style.cursor = 'not-allowed';
-
-      let content = '';
-      try {
-        content = await navigator.clipboard.readText();
-      } catch (err) {
-        console.error('[ScanSim] Clipboard readText failed', err);
-        alert('Klembord lezen mislukt. Zie console.');
-        btn.disabled = prevDisabled;
-        btn.style.opacity = '';
-        btn.style.cursor = 'pointer';
-        return;
-      }
-
-      try {
-        await withGlobalProcessGuard({ clipboardText: content, sameClipboardWindowMs: 1500 }, () => processClipboard(content));
-      } finally {
-        btn.disabled = prevDisabled;
-        btn.style.opacity = '';
-        btn.style.cursor = 'pointer';
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      await runNextBatchOutgoing();
     });
 
     document.body.appendChild(btn);
   }
 
-  // -------------------------
-  // Clipboard processing
-  // -------------------------
-  async function processClipboard(text) {
-    if (!isTabActive()) return;
+  function hideContinueBadgeOutgoing() {
+    document.getElementById('scansim-batch-continue-outgoing')?.remove();
+  }
 
-    if (isIncoming && INCOMING_FAST_BULK) {
-      const expanded = parseClipboardLinesToExpanded(text);
-      await fastIncomingInsert(expanded);
+  async function runNextBatchOutgoing() {
+    if (!isOutgoing || !SCANSIM_BATCH_OUTGOING.enabled) return;
+
+    if (!isTabActive()) {
+      setBatchInfo('Tab is niet actief. Klik eerst in het tabblad en probeer opnieuw.', true);
       return;
     }
 
-    const lines = (text || '').trim().split('\n');
-    for (const line of lines) {
-      const [barcodeRaw, countRaw] = line.split('\t');
-      const barcode = (barcodeRaw || '').trim();
-      const count = Math.abs(parseInt(countRaw || '1', 10));
-      if (!barcode || Number.isNaN(count)) continue;
-
-      if (isIncoming && BUFFER_INCOMING) enqueueScan(barcode, count);
-      else for (let i = 0; i < count; i++) injectScanTask(barcode);
+    const state = loadBatchOutgoing();
+    if (!state?.items?.length) {
+      setBatchInfo('Geen outgoing batch opgeslagen. Plak eerst je regels en klik "Opslaan & injecteer".', true);
+      hideContinueBadgeOutgoing();
+      return;
     }
-    scheduleIncomingProcessKick();
-  }
 
-  // -------------------------
-  // Fast incoming bulk
-  // -------------------------
-  function parseClipboardLinesToExpanded(text) {
-    const lines = (text || '').trim().split('\n');
-    const expanded = [];
-    for (const line of lines) {
-      const [barcodeRaw, countRaw] = line.split('\t');
-      const barcode = (barcodeRaw || '').trim();
-      const count = Math.abs(parseInt(countRaw || '1', 10));
-      if (!barcode || Number.isNaN(count) || count < 1) continue;
-      for (let i = 0; i < count; i++) expanded.push(barcode);
+    const pending = takePendingFromState(state, SCANSIM_BATCH_OUTGOING.batchSize);
+    if (!pending.length) {
+      clearBatchOutgoing();
+      hideContinueBadgeOutgoing();
+      setBatchInfo('Outgoing batch is leeg ✅', false);
+      return;
     }
-    return expanded;
-  }
 
-  async function fastIncomingInsert(expanded) {
-    if (!expanded.length) return;
-    if (!isTabActive()) return;
+    const total = pending.reduce((s, p) => s + p.qty, 0);
 
     await withGlobalProcessGuard({}, async () => {
-      if (typeof window.addBarcodeToTasks !== 'function') {
-        await waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000, intervalMs: 100 });
-      }
-
-      wrapIncomingFunctionsToRequireFocus();
+      try { freezeUI(); } catch (_) {}
 
       try {
-        freezeUI();
-        const useNoYield = (typeof NO_CHUNK_YIELD === 'undefined') ? true : NO_CHUNK_YIELD;
-
-        if (useNoYield) {
-          for (const bc of expanded) injectScanTask(bc);
-        } else {
-          for (let i = 0; i < expanded.length; i += CHUNK_SIZE) {
-            const chunk = expanded.slice(i, i + CHUNK_SIZE);
-            for (const bc of chunk) injectScanTask(bc);
-            await sleep(YIELD_MS);
+        for (const p of pending) {
+          for (let i = 0; i < p.qty; i++) {
+            injectScanTask(p.ean);
           }
         }
       } finally {
-        unfreezeUI();
+        try { unfreezeUI(); } catch (_) {}
       }
 
-      scheduleIncomingProcessKick();
+      // Outgoing: direct "commit" to storage (inject = done)
+      commitPendingToState(state, pending);
+      if (state.items.length) {
+        saveBatchOutgoing(state);
+        showContinueBadgeOutgoing(state);
+      } else {
+        clearBatchOutgoing();
+        hideContinueBadgeOutgoing();
+      }
+
+      // Kick processing once
+      try { window.executeTasks?.(); } catch (_) {}
+
+      setBatchInfo(`Outgoing batch ingevoerd: ${total} scans ✅ Verwerking loopt.`, false);
     });
   }
 
-// -------------------------
-// Outgoing scanner loop (origineel)
-// -------------------------
-let scannerLoopStarted = false;
+  // -------------------------
+  // Outgoing scanner loop (origineel)
+  // -------------------------
+  let scannerLoopStarted = false;
 
-function activateOutgoingScannerLoop() {
-  if (!isOutgoing) return;
-  if (scannerLoopStarted) return;
+  function activateOutgoingScannerLoop() {
+    if (!isOutgoing) return;
+    if (scannerLoopStarted) return;
 
-  if (typeof window.executeTasks === 'function') {
-    scannerLoopStarted = true;
-    setInterval(() => {
-      try { window.executeTasks(); }
-      catch (e) { console.error('[ScanSim] executeTasks fout', e); }
-    }, 1000);
+    if (typeof window.executeTasks === 'function') {
+      scannerLoopStarted = true;
+      setInterval(() => {
+        try { window.executeTasks(); }
+        catch (e) { console.error('[ScanSim] executeTasks fout', e); }
+      }, 1000);
+    }
   }
-}
 
   // -------------------------
   // Init
@@ -1202,17 +1347,41 @@ function activateOutgoingScannerLoop() {
     injectFontAwesome();
     addBarcodeButton();
     addStockCheckButton();
-    activateOutgoingScannerLoop();
 
-    initBatchModule();
+    // Batch buttons (incoming + outgoing)
+    if ((isIncoming && SCANSIM_BATCH_INCOMING.enabled) || (isOutgoing && SCANSIM_BATCH_OUTGOING.enabled)) {
+      addBatchButtons();
+    }
 
-    if (isIncoming) {
+    // Incoming batch init
+    if (isIncoming && SCANSIM_BATCH_INCOMING.enabled) {
+      installCommitOnRegisterButton();
+      const st = loadBatchIncoming();
+      if (st?.items?.length) showContinueBadgeIncoming(st);
+
+      const pend = loadIncomingPending();
+      if (pend?.pending?.length) {
+        console.log(`[ScanSim] Pending incoming batch waiting: ${pend.total} scans. Klik "Ontvangst registreren".`);
+      }
+
       waitFor(() => (typeof window.addBarcodeToTasks === 'function' ? true : null), { timeoutMs: 20000 })
         .then(() => wrapIncomingFunctionsToRequireFocus())
         .catch(() => {});
     }
+
+    // Outgoing batch init + loop
+    if (isOutgoing && SCANSIM_BATCH_OUTGOING.enabled) {
+      const st = loadBatchOutgoing();
+      if (st?.items?.length) showContinueBadgeOutgoing(st);
+      activateOutgoingScannerLoop();
+    } else {
+      activateOutgoingScannerLoop();
+    }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-  else init();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
 })();
