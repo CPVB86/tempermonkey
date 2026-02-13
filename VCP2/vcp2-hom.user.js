@@ -665,21 +665,37 @@ function syncHomButtonText() {
 }
 
 
-  function isHomSelected() {
-    const sel = document.querySelector('#leverancier-keuze');
-    if (!sel) return false;
-    const val = norm(sel.value || '');
-    const txt = norm(sel.options[sel.selectedIndex]?.text || '');
-    const blob = `${val} ${txt}`;
-    return blob.includes('hom');
-  }
+function normBlob(s='') {
+  return String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
+}
+
+function getSupplierKey() {
+  const sel = document.querySelector('#leverancier-keuze');
+  if (!sel) return '';
+  const byValue = normBlob(sel.value || '');
+  const byText  = normBlob(sel.options?.[sel.selectedIndex]?.textContent || '');
+  return `${byValue} ${byText}`;
+}
+
+function isHomSelectedStrict() {
+  const blob = getSupplierKey();
+
+  // ✅ whitelist exact leveranciers (value of text)
+  const allowed = [
+    'hom',
+    'hom nachtmode',
+    'hom swimwear'
+  ];
+
+  return allowed.some(k => blob === k || blob.startsWith(k + ' ') || blob.includes(' ' + k + ' '));
+}
 
 Core.mountSupplierButton({
   id: 'vcp2-hom-btn',
   text: computeHomButtonText(),
   right: 250,
   top: 8,
-  match: () => isHomSelected(),
+  match: () => isHomSelectedStrict(),
   onClick: (btn) => run(btn)
 });
 
