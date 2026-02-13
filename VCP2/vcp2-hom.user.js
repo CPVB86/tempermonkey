@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VCP2 | HOM
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      5.0.0
-// @description  VCP2 HOM: bridge op b2b.huberholding.com + tool runner met VCPCore + StockRules (mapping/reconcile centraal)
+// @version      3.0
+// @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @match        https://b2b.huberholding.com/*
