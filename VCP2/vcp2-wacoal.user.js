@@ -57,6 +57,7 @@
         console.table(report.map(r => ({
           maat: r.maat,
           local: r.local,
+          remoteStatus: r.remoteStatus || '—',
           remote: Number.isFinite(r.remote) ? r.remote : '—',
           target: Number.isFinite(r.target) ? r.target : '—',
           delta: Number.isFinite(r.delta) ? r.delta : '—',
@@ -107,7 +108,14 @@
     return false;
   }
 
-  // ---------- JSON -> statusMap (stockLevel leidend) ----------
+  // ✅ STRICT: alleen letterlijk IN_STOCK telt als "in stock"
+  // Alles anders (incl. WITHIN_STAGE1/2/3) => remote stock = 0
+  function isWacoalInStockStrict(wacoalStatusRaw){
+    const ws = String(wacoalStatusRaw || '').toUpperCase().trim();
+    return ws === 'IN_STOCK';
+  }
+
+  // ---------- JSON -> statusMap (wacoalstockStatus leidend) ----------
   function buildStatusMap(json){
     const map = {};
 
@@ -120,9 +128,12 @@
 
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
         const wacoal = String(cell?.stock?.wacoalstockStatus || '').toUpperCase();
-        const status = (stockLevel > 0) ? 'IN_STOCK' : 'OUT_OF_STOCK';
 
-        map[sizeEU] = { status, stock: stockLevel, wacoal };
+        const inStock = isWacoalInStockStrict(wacoal);
+        const status  = inStock ? 'IN_STOCK' : 'OUT_OF_STOCK';
+        const stock   = inStock ? stockLevel : 0;
+
+        map[sizeEU] = { status, stock, wacoal };
       }
       return map;
     }
@@ -137,9 +148,12 @@
         const key = `${bandEU}${cupEU}`.toUpperCase();
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
         const wacoal = String(cell?.stock?.wacoalstockStatus || '').toUpperCase();
-        const status = (stockLevel > 0) ? 'IN_STOCK' : 'OUT_OF_STOCK';
 
-        map[key] = { status, stock: stockLevel, wacoal };
+        const inStock = isWacoalInStockStrict(wacoal);
+        const status  = inStock ? 'IN_STOCK' : 'OUT_OF_STOCK';
+        const stock   = inStock ? stockLevel : 0;
+
+        map[key] = { status, stock, wacoal };
       }
     }
 
@@ -196,7 +210,13 @@
       const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
 
       const remoteEntry = resolveRemote(statusMap, maat);
-      const supplierQty = Number(remoteEntry?.stock ?? 0) || 0;
+
+      // ✅ resumé rule:
+      // IN_STOCK => logica toepassen met stock
+      // NIET IN_STOCK => remote stock 0
+      const supplierQty = (remoteEntry?.status === 'IN_STOCK')
+        ? (Number(remoteEntry?.stock ?? 0) || 0)
+        : 0;
 
       // target policy:
       // - remoteEntry bestaat: supplierQty>0 => mapRemoteToTarget, anders 0
@@ -244,6 +264,7 @@
       report.push({
         maat,
         local,
+        remoteStatus: remoteEntry?.wacoal || remoteEntry?.status || '',
         remote: supplierQty,
         target: Number.isFinite(target) ? target : NaN,
         delta,
