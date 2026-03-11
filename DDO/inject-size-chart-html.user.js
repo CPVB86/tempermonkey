@@ -189,18 +189,18 @@
     const btn = document.createElement('button');
     btn.id = 'ddo-inject-sizechart-btn';
     btn.type = 'button';
-    btn.textContent = 'Inject size chart';
+    btn.textContent = '📐';
     btn.style.cssText = [
       'position:fixed',
-      'right:20px',
-      'bottom:20px',
+      'right:65px',
+      'bottom:17px',
       'z-index:999999',
-      'padding:12px 16px',
+      'padding:8px 8px',
       'border:0',
-      'border-radius:10px',
+      'border-radius:90px',
       'background:#2b6cb0',
       'color:#fff',
-      'font-size:14px',
+      'font-size:16px',
       'font-weight:700',
       'cursor:pointer',
       'box-shadow:0 6px 20px rgba(0,0,0,.18)'
