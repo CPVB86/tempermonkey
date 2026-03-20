@@ -82,6 +82,7 @@
     'hom-swimwear': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=190', payload: basePayload() },
     'hom-nachtmode': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=207', payload: basePayload() },
     lisca: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=193', payload: basePayload() },
+    sapph: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=241', payload: basePayload() },
     'q-linn': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=111', payload: basePayload() },
     'sugar-candy': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=178', payload: basePayload() },
     anita: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=196', payload: basePayload() },
@@ -113,6 +114,7 @@
     anita:         'https://b2b.anita.com/',
     wacoal:        'https://b2b.wacoal-europe.com/b2b/en/EUR/login',
     lisca:         'https://b2b-eu.lisca.com/customer/account/login/',
+    sapph:         'https://sapph.prod.webstore.colect.io/products/SAPPHX_02/',
     muchachomalo:  'https://agent.muchachomalo.com/en/login',
     'sugar-candy': 'https://b2b.cakelingerie.eu/authentication',
     'charlie-choe':'https://vangennip.itsperfect.it/webshop/shop/',
@@ -155,6 +157,7 @@
     if (/^(anita|rosa-faia)/.test(key)) return 'anita';
     if (/^(wacoal|freya|freya-swim|fantasie|fantasie-swim|elomi|elomi-swim)/.test(key)) return 'wacoal';
     if (/^lisca/.test(key)) return 'lisca';
+    if (/^sapph/.test(key)) return 'sapph';
     if (/^muchachomalo/.test(key)) return 'muchachomalo';
     if (/^sugar-candy/.test(key)) return 'sugar-candy';
     if (/^charlie-choe/.test(key)) return 'charlie-choe';
