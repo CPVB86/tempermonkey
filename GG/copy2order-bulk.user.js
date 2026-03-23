@@ -196,11 +196,13 @@
 
                 const locSpan = tr.querySelector('td.productPicklocation .stockLocationName');
 if (!locSpan) return;
+
 const locText = locSpan.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+console.log('Locatie gevonden:', JSON.stringify(locText));
 
 const isAllowedLocation =
-    locText === '00. extern' ||
-    locText === '00. tussenstop';
+    locText.startsWith('00. extern') ||
+    locText.startsWith('00. tussenstop');
 
 if (!isAllowedLocation) {
     return;
