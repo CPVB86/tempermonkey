@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG | Copy2Order Bulk
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.3
+// @version      1.4
 // @description  Zoek alle orders met tag 'extern' maar niet 'geprint_extern', haal [ext] + 00. Extern regels op en zet TSV in het klembord.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
 // @run-at       document-end
@@ -195,11 +195,16 @@
                 }
 
                 const locSpan = tr.querySelector('td.productPicklocation .stockLocationName');
-                if (!locSpan) return;
-                const locText = locSpan.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
-                if (!locText.startsWith('00. extern')) {
-                    return;
-                }
+if (!locSpan) return;
+const locText = locSpan.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+
+const isAllowedLocation =
+    locText === '00. extern' ||
+    locText === '00. tussenstop';
+
+if (!isAllowedLocation) {
+    return;
+}
 
                 const plusBtn = tr.querySelector('button.plus[data-product-sku]');
                 const productId = plusBtn ? plusBtn.getAttribute('data-product-sku').trim() : '';
