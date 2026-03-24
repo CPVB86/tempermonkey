@@ -579,15 +579,22 @@ async function perTable(table) {
   const tableId = (table.id || '').trim();
   const anchorId = tableId || 'onbekend';
 
-  const m = tableId.match(/^([A-Z0-9]+)-([A-Z0-9]{3,4})$/i);
-  if (!m) {
-    Logger.status(anchorId, 'niet-gevonden (id niet in vorm STIJL-KLEUR)');
-    Logger.perMaat(anchorId, []);
-    return 0;
-  }
+const lastDash = tableId.lastIndexOf('-');
 
-  const styleId   = m[1];
-  const colorCode = m[2].toUpperCase();
+if (lastDash <= 0 || lastDash === tableId.length - 1) {
+  Logger.status(anchorId, 'niet-gevonden (id niet in vorm STIJL-KLEUR)');
+  Logger.perMaat(anchorId, []);
+  return 0;
+}
+
+const styleId = tableId.slice(0, lastDash).trim();
+const colorCode = tableId.slice(lastDash + 1).trim().toUpperCase();
+
+if (!/^[A-Z0-9]{3,4}$/i.test(colorCode)) {
+  Logger.status(anchorId, `niet-gevonden (ongeldige kleurcode: ${colorCode})`);
+  Logger.perMaat(anchorId, []);
+  return 0;
+}
 
   const cartId = undefined;
 
