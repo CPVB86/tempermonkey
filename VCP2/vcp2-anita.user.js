@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Anita
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
+// @version      3.1
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -49,8 +49,8 @@
   const CONTENT_HDR = 'application/x-www-form-urlencoded; charset=UTF-8';
 
   const ALLOWED_SUPPLIERS = new Set([
-    'anita','anita-active','anita-badmode','anita-care','anita-maternity',
-    'rosa-faia','rosa-faia-badmode'
+    'anita','anita-active','anita-badmode','anita-care','anita-maternity','anita-all',
+    'rosa-faia','rosa-faia-badmode','rosa-faia-all'
   ]);
 
   const $  = (s, r=document) => r.querySelector(s);
