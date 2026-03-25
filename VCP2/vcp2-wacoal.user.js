@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Wacoal
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
+// @version      3.1
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -33,7 +33,7 @@
   const TIMEOUT = 15000;
 
   const SUPPORTED_BRANDS = new Set([
-    'wacoal','freya','freya swim','fantasie','fantasie swim','elomi','elomi swim'
+    'wacoal','freya','freya swim','fantasie','fantasie swim','elomi','elomi swim','wacoal group'
   ]);
 
   const $ = (s, r=document) => r.querySelector(s);
