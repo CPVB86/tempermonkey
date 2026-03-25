@@ -49,8 +49,8 @@
   const CONTENT_HDR = 'application/x-www-form-urlencoded; charset=UTF-8';
 
   const ALLOWED_SUPPLIERS = new Set([
-    'anita','anita-active','anita-badmode','anita-care','anita-maternity','anita-all',
-    'rosa-faia','rosa-faia-badmode','rosa-faia-all'
+    'anita','anita-active','anita-badmode','anita-care','anita-maternity','anita-group',
+    'rosa-faia','rosa-faia-group'
   ]);
 
   const $  = (s, r=document) => r.querySelector(s);
