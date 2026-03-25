@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         VCP | DDO Ex>Import
-// @version      1.7
+// @version      2.0
 // @description  Start vanuit de checker direct een Attributes-export en biedt link naar B2B per merk
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @run-at       document-idle
@@ -77,6 +77,7 @@
     elomi: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=219', payload: basePayload() },
     'elomi-swim': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=220', payload: basePayload() },
     wacoal: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=214', payload: basePayload() },
+    'wacoal-group': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=244', payload: basePayload() },
     muchachomalo: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=203', payload: basePayload() },
     hom: { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=205', payload: basePayload() },
     'hom-swimwear': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=brand_id&id=190', payload: basePayload() },
@@ -92,6 +93,8 @@
     'anita-maternity': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=200', payload: basePayload() },
     'rosa-faia': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=195', payload: basePayload() },
     'rosa-faia-badmode': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=194', payload: basePayload() },
+    'rosa-faia-group': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=243', payload: basePayload() },
+    'anita-group': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=242', payload: basePayload() },
     'lingadore': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=213', payload: basePayload() },
     'lingadore-beach': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=223', payload: basePayload() },
     'lingadore-consignatie': { url: 'https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=231', payload: basePayload() },
@@ -154,8 +157,8 @@
   function getB2BGroup(key){
     if (!key) return null;
     key = String(key).toLowerCase();
-    if (/^(anita|rosa-faia)/.test(key)) return 'anita';
-    if (/^(wacoal|freya|freya-swim|fantasie|fantasie-swim|elomi|elomi-swim)/.test(key)) return 'wacoal';
+    if (/^(anita|rosa-faia|anita-group|rosa-faia-group)/.test(key)) return 'anita';
+    if (/^(wacoal|freya|freya-swim|fantasie|fantasie-swim|elomi|elomi-swim|wacoal-group)/.test(key)) return 'wacoal';
     if (/^lisca/.test(key)) return 'lisca';
     if (/^sapph/.test(key)) return 'sapph';
     if (/^muchachomalo/.test(key)) return 'muchachomalo';
