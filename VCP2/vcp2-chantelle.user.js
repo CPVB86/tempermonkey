@@ -60,37 +60,40 @@
     return String(raw || '').toUpperCase().replace(/\s+/g, '').trim();
   }
 
-  function normalizeSizeKey(raw) {
-    let v = String(raw ?? '').trim();
-    if (!v) return '';
+function normalizeSizeKey(raw) {
+  let v = String(raw ?? '').trim();
+  if (!v) return '';
 
-    v = v.split(/[|,]/)[0];
-    v = v.split('/')[0];
+  v = v.split(/[|,]/)[0];
+  v = v.split('/')[0];
 
-    v = normSize(v);
-    if (!v) return '';
+  v = normSize(v);
+  if (!v) return '';
 
-    let m = v.match(/^0*(\d{2,3})([A-Z]{1,4})$/);
-    if (m) return `${parseInt(m[1], 10)}${m[2]}`;
+  // one size / taille unique mapping
+  if (/^(NOSIZE|ONESIZE|ONE SIZE|ONE-SIZE|OS|TU)$/.test(v)) return 'TU';
 
-    if (/^0*\d{1,3}$/.test(v)) {
-      const n = parseInt(v, 10);
-      return Number.isFinite(n) && n > 0 ? String(n) : '';
-    }
+  let m = v.match(/^0*(\d{2,3})([A-Z]{1,4})$/);
+  if (m) return `${parseInt(m[1], 10)}${m[2]}`;
 
-    if (/^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return v;
-
-    return v;
+  if (/^0*\d{1,3}$/.test(v)) {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? String(n) : '';
   }
 
-  function isSizeLabel(s) {
-    const v = normalizeSizeKey(s);
-    if (!v) return false;
-    if (/^\d{2,3}[A-Z]{1,4}$/.test(v)) return true;
-    if (/^\d{1,3}$/.test(v)) return true;
-    if (/^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return true;
-    return false;
-  }
+  if (/^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL|TU)$/.test(v)) return v;
+
+  return v;
+}
+
+function isSizeLabel(s) {
+  const v = normalizeSizeKey(s);
+  if (!v) return false;
+  if (/^\d{2,3}[A-Z]{1,4}$/.test(v)) return true;
+  if (/^\d{1,3}$/.test(v)) return true;
+  if (/^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL|TU)$/.test(v)) return true;
+  return false;
+}
 
   // -----------------------
   // Logger (status -> logboek, mapping -> console)
