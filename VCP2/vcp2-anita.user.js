@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Anita
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.1
+// @version      3.2
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -55,7 +55,52 @@
 
   const $  = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // -----------------------
+  // Performance / caching
+  // -----------------------
+  const CONCURRENCY = 5;
+
+  const DETAIL_CACHE = new Map();
+  let SESSION_HIDDEN_PROMISE = null;
+  const NOT_FOUND = Symbol('not_found');
+
+  function detailCacheKey({ arnr, koll='', fbnr='', zicht='A' }) {
+    return `${String(koll).trim()}|${String(arnr).trim()}|${String(fbnr).trim()}|${String(zicht).trim()}`;
+  }
+
+  async function getSessionHiddenCached() {
+    if (!SESSION_HIDDEN_PROMISE) {
+      SESSION_HIDDEN_PROMISE = getSessionHidden().catch(err => {
+        SESSION_HIDDEN_PROMISE = null;
+        throw err;
+      });
+    }
+    return SESSION_HIDDEN_PROMISE;
+  }
+
+  async function fetchDetailHtmlCached(params) {
+    const key = detailCacheKey(params);
+
+    if (!DETAIL_CACHE.has(key)) {
+      DETAIL_CACHE.set(key, (async () => {
+        try {
+          return await fetchDetailHtml(params);
+        } catch (e) {
+          const msg = String(e?.message || e);
+          if (/^HTTP_\d+$/i.test(msg)) {
+            const status = parseInt(msg.replace(/^HTTP_/i, ''), 10);
+            if (Number.isFinite(status) && isNotFoundHttp(status)) {
+              return NOT_FOUND;
+            }
+          }
+          throw e;
+        }
+      })());
+    }
+
+    return DETAIL_CACHE.get(key);
+  }
 
   // -----------------------
   // Logger (status -> logboek, mapping -> console.table)
@@ -180,7 +225,7 @@
 
     // 2) fallback 410 (POST with session hidden if possible)
     try {
-      const h = await getSessionHidden();
+      const h = await getSessionHiddenCached();
 
       const bodyParams = {
         such: params.arnr || '',
@@ -196,7 +241,6 @@
       if (rPost.status >= 200 && rPost.status < 300) return rPost.text;
       if (isNotFoundHttp(rPost.status)) throw new Error(`HTTP_${rPost.status}`);
 
-      // unknown -> treat as not-found
       throw new Error(`HTTP_${rPost.status}`);
 
     } catch (e) {
@@ -467,7 +511,13 @@
 
     let html = '';
     try {
-      html = await fetchDetailHtml({ arnr, koll, fbnr, zicht: 'A' });
+      html = await fetchDetailHtmlCached({ arnr, koll, fbnr, zicht: 'A' });
+
+      if (html === NOT_FOUND) {
+        Logger.status(anchorId, 'niet-gevonden');
+        Logger.perMaat(anchorId, []);
+        return 0;
+      }
     } catch (e) {
       const msg = String(e?.message || e);
       if (/^HTTP_\d+$/i.test(msg)) {
@@ -478,7 +528,6 @@
           return 0;
         }
       }
-      // alles wat hier misgaat: niet-gevonden (VCP2 foutregels)
       Logger.status(anchorId, 'niet-gevonden');
       Logger.perMaat(anchorId, []);
       return 0;
@@ -523,7 +572,7 @@
     await Core.runTables({
       btn,
       tables,
-      concurrency: 3,
+      concurrency: CONCURRENCY,
       perTable
     });
   }
@@ -549,7 +598,7 @@
   // -----------------------
   // UI (Core.mountSupplierButton)
   // -----------------------
-      function titleCaseWords(s='') {
+  function titleCaseWords(s='') {
     return String(s)
       .trim()
       .replace(/\s+/g, ' ')
@@ -580,10 +629,8 @@
     if (v.includes('anita-active') || t.includes('anita-active') || /anita\s*active/i.test(label)) return 'Anita Active';
     if (v.includes('anita-badmode') || t.includes('anita-badmode') || /anita\s*badmode/i.test(label)) return 'Anita Badmode';
 
-    // Als het gewoon "anita" is, maak het netjes
     if (v === 'anita' || t === 'anita' || /^anita$/i.test(label)) return 'Anita';
 
-    // Anders: gebruik dropdowntekst maar maak het wat netter
     return titleCaseWords(label);
   }
 
@@ -597,14 +644,13 @@
   if (ON_TOOL) {
     Core.mountSupplierButton({
       id: 'vcp2-anita-btn',
-      text: '🔍 Check Stock | Anita',          // init, wordt direct overschreven
+      text: '🔍 Check Stock | Anita',
       right: 250,
       top: 8,
       match: () => isAllowedSupplierSelected(),
       onClick: (btn) => run(btn),
     });
 
-    // Text sync na mount + bij dropdown change (alleen tekst, geen show/hide)
     setTimeout(updateAnitaButtonText, 50);
 
     const dd = document.getElementById('leverancier-keuze');
