@@ -1,14 +1,17 @@
 // ==UserScript==
 // @name         VCP2 | Zetex
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
-// @description  Vergelijk local stock met die van de leverancier (remote).
+// @version      5.0
+// @description  Vergelijk local stock met die van de leverancier (remote) via Zetex validate.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
+// @match        https://b2b.zetex.nl/*
 // @grant        unsafeWindow
-// @grant        GM_xmlhttpRequest
-// @run-at       document-idle
-// @connect      b2b.zetex.nl
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
+// @run-at       document-start
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-zetex.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-zetex.user.js
 // ==/UserScript==
@@ -16,418 +19,947 @@
 (() => {
   'use strict';
 
-  const ON_TOOL = location.hostname.includes('lingerieoutlet.nl');
-
-  const g    = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const g = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const Core = g.VCPCore;
   const SR   = g.StockRules;
 
-  const BRAND_KEY = 'zetex';
+  const ON_TOOL  = location.hostname.includes('lingerieoutlet.nl');
+  const ON_ZETEX = location.hostname.includes('b2b.zetex.nl');
 
-  // -----------------------
-  // Tool-side prerequisites
-  // -----------------------
-  if (ON_TOOL) {
-    if (!Core) {
-      console.error('[VCP2|Zetex] VCPCore ontbreekt. Check @require vcp-core.js');
-      return;
-    }
-    if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
-      console.error('[VCP2|Zetex] StockRules ontbreekt/incompleet. Vereist: mapRemoteToTarget + reconcile');
-      return;
-    }
+  const HEARTBEAT_KEY   = 'zetex_bridge_heartbeat';
+  const AUTH_HEADER_KEY = 'zetex_bridge_auth_header';
+
+  const REQ_KEY  = 'zetex_bridge_req';
+  const RESP_KEY = 'zetex_bridge_resp';
+
+  const VALIDATE_REQ_KEY  = 'zetex_bridge_validate_req';
+  const VALIDATE_RESP_KEY = 'zetex_bridge_validate_resp';
+
+  const BRAND_KEY  = 'zetex';
+  const TIMEOUT_MS = 20000;
+  const PROBE_QTY  = 20;
+
+  const uid  = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const norm = (s = '') => String(s).toLowerCase().trim().replace(/\s+/g, ' ');
+
+  function extractMetaFromUrl(url) {
+    if (!url) return {};
+    const m = String(url).match(/\/api\/shop\/webstores\/(\d+)\/carts\/(\d+)\/grid\/([^/?#]+)\/products/i);
+    if (!m) return {};
+    return {
+      webstoreId: m[1],
+      cartId: m[2],
+      styleId: m[3]
+    };
   }
 
-  // -----------------------
-  // Config / URLs
-  // -----------------------
-  const CONFIG = {
-    ZETEX_BASE_URL: 'https://b2b.zetex.nl',
-    ZETEX_PRODUCT_PREFIX: '/webstore/v2/product/Zetex_01',
-    uiDelayMs: 40,
+  // ========================================================================
+  // 1) BRIDGE OP ZETEX (auth-capture + grid-call + validate-call)
+  // ========================================================================
+  if (ON_ZETEX) {
+    const w = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+    let pageFetch = null;
+
+    setInterval(() => {
+      try { GM_setValue(HEARTBEAT_KEY, Date.now()); } catch {}
+    }, 2500);
+
+    function storeAuth(val, via, meta) {
+      if (!val) return;
+      const auth = String(val).trim();
+      if (!/^bearer\s+/i.test(auth)) return;
+
+      let prevRaw = null;
+      try { prevRaw = GM_getValue(AUTH_HEADER_KEY, null); } catch {}
+
+      let prev = null;
+      if (prevRaw && typeof prevRaw === 'object') prev = prevRaw;
+      else if (typeof prevRaw === 'string') prev = { auth: prevRaw };
+
+      const session = {
+        auth,
+        webstoreId: (meta && meta.webstoreId) || (prev && prev.webstoreId) || null,
+        cartId:     (meta && meta.cartId)     || (prev && prev.cartId)     || null,
+        styleId:    (meta && meta.styleId)    || (prev && prev.styleId)    || null
+      };
+
+      try { GM_setValue(AUTH_HEADER_KEY, session); } catch {}
+
+      try {
+        console.info(
+          '[Zetex-bridge][DEBUG]',
+          via,
+          'Authorization captured:',
+          auth.slice(0, 22) + '…',
+          '| webstoreId:',
+          session.webstoreId || '∅',
+          '| cartId:',
+          session.cartId || '∅',
+          '| styleId:',
+          session.styleId || '∅'
+        );
+      } catch {}
+    }
+
+    function extractAuthFromHeaders(headers) {
+      if (!headers) return null;
+
+      if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+        return headers.get('Authorization') || headers.get('authorization') || null;
+      }
+
+      if (Array.isArray(headers)) {
+        for (const [k, v] of headers) {
+          if (/^authorization$/i.test(k)) return v;
+        }
+      }
+
+      if (typeof headers === 'object') {
+        for (const k of Object.keys(headers)) {
+          if (/^authorization$/i.test(k)) return headers[k];
+        }
+      }
+
+      return null;
+    }
+
+    (function hookFetchForAuth() {
+      try {
+        const orig = w.fetch;
+        if (!orig) return;
+
+        pageFetch = orig.bind(w);
+
+        w.fetch = function patchedFetch(input, init = {}) {
+          try {
+            const auth = extractAuthFromHeaders(init.headers);
+            if (auth) {
+              let urlStr = '';
+              if (typeof input === 'string') urlStr = input;
+              else if (input && typeof input.url === 'string') urlStr = input.url;
+
+              const meta = extractMetaFromUrl(urlStr);
+              storeAuth(auth, 'via fetch', meta);
+            }
+          } catch {}
+
+          return pageFetch(input, init);
+        };
+
+        console.info('[Zetex-bridge] fetch-hook actief in page-context');
+      } catch (e) {
+        console.warn('[Zetex-bridge] kon fetch niet hooken:', e);
+      }
+    })();
+
+    (function hookXHRForAuth() {
+      try {
+        const OrigXHR = w.XMLHttpRequest;
+        if (!OrigXHR) return;
+
+        function XHRProxy() {
+          const xhr = new OrigXHR();
+          const origSetRequestHeader = xhr.setRequestHeader;
+          const origOpen             = xhr.open;
+
+          xhr._bridgeUrl = '';
+
+          xhr.open = function(method, url) {
+            try { xhr._bridgeUrl = url; } catch {}
+            return origOpen.apply(this, arguments);
+          };
+
+          xhr.setRequestHeader = function(name, value) {
+            try {
+              if (/^authorization$/i.test(name)) {
+                const meta = extractMetaFromUrl(xhr._bridgeUrl);
+                storeAuth(value, 'via XHR', meta);
+              }
+            } catch {}
+
+            return origSetRequestHeader.apply(this, arguments);
+          };
+
+          return xhr;
+        }
+
+        XHRProxy.prototype = OrigXHR.prototype;
+        w.XMLHttpRequest = XHRProxy;
+
+        console.info('[Zetex-bridge] XHR-hook actief in page-context');
+      } catch (e) {
+        console.warn('[Zetex-bridge] kon XHR niet hooken:', e);
+      }
+    })();
+
+    async function fetchZetexGrid(styleId, cartId, timeout = TIMEOUT_MS) {
+      const raw = GM_getValue(AUTH_HEADER_KEY, null);
+
+      let auth = null;
+      let sessionStore = null;
+      let sessionCart  = null;
+
+      if (raw && typeof raw === 'object') {
+        auth         = raw.auth || null;
+        sessionStore = raw.webstoreId || null;
+        sessionCart  = raw.cartId || null;
+      } else {
+        auth = raw;
+      }
+
+      if (!sessionStore) {
+        throw new Error('Geen webstoreId gevonden in Zetex-session. Laat eerst een grid-call lopen op b2b.zetex.nl.');
+      }
+
+      const effectiveCartId = cartId || sessionCart;
+      if (!effectiveCartId) {
+        throw new Error('Geen cartId gevonden in Zetex-session. Laat eerst een grid-call lopen op b2b.zetex.nl.');
+      }
+
+      const url =
+        `https://b2b.zetex.nl/api/shop/webstores/${encodeURIComponent(sessionStore)}` +
+        `/carts/${encodeURIComponent(effectiveCartId)}` +
+        `/grid/${encodeURIComponent(styleId)}/products`;
+
+      const ctrl = new AbortController();
+      const to   = setTimeout(() => ctrl.abort(), timeout);
+
+      const headers = { 'Accept': 'application/json, text/plain, */*' };
+      if (auth) headers['Authorization'] = auth;
+
+      const f = pageFetch || w.fetch.bind(w);
+      const res = await f(url, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+        signal: ctrl.signal
+      });
+
+      clearTimeout(to);
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.text();
+    }
+
+async function fetchZetexValidate(styleId, cartId, payload, timeout = TIMEOUT_MS) {
+  const raw = GM_getValue(AUTH_HEADER_KEY, null);
+
+  let auth = null;
+  let sessionStore = null;
+  let sessionCart  = null;
+
+  if (raw && typeof raw === 'object') {
+    auth         = raw.auth || null;
+    sessionStore = raw.webstoreId || null;
+    sessionCart  = raw.cartId || null;
+  } else {
+    auth = raw;
+  }
+
+  if (!sessionStore) {
+    throw new Error('Geen webstoreId gevonden in Zetex-session.');
+  }
+
+  const effectiveCartId = cartId || sessionCart;
+  if (!effectiveCartId) {
+    throw new Error('Geen cartId gevonden in Zetex-session.');
+  }
+
+  const url =
+    `https://b2b.zetex.nl/api/shop/webstores/${encodeURIComponent(sessionStore)}` +
+    `/carts/${encodeURIComponent(effectiveCartId)}` +
+    `/product-styles/${encodeURIComponent(styleId)}/lines/validate`;
+
+  const ctrl = new AbortController();
+  const to   = setTimeout(() => ctrl.abort(), timeout);
+
+  const headers = {
+    'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8'
   };
+  if (auth) headers['Authorization'] = auth;
 
-  const $ = (s, r=document) => r.querySelector(s);
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
+  const f = pageFetch || w.fetch.bind(w);
+  const res = await f(url, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(payload),
+    signal: ctrl.signal
+  });
 
-  // Cache: Map<supplierPid -> Map<EANdigits -> remoteQtyOrToken>>
-  // (remote here is "free qty" extracted from Zetex, not mapped to target!)
-  const PID_CACHE = new Map();
+  clearTimeout(to);
 
-  // -----------------------
-  // Logger (status -> logboek, mapping -> console.table)
-  // -----------------------
+  const text = await res.text();
+
+  if (!res.ok) {
+    console.error('[Zetex][VALIDATE][HTTP ERROR]', {
+      status: res.status,
+      url,
+      payload,
+      responseText: text
+    });
+    throw new Error(`HTTP ${res.status} :: ${text}`);
+  }
+
+  return text;
+}
+
+    GM_addValueChangeListener(REQ_KEY, (_name, _old, req) => {
+      if (!req || !req.id || !req.styleId) return;
+
+      (async () => {
+        try {
+          const text = await fetchZetexGrid(req.styleId, req.cartId, req.timeout || TIMEOUT_MS);
+          GM_setValue(RESP_KEY, { id: req.id, ok: true, text });
+        } catch (e) {
+          GM_setValue(RESP_KEY, { id: req.id, ok: false, error: String(e?.message || e) });
+        }
+      })();
+    });
+
+    GM_addValueChangeListener(VALIDATE_REQ_KEY, (_name, _old, req) => {
+      if (!req || !req.id || !req.styleId || !req.payload) return;
+
+      (async () => {
+        try {
+          const text = await fetchZetexValidate(req.styleId, req.cartId, req.payload, req.timeout || TIMEOUT_MS);
+          GM_setValue(VALIDATE_RESP_KEY, { id: req.id, ok: true, text });
+        } catch (e) {
+          GM_setValue(VALIDATE_RESP_KEY, { id: req.id, ok: false, error: String(e?.message || e) });
+        }
+      })();
+    });
+
+    if (document.readyState !== 'loading') {
+      console.info('[Zetex-bridge] actief op', location.href);
+    } else {
+      document.addEventListener('DOMContentLoaded', () => {
+        console.info('[Zetex-bridge] actief op', location.href);
+      });
+    }
+
+    return;
+  }
+
+  // ========================================================================
+  // 2) CLIENT OP TOOL
+  // ========================================================================
+  if (!ON_TOOL) return;
+
+  if (!Core) {
+    console.error('[VCP2|Zetex] VCPCore ontbreekt. Check @require vcp-core.js');
+    return;
+  }
+
+  if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
+    console.error('[VCP2|Zetex] StockRules ontbreekt of incompleet. Check @require stockrules.js');
+    return;
+  }
+
   const Logger = {
     lb() {
-      return (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek;
+      try {
+        return (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek)
+          ? unsafeWindow.logboek
+          : window.logboek;
+      } catch {
+        return window.logboek;
+      }
     },
-    status(anchorId, txt) {
+    status(id, txt) {
       const lb = this.lb();
-      if (lb?.resultaat) lb.resultaat(String(anchorId), String(txt));
-      else console.info(`[Zetex][${anchorId}] status: ${txt}`);
+      if (lb && typeof lb.resultaat === 'function') lb.resultaat(String(id), txt);
+      else console.info(`[Zetex][${id}] status: ${txt}`);
     },
-    perMaat(anchorId, report) {
-      console.groupCollapsed(`[Zetex][${anchorId}] ean-vergelijking`);
+    perMaat(id, report) {
+      console.groupCollapsed(`[Zetex][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
           maat: r.maat,
-          ean: r.ean,
           local: r.local,
-          remote: (r.remoteRaw ?? '—'),
+          remote: Number.isFinite(r.remote) ? r.remote : '—',
           target: Number.isFinite(r.target) ? r.target : '—',
           delta: Number.isFinite(r.delta) ? r.delta : '—',
-          status: r.status
+          ean: r.ean || '—',
+          status: r.status,
+          exact: r.exact === true ? 'ja' : (r.exact === false ? 'nee' : '—')
         })));
-      } finally { console.groupEnd(); }
+      } finally {
+        console.groupEnd();
+      }
     }
   };
 
-  // -----------------------
-  // GM GET (returns {status, text})
-  // -----------------------
-  function gmGet(url, timeoutMs = 20000) {
+  function bridgeIsOnlineByHeartbeat(maxAge = 5000) {
+    try {
+      const t = GM_getValue(HEARTBEAT_KEY, 0);
+      return t && (Date.now() - t) < maxAge;
+    } catch {
+      return false;
+    }
+  }
+
+  function bridgeGetGrid(styleId, cartId, timeout = TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url,
-        timeout: timeoutMs,
-        onload: (resp) => resolve({ status: resp.status, text: resp.responseText || '' }),
-        onerror: (err) => reject(err || new Error('Netwerkfout')),
-        ontimeout: () => reject(new Error(`timeout @ ${url}`)),
+      const id = uid();
+
+      let handle = GM_addValueChangeListener(RESP_KEY, (_name, _old, msg) => {
+        if (!msg || msg.id !== id) return;
+        try { GM_removeValueChangeListener(handle); } catch {}
+        msg.ok ? resolve(msg.text) : reject(new Error(msg.error || 'bridge error'));
       });
+
+      GM_setValue(REQ_KEY, { id, styleId, cartId, timeout });
+
+      setTimeout(() => {
+        try { GM_removeValueChangeListener(handle); } catch {}
+        reject(new Error('bridge timeout'));
+      }, timeout + 1500);
     });
   }
 
-  const isNotFoundHttp = (status) =>
-    status === 401 || status === 403 || status === 404 || status === 410 || (status >= 500 && status <= 599);
+  function bridgeValidate(styleId, cartId, payload, timeout = TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      const id = uid();
 
-  // -----------------------
-  // Supplier PID helpers (pure)
-  // -----------------------
-  // "23222-600-6-710" → { base: "23222-600-6", color: "710" }
-  function splitSupplierPid(rawPid) {
-    const pid = String(rawPid || '').trim();
-    if (!pid) return null;
+      let handle = GM_addValueChangeListener(VALIDATE_RESP_KEY, (_name, _old, msg) => {
+        if (!msg || msg.id !== id) return;
+        try { GM_removeValueChangeListener(handle); } catch {}
+        msg.ok ? resolve(msg.text) : reject(new Error(msg.error || 'validate bridge error'));
+      });
 
-    const idx = pid.lastIndexOf('-');
-    if (idx === -1) return null;
+      GM_setValue(VALIDATE_REQ_KEY, { id, styleId, cartId, payload, timeout });
 
-    return { base: pid.slice(0, idx), color: pid.slice(idx + 1) };
+      setTimeout(() => {
+        try { GM_removeValueChangeListener(handle); } catch {}
+        reject(new Error('validate bridge timeout'));
+      }, timeout + 1500);
+    });
   }
 
-  function buildProductUrlFromPidParts(parts) {
-    if (!parts?.base || !parts?.color) return null;
+  const gridCache = new Map();
 
-    return (
-      CONFIG.ZETEX_BASE_URL +
-      CONFIG.ZETEX_PRODUCT_PREFIX +
-      '/' +
-      encodeURIComponent(parts.base) +
-      '/' +
-      encodeURIComponent(parts.color)
-    );
+  async function getGrid(styleId, cartId) {
+    const key = `${cartId || 'session'}:${styleId}`;
+    if (gridCache.has(key)) return gridCache.get(key);
+
+    const p = bridgeGetGrid(styleId, cartId).then(text => {
+      try { return JSON.parse(text); }
+      catch { return []; }
+    }).catch(err => {
+      gridCache.delete(key);
+      throw err;
+    });
+
+    gridCache.set(key, p);
+    return p;
   }
 
-  function extractDataUrlFromProductHtml(html) {
-    let txt = String(html || '');
-    txt = txt.replace(/\\u003f/gi, '?');
-    txt = txt.replace(/\\\//g, '/');
+  const SIZE_ALIAS = {
+    '2XL':'XXL','XXL':'2XL',
+    '3XL':'XXXL','XXXL':'3XL',
+    '4XL':'XXXXL','XXXXL':'4XL',
+    'XS/S':'XS','S/M':'M','M/L':'L','L/XL':'XL','XL/2XL':'2XL'
+  };
 
-    const patterns = [
-      /wicketAjaxGet\('([^']*IBehaviorListener\.3-[^']*)'/,
-      /"u":"([^"]*IBehaviorListener\.3-[^"]*)"/,
-      /["'](\/webstore\/v2\/product\/Zetex_01\/[^"']*IBehaviorListener\.3-[^"']*)["']/
-    ];
+  function aliasCandidates(label) {
+    const raw = String(label || '').trim().toUpperCase();
+    const ns  = raw.replace(/\s+/g, '');
+    const set = new Set([raw, ns]);
 
-    for (const re of patterns) {
-      const m = re.exec(txt);
-      if (!m) continue;
+    if (SIZE_ALIAS[raw]) set.add(SIZE_ALIAS[raw]);
+    if (SIZE_ALIAS[ns])  set.add(SIZE_ALIAS[ns]);
 
-      let url = m[1].replace(/\\\//g, '/');
+    if (raw.includes('/')) {
+      raw.split('/').map(s => s.trim()).forEach(x => {
+        if (!x) return;
+        set.add(x);
+        set.add(x.replace(/\s+/g, ''));
+        if (SIZE_ALIAS[x]) set.add(SIZE_ALIAS[x]);
+      });
+    }
 
-      if (url.startsWith('/')) url = CONFIG.ZETEX_BASE_URL + url;
-      else if (!/^https?:\/\//i.test(url)) url = CONFIG.ZETEX_BASE_URL.replace(/\/$/, '') + '/' + url.replace(/^\//, '');
+    return Array.from(set);
+  }
 
-      return url;
+  function resolveRemote(statusMap, label) {
+    for (const c of aliasCandidates(label)) {
+      if (statusMap && statusMap[c]) return statusMap[c];
+    }
+    return undefined;
+  }
+
+  function extractOverageFromMessage(msg = '') {
+    const m = String(msg).match(/\((\d+)\s+te\s+veel\)/i);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function parseZetexStyleColor(raw) {
+    const txt = String(raw || '').trim();
+    if (!txt) return null;
+
+    let m = txt.match(/^(.+)-([0-9A-Z]{3,4})$/i);
+    if (m) {
+      const styleId = String(m[1] || '').trim();
+      const colorCode = String(m[2] || '').trim().toUpperCase();
+
+      if (styleId && (styleId.match(/-/g) || []).length >= 2) {
+        return { styleId, colorCode };
+      }
+    }
+
+    m = txt.match(/^(.+?)\s+-\s+([0-9A-Z]{3,4})$/i);
+    if (m) {
+      return {
+        styleId: String(m[1] || '').trim(),
+        colorCode: String(m[2] || '').trim().toUpperCase()
+      };
+    }
+
+    m = txt.match(/^(.+?)[_\/]([0-9A-Z]{3,4})$/i);
+    if (m) {
+      return {
+        styleId: String(m[1] || '').trim(),
+        colorCode: String(m[2] || '').trim().toUpperCase()
+      };
     }
 
     return null;
   }
 
-  // -----------------------
-  // Zetex response parsing -> Map<EANdigits -> remoteQty>
-  // -----------------------
-  function parseEanQtyMapFromWicketXml(xmlText) {
-    const m = String(xmlText || '').match(/"sizes":\s*\{([\s\S]*?)\},"assortments"/);
-    if (!m) return new Map();
+  function getZetexProductKey(table) {
+    const candidates = [
+      String(table?.id || '').trim(),
+      String(table?.querySelector?.('thead .gg-supplier-link')?.textContent || '').trim(),
+      String(table?.querySelector?.('thead .gg-supplier-link')?.getAttribute('href') || '').trim(),
+      String(table?.getAttribute?.('data-product-id') || '').trim(),
+      String(table?.getAttribute?.('data-sku') || '').trim(),
+      String(table?.querySelector?.('thead th[colspan]')?.textContent || '').trim(),
+      String(table?.querySelector?.('caption')?.textContent || '').trim()
+    ].filter(Boolean);
 
-    let sizesStr = '{' + m[1] + '}';
-    sizesStr = sizesStr.replace(/\^/g, '');
-
-    let sizesObj;
-    try { sizesObj = JSON.parse(sizesStr); }
-    catch { return new Map(); }
-
-    const sizeList = Array.isArray(sizesObj.sizeList) ? sizesObj.sizeList : [];
-    const map = new Map();
-
-    for (const item of sizeList) {
-      const eanDigits = String(item?.eanCode || '').replace(/\D/g, '');
-      if (!eanDigits) continue;
-
-      let qtyRaw = 0;
-      const stockLevels = item?.stockLevels?.stockLevelList;
-      if (Array.isArray(stockLevels) && stockLevels.length) {
-        const lvl = stockLevels[0];
-        if (lvl && typeof lvl.quantity !== 'undefined') qtyRaw = Number(lvl.quantity) || 0;
+    for (const c of candidates) {
+      let parsed = parseZetexStyleColor(c);
+      if (parsed) {
+        console.log('[Zetex][DEBUG] key match via candidate:', c, parsed);
+        return parsed;
       }
 
-      // ✅ remote qty blijft "raw qty"; mapping gebeurt centraal in StockRules
-      map.set(eanDigits, qtyRaw);
+      const q = c.match(/[?&]q=([^&]+)/i);
+      if (q) {
+        const decoded = decodeURIComponent(q[1] || '').trim();
+        parsed = parseZetexStyleColor(decoded);
+        if (parsed) {
+          console.log('[Zetex][DEBUG] key match via href query:', decoded, parsed);
+          return parsed;
+        }
+      }
     }
 
-    return map;
-  }
-
-  async function fetchEanQtyMapForPid(supplierPid) {
-    if (PID_CACHE.has(supplierPid)) return PID_CACHE.get(supplierPid);
-
-    const parts = splitSupplierPid(supplierPid);
-    if (!parts) throw new Error('TARGET_NOT_FOUND');
-
-    const productUrl = buildProductUrlFromPidParts(parts);
-    if (!productUrl) throw new Error('TARGET_NOT_FOUND');
-
-    const res1 = await gmGet(productUrl);
-    if (isNotFoundHttp(res1.status)) throw new Error(`HTTP_${res1.status}`);
-    if (!(res1.status >= 200 && res1.status < 300)) throw new Error('TARGET_NOT_FOUND');
-
-    const dataUrl = extractDataUrlFromProductHtml(res1.text);
-    if (!dataUrl) throw new Error('TARGET_NOT_FOUND');
-
-    const res2 = await gmGet(dataUrl);
-    if (isNotFoundHttp(res2.status)) throw new Error(`HTTP_${res2.status}`);
-    if (!(res2.status >= 200 && res2.status < 300)) throw new Error('TARGET_NOT_FOUND');
-
-    const map = parseEanQtyMapFromWicketXml(res2.text);
-    PID_CACHE.set(supplierPid, map);
-    return map;
-  }
-
-  // -----------------------
-  // Local table parsing (EAN + qty)
-  // -----------------------
-  function getColumnIndices(table) {
-    const headerRow = table.querySelector('thead tr:last-child');
-    if (!headerRow) return { eanCol: 2, stockCol: 1 };
-
-    const ths = Array.from(headerRow.children);
-    let eanCol = -1;
-    let stockCol = -1;
-
-    ths.forEach((th, idx) => {
-      const txt = (th.textContent || '').trim().toLowerCase();
-      if (eanCol === -1 && txt.includes('ean')) eanCol = idx;
-      if (stockCol === -1 && (txt.includes('stock') || txt.includes('voorraad'))) stockCol = idx;
+    console.warn('[Zetex][DEBUG] geen productkey gevonden voor tabel', {
+      tableId: table?.id || '',
+      supplierLinkText: table?.querySelector?.('thead .gg-supplier-link')?.textContent || '',
+      supplierLinkHref: table?.querySelector?.('thead .gg-supplier-link')?.getAttribute('href') || '',
+      thead: table?.querySelector?.('thead')?.textContent || ''
     });
 
-    if (eanCol < 0) eanCol = 2;
-    if (stockCol < 0) stockCol = 1;
-
-    return { eanCol, stockCol };
+    return null;
   }
 
-  function readLocalRowsEAN(table) {
-    const { eanCol, stockCol } = getColumnIndices(table);
-    const rows = Array.from(table.querySelectorAll('tbody tr'));
+function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByEan = {}, styleIdFallback = '') {
+  const list = Array.isArray(productsJson)
+    ? productsJson
+    : (productsJson && Array.isArray(productsJson.products))
+      ? productsJson.products
+      : [];
 
-    const out = [];
-    for (const tr of rows) {
-      const eanCell = tr.children[eanCol];
-      const stockCell = tr.children[stockCol];
+  const wanted = String(wantedColorCode || '').trim().toUpperCase();
 
-      const rawEanTxt = String(eanCell?.textContent || '').trim();
-      const eanDigits = rawEanTxt.replace(/\D/g, '');
-      const local = parseInt(String(stockCell?.textContent || '').trim(), 10) || 0;
+  return list.map(prod => {
+    const prodColor = String(prod.colorCode || '').trim().toUpperCase();
+    const deliveryDate =
+      prod.deliveryDate ||
+      prod.requestedDeliveryStartDate ||
+      prod.selectableRequestedDeliveryRangeStartDate ||
+      null;
 
-      // maat proberen te pakken voor logging (kolom 0 meestal)
-      const maatRaw = String(tr.dataset.size || tr.children?.[0]?.textContent || '').trim();
+    const entries = Array.isArray(prod.skus) ? prod.skus.map(sku => {
+      const ean = String(sku.eanCode || '').trim();
 
-      out.push({ tr, maat: maatRaw || '', eanRaw: rawEanTxt, eanDigits, local });
+      return {
+        sizeName: String(sku.sizeName || sku.sizeDisplayName || '').trim() || null,
+        subsizeName: String(sku.subSizeName || '').trim() || null,
+        eanCode: ean,
+        quantity: prodColor === wanted
+          ? Number(probeQtyByEan[ean] || 0)
+          : 0
+      };
+    }) : [];
+
+    return {
+      productUniqueId: String(
+        prod.productUniqueId ||
+        prod.styleId ||
+        prod.productId ||
+        styleIdFallback ||
+        ''
+      ).trim(),
+      productColorCode: String(prod.colorCode || '').trim(),
+      manualDiscountPercentage: 0,
+      deliveryDate,
+      deliveryWindowCode: null,
+      lockDelivery: true,
+      entries,
+      productCollectionId: String(
+        prod.collectionId ||
+        prod.productCollectionId ||
+        'Zetex_01'
+      ).trim(),
+      discountGroupCode: null,
+      orderLineTypeCode: '',
+      remark: null
+    };
+  });
+}
+
+  function buildProbeQtyMapForTable(localTable, gridJson, wantedColorCode, probeQty = PROBE_QTY) {
+    const qtyMap = {};
+    const rows = Array.from(localTable.querySelectorAll('tbody tr'));
+    const wanted = String(wantedColorCode || '').trim().toUpperCase();
+
+    const list = Array.isArray(gridJson)
+      ? gridJson
+      : (gridJson && Array.isArray(gridJson.products))
+        ? gridJson.products
+        : [];
+
+    const products = list.filter(p =>
+      String(p.colorCode || '').trim().toUpperCase() === wanted
+    );
+
+    const eanBySize = {};
+
+    for (const prod of products) {
+      for (const sku of (prod.skus || [])) {
+        let label =
+          String(sku.sizeDisplayName || '').trim().toUpperCase() ||
+          String(sku.sizeName || '').trim().toUpperCase();
+
+        if (!label) {
+          const base = String(sku.sizeName || '').trim().toUpperCase();
+          const sub  = String(sku.subSizeName || '').trim().toUpperCase();
+          label = (base + (sub || '')).trim();
+        }
+
+        const ean = String(sku.eanCode || '').trim();
+        if (!label || !ean) continue;
+
+        for (const k of aliasCandidates(label)) {
+          eanBySize[k] = ean;
+        }
+      }
     }
-    return out;
+
+    for (const row of rows) {
+      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const ean = eanBySize[maat];
+      if (ean) qtyMap[ean] = probeQty;
+    }
+
+    return qtyMap;
   }
 
-  function getSkuFromTable(table) {
-    const id = String(table.id || '').trim();
-    if (id) return id;
+  function buildStatusMapFromValidate(validateJson) {
+    const map = {};
+    const lines = Array.isArray(validateJson?.lines) ? validateJson.lines : [];
 
-    const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || '';
-    return label || '';
+    for (const line of lines) {
+      const entries = Array.isArray(line?.cartLineEntries) ? line.cartLineEntries : [];
+
+      for (const entry of entries) {
+        const maat = String(
+          entry?.skuSizeDisplayName ||
+          entry?.skuSizeName ||
+          ''
+        ).trim().toUpperCase();
+
+        const ean = String(entry?.skuEanCode || '').trim();
+        const requestedQty = Number(entry?.quantity) || 0;
+        const errs = Array.isArray(entry?.errors) ? entry.errors : [];
+
+        let stock = requestedQty;
+        let exact = false;
+
+        for (const err of errs) {
+          if (err?.messageType !== 'INSUFFICIENT_STOCK') continue;
+
+          const over = extractOverageFromMessage(err?.message || '');
+          if (Number.isFinite(over)) {
+            stock = Math.max(0, requestedQty - over);
+            exact = true;
+            break;
+          }
+        }
+
+        if (!maat) continue;
+
+        for (const key of aliasCandidates(maat)) {
+          map[key] = {
+            status: stock > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK',
+            stock,
+            ean,
+            exact,
+            requestedQty
+          };
+        }
+      }
+    }
+
+    return map;
   }
 
-  function getMaxCap(table) {
-    try {
-      if (typeof Core.getMaxCap === 'function') return Core.getMaxCap(table);
-    } catch {}
-    return 5;
-  }
+async function getValidateForTable(styleId, colorCode, localTable, cartId) {
+  const gridJson = await getGrid(styleId, cartId);
+  const probeQtyMap = buildProbeQtyMapForTable(localTable, gridJson, colorCode, PROBE_QTY);
+  const payload = buildValidatePayloadFromGrid(gridJson, colorCode, probeQtyMap, styleId);
 
-  // -----------------------
-  // ✅ Apply: StockRules mapping + reconcile, Core.markRow
-  // -----------------------
-  function applyCompareAndMarkEAN(localRows, eanQtyMap, maxCap) {
+  console.log('[Zetex][DEBUG] validate payload for', styleId, colorCode, payload);
+
+  const text = await bridgeValidate(styleId, cartId, payload);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+  function applyRulesAndMark(localTable, statusMap) {
+    const rows = localTable.querySelectorAll('tbody tr');
     const report = [];
     let firstMut = null;
 
-    for (const { tr } of localRows) Core.clearRowMarks(tr);
+    rows.forEach(row => {
+      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
 
-    for (const { tr, maat, eanRaw, eanDigits, local } of localRows) {
-      if (!eanDigits) continue;
+      const remoteEntry = resolveRemote(statusMap, maat);
+      const supplierQty = Number(remoteEntry?.stock) || 0;
+      const ean         = String(remoteEntry?.ean || '').trim();
+      const st          = remoteEntry?.status;
+      const exact       = remoteEntry?.exact;
 
-      const remoteQty = eanQtyMap.get(eanDigits);
-      if (typeof remoteQty !== 'number') continue;
+      let target = null;
+      const maxCap = (typeof Core.getMaxCap === 'function') ? Core.getMaxCap(localTable) : 5;
 
-      // ✅ centrale mapping: remoteQty is number
-      const target = SR.mapRemoteToTarget(BRAND_KEY, remoteQty, maxCap);
-      const res    = SR.reconcile(local, target, maxCap);
+      if (st === 'IN_STOCK') target = SR.mapRemoteToTarget(BRAND_KEY, supplierQty, maxCap);
+      else if (st === 'OUT_OF_STOCK') target = 0;
+      else target = null;
 
-      const delta = Number(res?.delta || 0);
       let status = 'ok';
+      let delta = 0;
 
-      if (res?.action === 'bijboeken' && delta > 0) {
-        Core.markRow(tr, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, remote ${remoteQty})` });
-        status = 'bijboeken';
-        if (!firstMut) firstMut = tr;
-
-      } else if (res?.action === 'uitboeken' && delta > 0) {
-        Core.markRow(tr, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, remote ${remoteQty})` });
-        status = 'uitboeken';
-        if (!firstMut) firstMut = tr;
-
+      if (target === null) {
+        if (local > 0) {
+          delta = local;
+          Core.markRow(row, {
+            action: 'remove',
+            delta,
+            title: `Uitboeken ${delta} (maat onbekend bij Zetex)`
+          });
+          status = 'uitboeken';
+          if (!firstMut) firstMut = row;
+        } else {
+          Core.markRow(row, {
+            action: 'none',
+            delta: 0,
+            title: 'Negeren (maat onbekend bij Zetex)'
+          });
+          status = 'negeren';
+        }
       } else {
-        Core.markRow(tr, { action: 'none', delta: 0, title: `OK (target ${target}, remote ${remoteQty})` });
-        status = 'ok';
+        const res = SR.reconcile(local, target, maxCap);
+        delta = Number(res?.delta || 0);
+        const qtyLabel = Number.isFinite(supplierQty) ? `${supplierQty}${exact ? '' : '+'}` : '—';
+
+        if (res?.action === 'bijboeken' && delta > 0) {
+          Core.markRow(row, {
+            action: 'add',
+            delta,
+            title: `Bijboeken ${delta} (target ${target}, supplier qty ${qtyLabel})`
+          });
+          status = 'bijboeken';
+          if (!firstMut) firstMut = row;
+
+        } else if (res?.action === 'uitboeken' && delta > 0) {
+          Core.markRow(row, {
+            action: 'remove',
+            delta,
+            title: `Uitboeken ${delta} (target ${target}, supplier qty ${qtyLabel})`
+          });
+          status = 'uitboeken';
+          if (!firstMut) firstMut = row;
+
+        } else {
+          Core.markRow(row, {
+            action: 'none',
+            delta: 0,
+            title: `OK (target ${target}, supplier qty ${qtyLabel})`
+          });
+          status = 'ok';
+        }
       }
 
       report.push({
         maat,
-        ean: eanDigits || eanRaw,
         local,
-        remoteRaw: remoteQty,
-        target,
+        remote: supplierQty,
+        target: Number.isFinite(target) ? target : NaN,
         delta,
-        status
+        ean,
+        status,
+        exact
       });
-    }
+    });
 
     if (firstMut) Core.jumpFlash(firstMut);
     return report;
   }
 
-  function bepaalStatus(report, eanQtyMap) {
-    if (!eanQtyMap || eanQtyMap.size === 0) return 'niet-gevonden';
+  function bepaalLogStatus(report, statusMap) {
+    const leeg = !statusMap || Object.keys(statusMap).length === 0;
+    if (leeg) return 'niet-gevonden';
+
     const diffs = report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
     return diffs === 0 ? 'ok' : 'afwijking';
   }
 
-  // -----------------------
-  // perTable
-  // -----------------------
   async function perTable(table) {
-    const supplierPid = String(table.id || '').trim();
-    const headerText  = table.querySelector('thead th[colspan]')?.textContent?.trim() || '';
-    const anchorId    = supplierPid || headerText || getSkuFromTable(table) || 'onbekend';
+    const parsed = getZetexProductKey(table);
+    const anchorId = parsed
+      ? `${parsed.styleId}-${parsed.colorCode}`
+      : (table.id || 'onbekend');
 
-    if (!supplierPid) {
+    console.log('[Zetex][DEBUG] parsed key:', parsed, 'from table.id=', table.id);
+
+    if (!parsed?.styleId || !parsed?.colorCode) {
+      Logger.status(anchorId, 'niet-gevonden (geen geldige style/kleur)');
+      Logger.perMaat(anchorId, []);
+      return 0;
+    }
+
+    const { styleId, colorCode } = parsed;
+    const cartId = undefined;
+
+    const validateJson = await getValidateForTable(styleId, colorCode, table, cartId);
+    console.log('[Zetex][DEBUG] validate json for', styleId, validateJson);
+
+    const statusMap = buildStatusMapFromValidate(validateJson);
+    console.log('[Zetex][DEBUG] validate statusMap for color', colorCode, statusMap);
+
+    if (!statusMap || Object.keys(statusMap).length === 0) {
       Logger.status(anchorId, 'niet-gevonden');
       Logger.perMaat(anchorId, []);
       return 0;
     }
 
-    let eanQtyMap;
-    try {
-      eanQtyMap = await fetchEanQtyMapForPid(supplierPid);
-    } catch (e) {
-      const msg = String(e?.message || e);
-
-      if (/^HTTP_\d+$/i.test(msg)) {
-        const status = parseInt(msg.replace(/^HTTP_/i, ''), 10);
-        if (Number.isFinite(status) && isNotFoundHttp(status)) {
-          Logger.status(anchorId, 'niet-gevonden');
-          Logger.perMaat(anchorId, []);
-          return 0;
-        }
-      }
-
-      // parse / target not found / timeout -> niet-gevonden
-      Logger.status(anchorId, 'niet-gevonden');
-      Logger.perMaat(anchorId, []);
-      return 0;
-    }
-
-    if (!eanQtyMap || eanQtyMap.size === 0) {
-      Logger.status(anchorId, 'niet-gevonden');
-      Logger.perMaat(anchorId, []);
-      return 0;
-    }
-
-    const localRows = readLocalRowsEAN(table);
-    const maxCap = getMaxCap(table);
-
-    const report = applyCompareAndMarkEAN(localRows, eanQtyMap, maxCap);
-    Logger.status(anchorId, bepaalStatus(report, eanQtyMap));
+    const report = applyRulesAndMark(table, statusMap);
+    Logger.status(anchorId, bepaalLogStatus(report, statusMap));
     Logger.perMaat(anchorId, report);
 
     return report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
   }
 
-  // -----------------------
-  // Run
-  // -----------------------
-  async function run(btn) {
+  async function runZetex(btn) {
+    if (!bridgeIsOnlineByHeartbeat()) {
+      alert(
+        'Zetex-bridge offline.\n' +
+        'Open een b2b.zetex.nl-tab, log in, bezoek een product zodat hun grid-call loopt,\n' +
+        'en probeer het daarna opnieuw.'
+      );
+      return;
+    }
+
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) return;
 
-    await Core.runTables({
-      btn,
-      tables,
-      concurrency: 3,
-      perTable
-    });
-  }
+    try {
+      await Core.runTables({
+        btn,
+        tables,
+        concurrency: 3,
+        perTable
+      });
+    } catch (e) {
+      const msg = String(e?.message || e);
+      console.error('[VCP2|Zetex] run error:', e);
 
-  // -----------------------
-  // Supplier select (Zetex + Pastunette)
-  // -----------------------
-  function normStr(s) {
-    return String(s || '')
-      .toLowerCase()
-      .normalize('NFD').replace(/\p{Diacritic}/gu, '')
-      .replace(/[_\s-]+/g, '')
-      .trim();
+      if (msg.includes('HTTP 401')) {
+        alert('Zetex auth/token probleem (HTTP 401). Open Zetex-tab en laat een product-grid call lopen.');
+      } else if (msg.includes('bridge timeout')) {
+        alert('Zetex bridge timeout. Probeer opnieuw of refresh de Zetex-tab.');
+      } else if (msg.includes('validate bridge timeout')) {
+        alert('Zetex validate timeout. Probeer opnieuw of refresh de Zetex-tab.');
+      }
+    }
   }
 
   function isZetexSelected() {
     const sel = document.querySelector('#leverancier-keuze');
-    if (!sel) return true;
-    const v = normStr(sel.value);
-    const t = normStr(sel.options[sel.selectedIndex]?.textContent || '');
-    return v.includes('zetex') || t.includes('zetex') || v.includes('pastunette') || t.includes('pastunette');
+    if (!sel) return false;
+
+    const val = norm(sel.value || '');
+    const txt = norm(sel.options?.[sel.selectedIndex]?.text || '');
+    const blob = `${val} ${txt}`;
+
+    return /\bzetex\b/i.test(blob) || /\bpastunette\b/i.test(blob);
   }
 
-  // -----------------------
-  // UI (Core.mountSupplierButton)
-  // -----------------------
-  if (ON_TOOL) {
-    Core.mountSupplierButton({
-      id: 'vcp2-zetex-btn',
-      text: '🔍 Check Stock | Zetex',
-      right: 250,
-      top: 8,
-      match: () => isZetexSelected(),
-      onClick: (btn) => run(btn),
+  const { btn } = Core.mountSupplierButton({
+    id: 'vcp2-zetex-btn',
+    text: '🔍 Check Stock | Zetex',
+    right: 250,
+    top: 8,
+    match: (blob) => /\bzetex\b/i.test(blob) || /\bpastunette\b/i.test(blob),
+    onClick: (b) => runZetex(b)
+  });
+
+  (function attachHeartbeatDotOnce() {
+    if (!btn) return;
+    if (btn.querySelector('.vcp-hb-dot')) return;
+
+    btn.style.position = 'fixed';
+    btn.style.paddingRight = '26px';
+
+    const dot = document.createElement('span');
+    dot.className = 'vcp-hb-dot';
+
+    Object.assign(dot.style, {
+      position: 'absolute',
+      top: '-6px',
+      right: '-7px',
+      width: '18px',
+      height: '18px',
+      borderRadius: '50%',
+      color: '#fff',
+      fontSize: '10px',
+      fontWeight: '700',
+      lineHeight: '18px',
+      textAlign: 'center',
+      boxShadow: '0 0 0 2px #fff',
+      pointerEvents: 'none',
+      background: bridgeIsOnlineByHeartbeat() ? '#24b300' : 'red'
     });
-  }
+
+    dot.textContent = '';
+    btn.appendChild(dot);
+
+    const setDot = () => {
+      dot.style.background = bridgeIsOnlineByHeartbeat() ? '#24b300' : 'red';
+    };
+
+    try { GM_addValueChangeListener(HEARTBEAT_KEY, setDot); } catch {}
+    setInterval(setDot, 3000);
+  })();
 
 })();
