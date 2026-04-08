@@ -59,6 +59,12 @@
     return `${n.toFixed(0)}%`;
   }
 
+  function fmtMoney(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return `€ ${n.toFixed(2)}`;
+  }
+
   function extractMetaFromUrl(url) {
     if (!url) return {};
     const m = String(url).match(/\/api\/shop\/webstores\/(\d+)\/carts\/(\d+)\/grid\/([^/?#]+)\/products/i);
@@ -127,6 +133,7 @@
         customerWholesalePrice: null,
         originalWholesalePrice: null,
         wholesalePrice: null,
+        retailPrice: null,
         equalWholesale: null,
         hasDiscount: null,
         discountPct: null
@@ -136,6 +143,7 @@
     const customerWholesalePrice = parsePrice(dp.customerWholesalePrice);
     const originalWholesalePrice = parsePrice(dp.originalWholesalePrice);
     const wholesalePrice = parsePrice(dp.wholesalePrice);
+    const retailPrice = parsePrice(dp.retailPrice);
 
     const baseOriginal = Number.isFinite(originalWholesalePrice)
       ? originalWholesalePrice
@@ -164,6 +172,7 @@
       customerWholesalePrice,
       originalWholesalePrice,
       wholesalePrice,
+      retailPrice,
       equalWholesale,
       hasDiscount,
       discountPct
@@ -430,6 +439,11 @@
     return cells[6] || null;
   }
 
+  function getAdvicePriceCell(row) {
+    const cells = getCells(row);
+    return cells[7] || null;
+  }
+
   function ensureOriginalCellHtml(cell) {
     if (!cell) return '';
     if (!cell.dataset.zetexOriginalHtml) {
@@ -467,6 +481,12 @@
     if (!m) return 0;
 
     return parseFloat(m[1].replace(',', '.')) || 0;
+  }
+
+  function getLocalAdvicePrice(row) {
+    const cell = getAdvicePriceCell(row);
+    if (!cell) return null;
+    return parsePrice(cell.textContent);
   }
 
   function setPublicResult(row, state) {
@@ -513,9 +533,29 @@
     appendBadge(cell, html, 'zetex-price-badge');
   }
 
+  function setAdvicePriceResult(row, state, remoteRetailPrice = null) {
+    const cell = getAdvicePriceCell(row);
+    if (!cell) return;
+
+    ensureOriginalCellHtml(cell);
+
+    let html = '';
+
+    if (state === 'ok') {
+      html = `<span style="color:#1b5e20; font-weight:700;">✅</span>`;
+    } else if (state === 'bad') {
+      html = `<span style="color:#b71c1c; font-weight:700;">❌ ${fmtMoney(remoteRetailPrice)}</span>`;
+    } else {
+      html = `<span style="color:#e65100; font-weight:700;">⚠️</span>`;
+    }
+
+    appendBadge(cell, html, 'zetex-advice-badge');
+  }
+
   function setPending(row) {
     const publicCell = getPublicCell(row);
     const priceCell = getPriceCell(row);
+    const adviceCell = getAdvicePriceCell(row);
 
     if (publicCell) {
       ensureOriginalCellHtml(publicCell);
@@ -532,6 +572,15 @@
         priceCell,
         `<span style="color:#e65100; font-weight:700;">⏳</span>`,
         'zetex-price-badge'
+      );
+    }
+
+    if (adviceCell) {
+      ensureOriginalCellHtml(adviceCell);
+      appendBadge(
+        adviceCell,
+        `<span style="color:#e65100; font-weight:700;">⏳</span>`,
+        'zetex-advice-badge'
       );
     }
 
@@ -584,6 +633,7 @@
     if (!productId) {
       setPublicResult(row, 'warn');
       setPriceResult(row, 'warn');
+      setAdvicePriceResult(row, 'warn');
       setRowState(row, 'warn');
       return;
     }
@@ -597,6 +647,7 @@
       if (!pidParts) {
         setPublicResult(row, 'bad');
         setPriceResult(row, 'warn');
+        setAdvicePriceResult(row, 'warn');
         setRowState(row, 'warn');
         return;
       }
@@ -607,11 +658,13 @@
       if (!remoteProduct) {
         setPublicResult(row, 'bad');
         setPriceResult(row, 'warn');
+        setAdvicePriceResult(row, 'warn');
         setRowState(row, 'bad');
         return;
       }
 
       const whs = extractWholesaleInfo(remoteProduct);
+      const localAdvicePrice = getLocalAdvicePrice(row);
 
       setPublicResult(row, 'ok');
 
@@ -621,6 +674,17 @@
         setPriceResult(row, 'ok');
       } else {
         setPriceResult(row, 'warn');
+      }
+
+      if (Number.isFinite(whs.retailPrice) && Number.isFinite(localAdvicePrice)) {
+        const diff = Math.abs(whs.retailPrice - localAdvicePrice);
+        if (diff < 0.01) {
+          setAdvicePriceResult(row, 'ok');
+        } else {
+          setAdvicePriceResult(row, 'bad', whs.retailPrice);
+        }
+      } else {
+        setAdvicePriceResult(row, 'warn');
       }
 
       setRowState(row, 'ok');
@@ -636,6 +700,8 @@
         remoteFound: true,
         customerWholesalePrice: whs.customerWholesalePrice,
         originalWholesalePrice: whs.originalWholesalePrice,
+        retailPrice: whs.retailPrice,
+        localAdvicePrice,
         hasDiscount: whs.hasDiscount,
         discountPct: whs.discountPct
       });
@@ -643,6 +709,7 @@
       console.error(LOG, 'validateRow error', err);
       setPublicResult(row, 'warn');
       setPriceResult(row, 'warn');
+      setAdvicePriceResult(row, 'warn');
       setRowState(row, 'warn');
     }
   }
@@ -709,7 +776,7 @@
       btn.textContent = '€';
       btn.style.cssText = `
         position: fixed !important;
-        right: 110px !important;
+        right: 115px !important;
         bottom: 16px !important;
         z-index: 2147483646 !important;
         background: #0f172a !important;
