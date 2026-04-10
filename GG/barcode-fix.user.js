@@ -18,27 +18,30 @@
 
     const str = String(value).trim();
 
-    // Alleen pure numerieke barcodes aanpassen
-    if (!/^\d+$/.test(str)) {
-      return value;
-    }
+    // Alleen pure numerieke scannerbarcodes aanpassen
+    if (!/^\d+$/.test(str)) return value;
 
-    // Altijd exact 13 cijfers
-    if (str.length <= 13) {
+    // Alleen aanvullen als korter dan 13
+    if (str.length < 13) {
       return str.padStart(13, '0');
     }
 
-    // Langer dan 13? Niet aanpassen
+    // Precies 13 = laten staan
+    if (str.length === 13) {
+      return str;
+    }
+
+    // Langer dan 13 = niet aanpassen
     return value;
   }
 
   function patchJQuery($) {
-    if (!$ || $.fn.__barcodeFixPatched) return;
+    if (!$ || !$ .fn || $.fn.__barcodeFixPatched) return;
 
     const originalTrigger = $.fn.trigger;
     const originalTriggerHandler = $.fn.triggerHandler;
 
-    function normalizeTriggerArgs(type, data) {
+    function patchPayload(type, data) {
       const eventType =
         typeof type === 'string'
           ? type
@@ -48,96 +51,41 @@
         return data;
       }
 
-      // jQuery trigger kan string, array of losse waarde meekrijgen
       if (Array.isArray(data) && data.length > 0) {
-        const normalized = normalizeBarcode(data[0]);
-        if (normalized !== data[0]) {
-          console.log('[Barcode Fix trigger]', data[0], '→', normalized);
+        const original = data[0];
+        const normalized = normalizeBarcode(original);
+
+        if (normalized !== original) {
+          console.log('[Barcode Fix scanner]', original, '→', normalized);
         }
+
         return [normalized, ...data.slice(1)];
       }
 
       const normalized = normalizeBarcode(data);
+
       if (normalized !== data) {
-        console.log('[Barcode Fix trigger]', data, '→', normalized);
+        console.log('[Barcode Fix scanner]', data, '→', normalized);
       }
+
       return normalized;
     }
 
     $.fn.trigger = function (type, data) {
-      return originalTrigger.call(this, type, normalizeTriggerArgs(type, data));
+      return originalTrigger.call(this, type, patchPayload(type, data));
     };
 
     $.fn.triggerHandler = function (type, data) {
-      return originalTriggerHandler.call(this, type, normalizeTriggerArgs(type, data));
-    };
-
-    // Extra vangnet: als GG via jQuery dispatch werkt met arguments
-    const originalDispatch = $.event.dispatch;
-    $.event.dispatch = function () {
-      try {
-        const event = arguments[0];
-        if (event && event.type === 'barcodeScanned' && arguments.length > 1) {
-          const original = arguments[1];
-          const normalized = normalizeBarcode(original);
-          if (normalized !== original) {
-            arguments[1] = normalized;
-            console.log('[Barcode Fix dispatch]', original, '→', normalized);
-          }
-        }
-      } catch (err) {
-        console.warn('[Barcode Fix dispatch error]', err);
-      }
-
-      return originalDispatch.apply(this, arguments);
+      return originalTriggerHandler.call(this, type, patchPayload(type, data));
     };
 
     $.fn.__barcodeFixPatched = true;
-    console.log('[Barcode Fix] jQuery barcodeScanned patch actief');
-  }
-
-  function patchInputs() {
-    const applyToInput = (input) => {
-      if (!input || input.dataset.barcodeFixBound === '1') return;
-
-      const apply = () => {
-        const oldValue = input.value;
-        const newValue = normalizeBarcode(oldValue);
-
-        if (newValue !== oldValue) {
-          input.value = newValue;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          console.log('[Barcode Fix input]', oldValue, '→', newValue);
-        }
-      };
-
-      input.addEventListener('blur', apply, true);
-      input.addEventListener('change', apply, true);
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') apply();
-      }, true);
-
-      input.dataset.barcodeFixBound = '1';
-    };
-
-    const scan = () => {
-      document.querySelectorAll('input, textarea').forEach(applyToInput);
-    };
-
-    scan();
-
-    const observer = new MutationObserver(scan);
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true
-    });
+    console.log('[Barcode Fix] scanner-only patch actief');
   }
 
   function waitForJQuery() {
     if (window.jQuery && window.jQuery.fn) {
       patchJQuery(window.jQuery);
-      patchInputs();
       return;
     }
 
