@@ -1,13 +1,11 @@
 // ==UserScript==
 // @name         GG | Barcode Fix
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.3
-// @description  Vult gescande numerieke barcodes aan naar exact 13 cijfers vóór Goedgepickt ze verwerkt
+// @version      1.4
+// @description  Vult alleen gescande numerieke barcodes aan naar exact 13 cijfers
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        none
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/barcode-fix.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/barcode-fix.user.js
 // ==/UserScript==
 
 (function () {
