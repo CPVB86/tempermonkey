@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG | Barcode Fix
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.4
-// @description  Vult alleen gescande numerieke barcodes aan naar exact 13 cijfers
+// @version      1.5
+// @description  Vult alleen scannerbarcodes aan naar exact 13 cijfers via barcode-AJAX requests
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        none
 // @run-at       document-start
@@ -16,74 +16,59 @@
 
     const str = String(value).trim();
 
-    // Alleen pure numerieke scannerbarcodes aanpassen
+    // Alleen pure numerieke codes
     if (!/^\d+$/.test(str)) return value;
 
-    // Alleen aanvullen als korter dan 13
-    if (str.length < 13) {
-      return str.padStart(13, '0');
-    }
+    // Alleen korter dan 13 aanvullen
+    if (str.length < 13) return str.padStart(13, '0');
 
-    // Precies 13 = laten staan
-    if (str.length === 13) {
-      return str;
-    }
-
-    // Langer dan 13 = niet aanpassen
-    return value;
+    // 13 laten staan, >13 niet wijzigen
+    return str;
   }
 
-  function patchJQuery($) {
-    if (!$ || !$ .fn || $.fn.__barcodeFixPatched) return;
+  function shouldPatchUrl(url) {
+    if (!url) return false;
 
-    const originalTrigger = $.fn.trigger;
-    const originalTriggerHandler = $.fn.triggerHandler;
+    const s = String(url);
 
-    function patchPayload(type, data) {
-      const eventType =
-        typeof type === 'string'
-          ? type
-          : (type && type.type) || '';
+    return (
+      s.includes('/barcodes/validate') ||
+      s.includes('/barcodes/get-product-details')
+    );
+  }
 
-      if (eventType !== 'barcodeScanned') {
-        return data;
-      }
+  function patchAjax($) {
+    if (!$ || !$.ajax || $.__barcodeAjaxFixPatched) return;
 
-      if (Array.isArray(data) && data.length > 0) {
-        const original = data[0];
-        const normalized = normalizeBarcode(original);
+    const originalAjax = $.ajax;
 
-        if (normalized !== original) {
-          console.log('[Barcode Fix scanner]', original, '→', normalized);
+    $.ajax = function (options) {
+      try {
+        if (options && typeof options === 'object' && shouldPatchUrl(options.url)) {
+          if (options.data && typeof options.data === 'object' && 'barcode' in options.data) {
+            const original = options.data.barcode;
+            const normalized = normalizeBarcode(original);
+
+            if (normalized !== original) {
+              options.data.barcode = normalized;
+              console.log('[Barcode Fix ajax]', original, '→', normalized, 'for', options.url);
+            }
+          }
         }
-
-        return [normalized, ...data.slice(1)];
+      } catch (err) {
+        console.warn('[Barcode Fix ajax error]', err);
       }
 
-      const normalized = normalizeBarcode(data);
-
-      if (normalized !== data) {
-        console.log('[Barcode Fix scanner]', data, '→', normalized);
-      }
-
-      return normalized;
-    }
-
-    $.fn.trigger = function (type, data) {
-      return originalTrigger.call(this, type, patchPayload(type, data));
+      return originalAjax.apply(this, arguments);
     };
 
-    $.fn.triggerHandler = function (type, data) {
-      return originalTriggerHandler.call(this, type, patchPayload(type, data));
-    };
-
-    $.fn.__barcodeFixPatched = true;
-    console.log('[Barcode Fix] scanner-only patch actief');
+    $.__barcodeAjaxFixPatched = true;
+    console.log('[Barcode Fix] ajax-only patch actief');
   }
 
   function waitForJQuery() {
-    if (window.jQuery && window.jQuery.fn) {
-      patchJQuery(window.jQuery);
+    if (window.jQuery) {
+      patchAjax(window.jQuery);
       return;
     }
 
