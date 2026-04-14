@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Gallery Grabber | Triumph
-// @version      1.0
+// @version      1.1
 // @description  Download de beste beschikbare Triumph-productfoto's met één klik
 // @match        https://b2b.triumph.com/products/NL_TriumphPROD*
 // @match        https://b2b.triumph.com/products/NL_sloggiPROD*
@@ -45,10 +45,8 @@
       btn.style.backgroundColor = "#f39c12";
 
       try {
-        // 1. Verzamel alle relevante image-URL's uit de gallery
         const urlSet = new Set();
 
-        // a) De zichtbare <img> elementen
         document
           .querySelectorAll(
             ".product-details-multi-image img.c-image-zoom__origin-image"
@@ -57,7 +55,6 @@
             if (img.src) urlSet.add(cleanUrl(img.src));
           });
 
-        // b) De zoom-resultaten met background-image (meestal de grotere variant)
         document
           .querySelectorAll(
             ".product-details-multi-image .c-image-zoom__result"
@@ -79,14 +76,15 @@
           return;
         }
 
-        // 2. Basis bestandsnaam bepalen
-        // Eerst uit de description (10004928 - 0026 - SKIN -> 10004928-0026-SKIN)
-        const baseName =
+        const brandPrefix = getBrandPrefix();
+
+        const rawBaseName =
           getBaseNameFromDescription() ||
           guessProductCode(urls) ||
-          "triumph_product";
+          "product";
 
-        // 3. Download alle images één voor één
+        const baseName = `${brandPrefix}_${rawBaseName}`;
+
         for (let i = 0; i < urls.length; i++) {
           const url = urls[i];
 
@@ -114,7 +112,6 @@
           document.body.removeChild(a);
           URL.revokeObjectURL(objectUrl);
 
-          // kleine pauze om de browser niet te laten stikken
           await new Promise((res) => setTimeout(res, 200));
         }
 
@@ -137,18 +134,25 @@
       btn.innerText = ORIGINAL_TEXT;
       btn.style.backgroundColor = ORIGINAL_BG;
       delete btn.dataset.locked;
-    }, 3000); // 3 seconden reset
+    }, 3000);
   }
 
   function cleanUrl(url) {
-    // Zorg dat &amp; → & etc.
     const txt = document.createElement("textarea");
     txt.innerHTML = url;
     return txt.value;
   }
 
+  function getBrandPrefix() {
+    const path = window.location.pathname.toLowerCase();
+
+    if (path.includes("sloggiprod")) return "sloggi";
+    if (path.includes("triumphprod")) return "triumph";
+
+    return "brand";
+  }
+
   function getBaseNameFromDescription() {
-    // <p class="product-details-information__description">10004928 - 0026 - SKIN</p>
     const el = document.querySelector(
       ".product-details-information__description"
     );
@@ -157,28 +161,23 @@
     const text = (el.textContent || "").trim();
     if (!text) return null;
 
-    // "10004928 - 0026 - SKIN" -> "10004928-0026-SKIN"
-    const normalized = text
-      .replace(/\s*-\s*/g, "-") // spaties rond streepjes weg
-      .replace(/\s+/g, "-"); // overige spaties door 1 streepje (failsafe)
-
-    return normalized;
+    return text
+      .replace(/\s*-\s*/g, "-")
+      .replace(/\s+/g, "-");
   }
 
   function guessProductCode(urls) {
-    // Fallback als description er niet is
     const first = urls.find((u) =>
       u.includes("contentstore.triumph.com/transform/")
     );
+
     if (first) {
-      // Voorbeeld: .../101847650003_TO_F_1?date-modified=...
       const m = first.match(/\/(\d{6,})_[^\/?]+/);
       if (m && m[1]) {
         return m[1];
       }
     }
 
-    // Extra fallback: pak gewoon de eerste lange cijferreeks
     for (const u of urls) {
       const m = u.match(/(\d{6,})/);
       if (m && m[1]) return m[1];
