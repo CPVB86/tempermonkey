@@ -2,8 +2,7 @@
 // @name         Gallery Grabber | Triumph
 // @version      1.1
 // @description  Download de beste beschikbare Triumph-productfoto's met één klik
-// @match        https://b2b.triumph.com/products/NL_TriumphPROD*
-// @match        https://b2b.triumph.com/products/NL_sloggiPROD*
+// @match        https://b2b.triumph.com/products/*
 // @grant        none
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-triumph.user.js
