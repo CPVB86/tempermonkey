@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | After Eden (+ Elbrina)
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0
+// @version      3.1
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -23,11 +23,11 @@
   const SR   = g.StockRules;
 
   if (!Core) {
-    console.error('[VCP2|AfterEden] VCPCore ontbreekt. Check @require vcp-core.js');
+    console.info('[VCP2|AfterEden] VCPCore ontbreekt. Check @require vcp-core.js');
     return;
   }
   if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
-    console.error('[VCP2|AfterEden] StockRules ontbreekt/incompleet. Vereist: mapRemoteToTarget + reconcile');
+    console.info('[VCP2|AfterEden] StockRules ontbreekt/incompleet. Vereist: mapRemoteToTarget + reconcile');
     return;
   }
 
@@ -36,47 +36,60 @@
   const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
   const CACHE_PREFIX = 'vcp2_aftereden_html_cache_v1:'; // bump
   const BASE = 'https://bcg.fashionportal.shop';
+  const QUIET = true;
+
   const STOCK_URL = (itemNumber) =>
     `${BASE}/itemquantitycal?item_number=${encodeURIComponent(itemNumber)}&price_type=stockitem`;
 
-  const $ = (s, r=document) => r.querySelector(s);
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
-  const norm = (s='') => String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
+  const $ = (s, r = document) => r.querySelector(s);
+  const norm = (s = '') => String(s).toLowerCase().trim().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+
+  function debugConsole(level, ...args) {
+    if (QUIET) {
+      if (level === 'error') console.info(...args);
+      else if (typeof console[level] === 'function') console[level](...args);
+      else console.log(...args);
+      return;
+    }
+    if (typeof console[level] === 'function') console[level](...args);
+    else console.log(...args);
+  }
 
   // ---------- Helpers ----------
-  function extractColorCode(pid){
+  function extractColorCode(pid) {
     const m = String(pid || '').trim().match(/-([A-Za-z0-9]{2,})$/);
     return m ? m[1] : '';
   }
 
   function normalizeSize(s) {
-    const cleaned = String(s||'')
+    const cleaned = String(s || '')
       .trim()
       .toUpperCase()
-      .replace(/\s+/g,'')
-      .replace(/–|—/g,'-')
-      .replace(/_/g,'');
+      .replace(/\s+/g, '')
+      .replace(/–|—/g, '-')
+      .replace(/_/g, '');
 
     // keep legacy behavior: ONESIZE -> "1"
     if (/^ONESIZES?$/.test(cleaned)) return '1';
     return cleaned;
   }
 
-  // ---------- Logger (status -> logboek, mapping -> console table) ----------
+  // ---------- Logger ----------
   const Logger = {
-    lb(){
-      return (typeof unsafeWindow!=='undefined' && unsafeWindow.logboek)
+    lb() {
+      return (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek)
         ? unsafeWindow.logboek
         : window.logboek;
     },
-    status(id, txt, extra){
-      const lb=this.lb();
+    status(id, txt, extra) {
+      const lb = this.lb();
       if (lb?.resultaat) lb.resultaat(String(id), String(txt), extra);
-      else console.info(`[AfterEden][${id}] status: ${txt}`, extra||'');
+      else console.info(`[AfterEden][${id}] status: ${txt}`, extra || '');
     },
-    perMaat(id, report){
+    perMaat(id, report) {
+      if (!report?.length) return;
       console.groupCollapsed(`[AfterEden][${id}] maatvergelijking`);
-      try{
+      try {
         console.table(report.map(r => ({
           pid: r.pid,
           kleurcode: r.kleurcode,
@@ -87,12 +100,14 @@
           delta: Number.isFinite(r.delta) ? r.delta : '—',
           status: r.status
         })));
-      } finally { console.groupEnd(); }
+      } finally {
+        console.groupEnd();
+      }
     }
   };
 
   // ---------- Net ----------
-  function gmFetch(url, responseType='text') {
+  function gmFetch(url, responseType = 'text') {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'GET',
@@ -100,7 +115,7 @@
         responseType,
         anonymous: false,
         timeout: TIMEOUT,
-        headers: { 'Accept':'text/html,*/*;q=0.8' },
+        headers: { 'Accept': 'text/html,*/*;q=0.8' },
         onload: r => resolve(r),
         onerror: e => reject(e),
         ontimeout: () => reject(new Error('Timeout')),
@@ -109,15 +124,21 @@
   }
 
   // ---------- Cache ----------
-  function cacheKey(itemNumber){ return `${CACHE_PREFIX}${String(itemNumber||'').trim()}`; }
+  function cacheKey(itemNumber) {
+    return `${CACHE_PREFIX}${String(itemNumber || '').trim()}`;
+  }
+
   function loadCache(itemNumber) {
     const raw = GM_getValue(cacheKey(itemNumber), null);
     if (!raw) return null;
     try {
       const { t, data } = JSON.parse(raw);
       return (Date.now() - t <= CACHE_TTL_MS) ? data : null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
+
   function saveCache(itemNumber, html) {
     GM_setValue(cacheKey(itemNumber), JSON.stringify({ t: Date.now(), data: html }));
   }
@@ -151,7 +172,7 @@
   }
 
   // ---------- STRICT inventory read ----------
-  // ✅ Alleen data-inventory telt. Geen data-title, geen price text.
+  // Alleen data-inventory telt.
   function readRemoteInventoryFromBox_STRICT(box) {
     const invEl =
       box.querySelector('.qty-limit[data-inventory]') ||
@@ -159,17 +180,17 @@
       null;
 
     const raw = invEl?.getAttribute('data-inventory') ?? invEl?.dataset?.inventory;
-    if (raw == null) return { present:false, qty:null };
+    if (raw == null) return { present: false, qty: null };
 
     const cleaned = String(raw).trim().replace(',', '.');
     const n = Number(cleaned);
-    if (!Number.isFinite(n)) return { present:false, qty:null };
+    if (!Number.isFinite(n)) return { present: false, qty: null };
 
-    return { present:true, qty:n };
+    return { present: true, qty: n };
   }
 
   // ---------- Exact wrapper pick: PID match ----------
-  function findSelectWrapByExactPid(doc, pid){
+  function findSelectWrapByExactPid(doc, pid) {
     const wraps = [...doc.querySelectorAll('.selectqty-wrap')];
     const target = String(pid || '').trim();
 
@@ -185,12 +206,11 @@
     throw new Error(`PID_WRAP_NOT_FOUND:${target}`);
   }
 
-  function readKleurLabelFromWrap(wrap){
+  function readKleurLabelFromWrap(wrap) {
     return wrap.querySelector('.pro-sku p')?.textContent?.trim() || '';
   }
 
   // ---------- Parse within wrapper ----------
-  // returns Map<sizeKey -> { qty:number }>
   function parseWrapToQtyMap(wrap, pid, kleurcode) {
     const m = new Map();
     const dbg = [];
@@ -207,13 +227,13 @@
         const r = readRemoteInventoryFromBox_STRICT(box);
 
         if (!r.present) {
-          dbg.push({ pid, kleurcode, type:'1D', size:sizeKey, present:false, qty:null });
+          dbg.push({ pid, kleurcode, type: '1D', size: sizeKey, present: false, qty: null });
           continue;
         }
 
         const remoteQty = r.qty;
         m.set(sizeKey, { qty: remoteQty });
-        dbg.push({ pid, kleurcode, type:'1D', size:sizeKey, present:true, qty:remoteQty });
+        dbg.push({ pid, kleurcode, type: '1D', size: sizeKey, present: true, qty: remoteQty });
       }
     }
 
@@ -241,18 +261,18 @@
             const r = readRemoteInventoryFromBox_STRICT(cell);
 
             if (!r.present) {
-              dbg.push({ pid, kleurcode, type:'3D', size:sizeKey, present:false, qty:null });
+              dbg.push({ pid, kleurcode, type: '3D', size: sizeKey, present: false, qty: null });
               return;
             }
 
             const remoteQty = r.qty;
-
             const prev = m.get(sizeKey);
+
             if (!prev || remoteQty > prev.qty) {
               m.set(sizeKey, { qty: remoteQty });
             }
 
-            dbg.push({ pid, kleurcode, type:'3D', size:sizeKey, present:true, qty:remoteQty });
+            dbg.push({ pid, kleurcode, type: '3D', size: sizeKey, present: true, qty: remoteQty });
           });
         }
       }
@@ -268,7 +288,6 @@
     const wrap = findSelectWrapByExactPid(doc, pid);
     const kleurLabel = readKleurLabelFromWrap(wrap);
 
-    // sanity: labelCode vs kleurcode
     if (kleurcode && kleurLabel) {
       const labelCode = (kleurLabel.match(/^([A-Za-z0-9]+)/)?.[1] || '').trim();
       if (labelCode && labelCode !== kleurcode) {
@@ -280,7 +299,7 @@
     return { qtyMap, kleurcode, kleurLabel };
   }
 
-  // ---------- Apply rules (VCP2: SR.mapRemoteToTarget + SR.reconcile + Core.markRow) ----------
+  // ---------- Apply rules ----------
   function applyRulesOnTable(table, qtyMap, pid, kleurcode, brandKey) {
     const rows = table.querySelectorAll('tbody tr');
     const report = [];
@@ -289,7 +308,7 @@
     rows.forEach(row => Core.clearRowMarks(row));
 
     rows.forEach(row => {
-      const sizeTd  = row.children?.[0];
+      const sizeTd = row.children?.[0];
       const stockTd = row.children?.[1];
       if (!sizeTd || !stockTd) return;
 
@@ -302,7 +321,8 @@
       // STRICT: als maat niet in remote => niets doen
       if (!remoteObj) {
         report.push({
-          pid, kleurcode,
+          pid,
+          kleurcode,
           maat,
           local,
           remotePresent: false,
@@ -322,22 +342,33 @@
       let status = 'ok';
 
       if (res.action === 'bijboeken' && delta > 0) {
-        Core.markRow(row, { action:'add', delta, title:`Bijboeken ${delta} (target ${target}, remoteQty ${remoteQty})` });
+        Core.markRow(row, {
+          action: 'add',
+          delta,
+          title: `Bijboeken ${delta} (target ${target}, remoteQty ${remoteQty})`
+        });
         status = 'bijboeken';
         if (!firstMut) firstMut = row;
-
       } else if (res.action === 'uitboeken' && delta > 0) {
-        Core.markRow(row, { action:'remove', delta, title:`Uitboeken ${delta} (target ${target}, remoteQty ${remoteQty})` });
+        Core.markRow(row, {
+          action: 'remove',
+          delta,
+          title: `Uitboeken ${delta} (target ${target}, remoteQty ${remoteQty})`
+        });
         status = 'uitboeken';
         if (!firstMut) firstMut = row;
-
       } else {
-        Core.markRow(row, { action:'none', delta:0, title:`OK (target ${target}, remoteQty ${remoteQty})` });
+        Core.markRow(row, {
+          action: 'none',
+          delta: 0,
+          title: `OK (target ${target}, remoteQty ${remoteQty})`
+        });
         status = 'ok';
       }
 
       report.push({
-        pid, kleurcode,
+        pid,
+        kleurcode,
         maat,
         local,
         remotePresent: true,
@@ -362,12 +393,12 @@
     return diffs === 0 ? 'ok' : 'afwijking';
   }
 
-  function isNotFoundError(err){
+  function isNotFoundError(err) {
     const msg = String(err?.message || err || '').toUpperCase();
     if (/HTTP\s(401|403|404|410)/.test(msg)) return true;
     if (/HTTP\s5\d{2}/.test(msg)) return true;
     if (/SYNTAXERROR/.test(msg)) return true;
-    if (/UNEXPECTED\s+TOKEN/.test(msg)) return true; // HTML ipv HTML? (rare)
+    if (/UNEXPECTED\s+TOKEN/.test(msg)) return true;
     if (msg.includes('NO_INVENTORY_IN_HTML')) return true;
     if (msg.includes('PID_WRAP_NOT_FOUND')) return true;
     return false;
@@ -382,7 +413,6 @@
 
       if (!pid) {
         Logger.status(anchorId, 'niet-gevonden');
-        Logger.perMaat(anchorId, []);
         return 0;
       }
 
@@ -394,14 +424,14 @@
 
         if (!qtyMap || qtyMap.size === 0) {
           Logger.status(anchorId, 'niet-gevonden', { kleurcode, kleurLabel });
-          Logger.perMaat(anchorId, []);
           return 0;
         }
 
         const { diffs, report } = applyRulesOnTable(table, qtyMap, pid, kleurcode, brandKey);
 
         Logger.status(anchorId, logStatusFromReport(report, qtyMap), {
-          kleurcode, kleurLabel,
+          kleurcode,
+          kleurLabel,
           diffs,
           missingRemote: report.filter(r => r.status === 'ignored_missing_remote').length
         });
@@ -410,66 +440,62 @@
         return diffs;
 
       } catch (e) {
-        console.error('[AfterEden] error for pid', pid, e);
-
         const msg = String(e?.message || e);
-        if (/LOGIN_REQUIRED/i.test(msg)) {
-          alert('Login required. Log in op bcg.fashionportal.shop en probeer opnieuw.');
-        }
-        if (/NO_INVENTORY_IN_HTML/i.test(msg)) {
-          alert('After Eden: geen inventory in HTML (mogelijk sessie/cookie issue). Log in en probeer opnieuw.');
-        }
-        if (/PID_WRAP_NOT_FOUND|AMBIGUOUS_PID_WRAP|KLEURCODE_MISMATCH/i.test(msg)) {
-          alert(`After Eden: kleur/PID match faalt.\nPID: ${pid}\nKleurcode: ${kleurcode || '(none)'}\n${msg}`);
-        }
 
-        Logger.status(anchorId, isNotFoundError(e) ? 'niet-gevonden' : 'afwijking', { error: msg, kleurcode });
-        Logger.perMaat(anchorId, []);
+        debugConsole('info', '[AfterEden]', {
+          pid,
+          kleurcode,
+          status: isNotFoundError(e) ? 'niet-gevonden' : 'afwijking',
+          message: msg
+        });
+
+        Logger.status(
+          anchorId,
+          isNotFoundError(e) ? 'niet-gevonden' : 'afwijking',
+          { error: msg, kleurcode }
+        );
+
         return 0;
       }
     };
   }
 
   // ---------- UI / Supplier selection ----------
-  function getSelectedSupplierText(){
+  function getSelectedSupplierText() {
     const sel = $('#leverancier-keuze');
     if (!sel) return '';
     return String(sel.options?.[sel.selectedIndex]?.text || sel.value || '').trim();
   }
 
-  function isAfterEdenSelected(){
+  function isAfterEdenSelected() {
     const sel = $('#leverancier-keuze');
     if (!sel) return false;
-    const blob = `${norm(sel.value||'')} ${norm(getSelectedSupplierText())}`;
+    const blob = `${norm(sel.value || '')} ${norm(getSelectedSupplierText())}`;
     return blob.includes('after') && blob.includes('eden');
   }
 
-  function isElbrinaSelected(){
+  function isElbrinaSelected() {
     const sel = $('#leverancier-keuze');
     if (!sel) return false;
-    const blob = `${norm(sel.value||'')} ${norm(getSelectedSupplierText())}`;
+    const blob = `${norm(sel.value || '')} ${norm(getSelectedSupplierText())}`;
     return blob.includes('elbrina');
   }
 
-  function resolveBrandKey(){
-    // StockRules brand key die jij hanteert.
-    // Als jij liever "aftereden" en "elbrina" apart mapped: kan.
-    // Nu: beide naar aftereden (zelfde remote bron/regels).
+  function resolveBrandKey() {
     return (isElbrinaSelected() ? 'elbrina' : 'aftereden');
   }
 
-  function resolveButtonLabel(){
+  function resolveButtonLabel() {
     return isElbrinaSelected() ? 'Elbrina' : 'After Eden';
   }
 
-  async function run(btn){
+  async function run(btn) {
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) return;
 
     const brandKey = resolveBrandKey();
     const perTable = await perTableFactory(brandKey);
 
-    // concurrency via Core (geen eigen progress meer)
     await Core.runTables({
       btn,
       tables,
@@ -478,7 +504,6 @@
     });
   }
 
-  // ✅ nieuwe knop-naam-regel
   Core.mountSupplierButton({
     id: 'vcp2-aftereden-btn',
     text: '🔍 Check Stock | After Eden',
@@ -490,7 +515,6 @@
     },
     onClick: (btn) => run(btn),
     onTick: (btn) => {
-      // update label dynamisch als gebruiker wisselt tussen After Eden en Elbrina
       const name = resolveButtonLabel();
       btn.textContent = `🔍 Check Stock | ${name}`;
     }
