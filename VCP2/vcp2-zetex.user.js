@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Zetex
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      5.0
+// @version      5.1
 // @description  Vergelijk local stock met die van de leverancier (remote) via Zetex validate.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -241,69 +241,69 @@
       return await res.text();
     }
 
-async function fetchZetexValidate(styleId, cartId, payload, timeout = TIMEOUT_MS) {
-  const raw = GM_getValue(AUTH_HEADER_KEY, null);
+    async function fetchZetexValidate(styleId, cartId, payload, timeout = TIMEOUT_MS) {
+      const raw = GM_getValue(AUTH_HEADER_KEY, null);
 
-  let auth = null;
-  let sessionStore = null;
-  let sessionCart  = null;
+      let auth = null;
+      let sessionStore = null;
+      let sessionCart  = null;
 
-  if (raw && typeof raw === 'object') {
-    auth         = raw.auth || null;
-    sessionStore = raw.webstoreId || null;
-    sessionCart  = raw.cartId || null;
-  } else {
-    auth = raw;
-  }
+      if (raw && typeof raw === 'object') {
+        auth         = raw.auth || null;
+        sessionStore = raw.webstoreId || null;
+        sessionCart  = raw.cartId || null;
+      } else {
+        auth = raw;
+      }
 
-  if (!sessionStore) {
-    throw new Error('Geen webstoreId gevonden in Zetex-session.');
-  }
+      if (!sessionStore) {
+        throw new Error('Geen webstoreId gevonden in Zetex-session.');
+      }
 
-  const effectiveCartId = cartId || sessionCart;
-  if (!effectiveCartId) {
-    throw new Error('Geen cartId gevonden in Zetex-session.');
-  }
+      const effectiveCartId = cartId || sessionCart;
+      if (!effectiveCartId) {
+        throw new Error('Geen cartId gevonden in Zetex-session.');
+      }
 
-  const url =
-    `https://b2b.zetex.nl/api/shop/webstores/${encodeURIComponent(sessionStore)}` +
-    `/carts/${encodeURIComponent(effectiveCartId)}` +
-    `/product-styles/${encodeURIComponent(styleId)}/lines/validate`;
+      const url =
+        `https://b2b.zetex.nl/api/shop/webstores/${encodeURIComponent(sessionStore)}` +
+        `/carts/${encodeURIComponent(effectiveCartId)}` +
+        `/product-styles/${encodeURIComponent(styleId)}/lines/validate`;
 
-  const ctrl = new AbortController();
-  const to   = setTimeout(() => ctrl.abort(), timeout);
+      const ctrl = new AbortController();
+      const to   = setTimeout(() => ctrl.abort(), timeout);
 
-  const headers = {
-    'Accept': 'application/json, text/plain, */*',
-    'Content-Type': 'application/json;charset=UTF-8'
-  };
-  if (auth) headers['Authorization'] = auth;
+      const headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'Content-Type': 'application/json;charset=UTF-8'
+      };
+      if (auth) headers['Authorization'] = auth;
 
-  const f = pageFetch || w.fetch.bind(w);
-  const res = await f(url, {
-    method: 'POST',
-    headers,
-    credentials: 'include',
-    body: JSON.stringify(payload),
-    signal: ctrl.signal
-  });
+      const f = pageFetch || w.fetch.bind(w);
+      const res = await f(url, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(payload),
+        signal: ctrl.signal
+      });
 
-  clearTimeout(to);
+      clearTimeout(to);
 
-  const text = await res.text();
+      const text = await res.text();
 
-  if (!res.ok) {
-    console.error('[Zetex][VALIDATE][HTTP ERROR]', {
-      status: res.status,
-      url,
-      payload,
-      responseText: text
-    });
-    throw new Error(`HTTP ${res.status} :: ${text}`);
-  }
+      if (!res.ok) {
+        console.error('[Zetex][VALIDATE][HTTP ERROR]', {
+          status: res.status,
+          url,
+          payload,
+          responseText: text
+        });
+        throw new Error(`HTTP ${res.status} :: ${text}`);
+      }
 
-  return text;
-}
+      return text;
+    }
 
     GM_addValueChangeListener(REQ_KEY, (_name, _old, req) => {
       if (!req || !req.id || !req.styleId) return;
@@ -491,8 +491,18 @@ async function fetchZetexValidate(styleId, cartId, payload, timeout = TIMEOUT_MS
   }
 
   function extractOverageFromMessage(msg = '') {
-    const m = String(msg).match(/\((\d+)\s+te\s+veel\)/i);
-    return m ? parseInt(m[1], 10) : null;
+    const text = String(msg);
+
+    let m = text.match(/\((\d+)\s+te\s+veel\)/i);
+    if (m) return parseInt(m[1], 10);
+
+    m = text.match(/\((\d+)\s+too\s+many\)/i);
+    if (m) return parseInt(m[1], 10);
+
+    m = text.match(/\((\d+)\s+excess\)/i);
+    if (m) return parseInt(m[1], 10);
+
+    return null;
   }
 
   function parseZetexStyleColor(raw) {
@@ -567,61 +577,61 @@ async function fetchZetexValidate(styleId, cartId, payload, timeout = TIMEOUT_MS
     return null;
   }
 
-function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByEan = {}, styleIdFallback = '') {
-  const list = Array.isArray(productsJson)
-    ? productsJson
-    : (productsJson && Array.isArray(productsJson.products))
-      ? productsJson.products
-      : [];
+  function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByEan = {}, styleIdFallback = '') {
+    const list = Array.isArray(productsJson)
+      ? productsJson
+      : (productsJson && Array.isArray(productsJson.products))
+        ? productsJson.products
+        : [];
 
-  const wanted = String(wantedColorCode || '').trim().toUpperCase();
+    const wanted = String(wantedColorCode || '').trim().toUpperCase();
 
-  return list.map(prod => {
-    const prodColor = String(prod.colorCode || '').trim().toUpperCase();
-    const deliveryDate =
-      prod.deliveryDate ||
-      prod.requestedDeliveryStartDate ||
-      prod.selectableRequestedDeliveryRangeStartDate ||
-      null;
+    return list.map(prod => {
+      const prodColor = String(prod.colorCode || '').trim().toUpperCase();
+      const deliveryDate =
+        prod.deliveryDate ||
+        prod.requestedDeliveryStartDate ||
+        prod.selectableRequestedDeliveryRangeStartDate ||
+        null;
 
-    const entries = Array.isArray(prod.skus) ? prod.skus.map(sku => {
-      const ean = String(sku.eanCode || '').trim();
+      const entries = Array.isArray(prod.skus) ? prod.skus.map(sku => {
+        const ean = String(sku.eanCode || '').trim();
+
+        return {
+          sizeName: String(sku.sizeName || sku.sizeDisplayName || '').trim() || null,
+          subsizeName: String(sku.subSizeName || '').trim() || null,
+          eanCode: ean,
+          quantity: prodColor === wanted
+            ? Number(probeQtyByEan[ean] || 0)
+            : 0
+        };
+      }) : [];
 
       return {
-        sizeName: String(sku.sizeName || sku.sizeDisplayName || '').trim() || null,
-        subsizeName: String(sku.subSizeName || '').trim() || null,
-        eanCode: ean,
-        quantity: prodColor === wanted
-          ? Number(probeQtyByEan[ean] || 0)
-          : 0
+        productUniqueId: String(
+          prod.productUniqueId ||
+          prod.styleId ||
+          prod.productId ||
+          styleIdFallback ||
+          ''
+        ).trim(),
+        productColorCode: String(prod.colorCode || '').trim(),
+        manualDiscountPercentage: 0,
+        deliveryDate,
+        deliveryWindowCode: null,
+        lockDelivery: true,
+        entries,
+        productCollectionId: String(
+          prod.collectionId ||
+          prod.productCollectionId ||
+          'Zetex_01'
+        ).trim(),
+        discountGroupCode: null,
+        orderLineTypeCode: '',
+        remark: null
       };
-    }) : [];
-
-    return {
-      productUniqueId: String(
-        prod.productUniqueId ||
-        prod.styleId ||
-        prod.productId ||
-        styleIdFallback ||
-        ''
-      ).trim(),
-      productColorCode: String(prod.colorCode || '').trim(),
-      manualDiscountPercentage: 0,
-      deliveryDate,
-      deliveryWindowCode: null,
-      lockDelivery: true,
-      entries,
-      productCollectionId: String(
-        prod.collectionId ||
-        prod.productCollectionId ||
-        'Zetex_01'
-      ).trim(),
-      discountGroupCode: null,
-      orderLineTypeCode: '',
-      remark: null
-    };
-  });
-}
+    });
+  }
 
   function buildProbeQtyMapForTable(localTable, gridJson, wantedColorCode, probeQty = PROBE_QTY) {
     const qtyMap = {};
@@ -691,6 +701,10 @@ function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByE
         let stock = requestedQty;
         let exact = false;
 
+        const hasInsufficientStockError = errs.some(
+          err => err?.messageType === 'INSUFFICIENT_STOCK'
+        );
+
         for (const err of errs) {
           if (err?.messageType !== 'INSUFFICIENT_STOCK') continue;
 
@@ -702,6 +716,13 @@ function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByE
           }
         }
 
+        // Fallback:
+        // wel voorraadfout, maar exacte hoeveelheid niet uit de melding te halen
+        // => behandel als beperkt leverbaar en zet stock op 1
+        if (hasInsufficientStockError && !exact) {
+          stock = 1;
+        }
+
         if (!maat) continue;
 
         for (const key of aliasCandidates(maat)) {
@@ -710,7 +731,8 @@ function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByE
             stock,
             ean,
             exact,
-            requestedQty
+            requestedQty,
+            hasInsufficientStockError
           };
         }
       }
@@ -719,20 +741,20 @@ function buildValidatePayloadFromGrid(productsJson, wantedColorCode, probeQtyByE
     return map;
   }
 
-async function getValidateForTable(styleId, colorCode, localTable, cartId) {
-  const gridJson = await getGrid(styleId, cartId);
-  const probeQtyMap = buildProbeQtyMapForTable(localTable, gridJson, colorCode, PROBE_QTY);
-  const payload = buildValidatePayloadFromGrid(gridJson, colorCode, probeQtyMap, styleId);
+  async function getValidateForTable(styleId, colorCode, localTable, cartId) {
+    const gridJson = await getGrid(styleId, cartId);
+    const probeQtyMap = buildProbeQtyMapForTable(localTable, gridJson, colorCode, PROBE_QTY);
+    const payload = buildValidatePayloadFromGrid(gridJson, colorCode, probeQtyMap, styleId);
 
-  console.log('[Zetex][DEBUG] validate payload for', styleId, colorCode, payload);
+    console.log('[Zetex][DEBUG] validate payload for', styleId, colorCode, payload);
 
-  const text = await bridgeValidate(styleId, cartId, payload);
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+    const text = await bridgeValidate(styleId, cartId, payload);
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
   }
-}
 
   function applyRulesAndMark(localTable, statusMap) {
     const rows = localTable.querySelectorAll('tbody tr');
