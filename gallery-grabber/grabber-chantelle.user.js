@@ -35,8 +35,13 @@
     btn.style.fontFamily = 'inherit';
     btn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.4)';
 
-    btn.addEventListener('mouseover', () => (btn.style.background = 'rgba(0,0,0,0.9)'));
-    btn.addEventListener('mouseout', () => (btn.style.background = 'rgba(0,0,0,0.75)'));
+    btn.addEventListener('mouseover', () => {
+      btn.style.background = 'rgba(0,0,0,0.9)';
+    });
+
+    btn.addEventListener('mouseout', () => {
+      btn.style.background = 'rgba(0,0,0,0.75)';
+    });
 
     btn.addEventListener('click', async () => {
       try {
@@ -50,24 +55,16 @@
     document.body.appendChild(btn);
   }
 
-  // ---------- Helpers ----------
   function normalizeUrl(url) {
     if (!url) return '';
     let u = String(url).trim();
 
-    // protocol-relative -> https
     if (u.startsWith('//')) u = 'https:' + u;
 
-    // unescape basic html entities if they ever come through as text
     u = u.replace(/&amp;/g, '&').replace(/&quot;/g, '"');
 
     return u;
   }
-    function getSkuFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const sku = params.get('sku');
-  return safeSlug(sku || '');
-}
 
   function uniqByUrl(items) {
     const seen = new Set();
@@ -86,32 +83,12 @@
       .replace(/[^\w\-]/g, '');
   }
 
-  function fileBase(url) {
-    const clean = (url || '').split('?')[0];
-    return clean.split('/').pop() || 'image.jpg';
+  function getSkuFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const sku = params.get('sku');
+    return safeSlug(sku || '');
   }
 
-  function guessProductCodeFromUrl(url) {
-    // Chantelle voorbeelden:
-    // .../C010PF-011_S_SLASH_PACK_WEB_OB_PS1.jpg  -> C010PF-011
-    // .../C010PF-011_B75_SLASH_ECOM_CROP_WEB_WH_FT.jpg -> C010PF-011
-    const clean = (url || '').split('?')[0];
-    const file = clean.split('/').pop() || '';
-    const m = file.match(/^([A-Z0-9]+-[A-Z0-9]+)_/i);
-    return m ? safeSlug(m[1]) : '';
-  }
-
-  function guessProductCode(items) {
-    for (const it of items) {
-      const productCode = getSkuFromUrl() || guessProductCode(items);
-      if (code) return code;
-    }
-    // fallback: laatste stuk pathname
-    const pathSlug = safeSlug(location.pathname.split('/').filter(Boolean).pop() || '');
-    return pathSlug || 'product';
-  }
-
-  // ---------- Chantelle ----------
   async function downloadChantelle() {
     const container =
       document.querySelector('#photoContainer') ||
@@ -122,9 +99,15 @@
       return;
     }
 
+    const productCode = getSkuFromUrl();
+
+    if (!productCode) {
+      alert('Geen SKU gevonden in de pagina-URL.');
+      return;
+    }
+
     const collected = [];
 
-    // Main image
     const mainImg =
       container.querySelector('.cc_main_prod_image img.mainProdImage') ||
       container.querySelector('.cc_main_prod_image img') ||
@@ -135,7 +118,6 @@
       if (url) collected.push({ url });
     }
 
-    // Alternates (jouw snippet heeft data-id met full url)
     const alternates = Array.from(
       container.querySelectorAll('img.cc_alternate, img.alternate, img.thumbnail')
     );
@@ -145,34 +127,28 @@
       if (url) collected.push({ url });
     });
 
-    let items = uniqByUrl(collected);
+    const items = uniqByUrl(collected);
 
     if (!items.length) {
       alert('Geen Chantelle afbeeldingen gevonden in de gallery.');
       return;
     }
 
-    const productCode = guessProductCode(items);
+    const brandPrefix = productCode.startsWith('F') ? 'femilet_' : 'chantelle_';
 
     items.forEach((it, idx) => {
-      const base = fileBase(it.url);
       const index = idx + 1;
-
-// bepaal prefix op basis van productCode
-let brandPrefix = 'chantelle_';
-if (productCode.startsWith('F')) {
-  brandPrefix = 'femilet_';
-}
-
-const filename = `${brandPrefix}${productCode}_${index}.jpg`;
-      GM_download({ url: it.url, name: filename, saveAs: false });
+      const filename = `${brandPrefix}${productCode}_${index}.jpg`;
+      GM_download({
+        url: it.url,
+        name: filename,
+        saveAs: false
+      });
     });
   }
 
-  // init
   window.addEventListener('load', ensureButton);
 
-  // Keep button alive on SPA-ish pages
   const observer = new MutationObserver(() => ensureButton());
   observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
