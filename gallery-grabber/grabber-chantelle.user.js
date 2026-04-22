@@ -63,6 +63,11 @@
 
     return u;
   }
+    function getSkuFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const sku = params.get('sku');
+  return safeSlug(sku || '');
+}
 
   function uniqByUrl(items) {
     const seen = new Set();
@@ -98,7 +103,7 @@
 
   function guessProductCode(items) {
     for (const it of items) {
-      const code = guessProductCodeFromUrl(it.url);
+      const productCode = getSkuFromUrl() || guessProductCode(items);
       if (code) return code;
     }
     // fallback: laatste stuk pathname
