@@ -151,7 +151,15 @@
 
     items.forEach((it, idx) => {
       const base = fileBase(it.url);
-      const filename = `chantelle_${productCode}_${idx + 1}_${base}`;
+      const index = idx + 1;
+
+// bepaal prefix op basis van productCode
+let brandPrefix = 'chantelle_';
+if (productCode.startsWith('F')) {
+  brandPrefix = 'femilet_';
+}
+
+const filename = `${brandPrefix}${productCode}_${index}.jpg`;
       GM_download({ url: it.url, name: filename, saveAs: false });
     });
   }
