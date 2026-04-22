@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Gallery Grabber | Chantelle
-// @version      1.0
+// @version      2.0
 // @description  Download alle afbeeldingen uit de Chantelle B2B/PDP fotogallery (#photoContainer)
 // @match        https://chantelle-lingerie.my.site.com/DefaultStore/ccrz__ProductDetails*
 // @run-at       document-idle
