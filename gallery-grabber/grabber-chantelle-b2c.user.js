@@ -135,15 +135,15 @@
     return safeSlug(tail);
   }
 
-  function guessFilename(item, index, productCode) {
-    const alt = String(item.alt || '').trim();
+function guessFilename(item, index, productCode) {
+  const alt = String(item.alt || '').trim();
 
-    if (alt) {
-      return `${safeSlug(alt)}.jpg`;
-    }
-
-    return `${productCode}_${String(index + 1).padStart(2, '0')}.jpg`;
+  if (alt) {
+    return `chantelle_${safeSlug(alt)}.jpg`;
   }
+
+  return `chantelle_${productCode}_${String(index + 1).padStart(2, '0')}.jpg`;
+}
 
   function triggerDownload(url, filename) {
     log('download:', filename, url);
