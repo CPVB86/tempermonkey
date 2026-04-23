@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         2Order | Anita Sale Mapper
 // @namespace    https://www.dutchdesignersoutlet.nl/
-// @version      1.1
+// @version      1.2
 // @description  Vult Anita/Rosa Faia links in Paste2Order aan met juiste VAKN (SVCO/SVBA) + kleurtjes
 // @match        https://lingerieoutlet.nl/tools/2order/*
 // @run-at       document-idle
@@ -61,39 +61,43 @@
 
     // SPID parser (zoals in jouw scripts)
     function parseFromSupplierPid(pidRaw) {
-        // Voorbeelden:
-        //  4785X-741
-        //  M5 7811-186
-        //  M5-7811-186
-        let koll = '';
-        let arnr = '';
-        let fbnr = '';
+    let koll = '';
+    let arnr = '';
+    let fbnr = '';
 
-        pidRaw = (pidRaw || '').trim();
+    pidRaw = (pidRaw || '').trim();
 
-        let m = pidRaw.match(/^([A-Za-z0-9]{2})\s*[- ]?(\d{4}[A-Za-z]?)\-(\d{3})$/);
-        if (m) {
-            koll = m[1].toUpperCase();
-            arnr = m[2];
-            fbnr = m[3];
-            return { koll, arnr, fbnr };
-        }
+    // Voorbeelden:
+    // M5-7811-186
+    // M5-8816-1-563
+    // M6-8769-0-001
+    // 8816-1-563
+    // 7811-186
+    // 4785X-741
 
-        m = pidRaw.match(/^(\d{4}[A-Za-z]?)\-(\d{3})$/);
-        if (m) {
-            arnr = m[1];
-            fbnr = m[2];
-            return { koll: '', arnr, fbnr };
-        }
-
-        m = pidRaw.match(/^(\d{4}[A-Za-z]?)$/);
-        if (m) {
-            arnr = m[1];
-            return { koll: '', arnr, fbnr: '' };
-        }
-
-        return null;
+    let m = pidRaw.match(/^([A-Za-z0-9]{2})\s*[- ]?(\d{4}[A-Za-z]?(?:-\d+)?)\-(\d{3})$/);
+    if (m) {
+        koll = m[1].toUpperCase();
+        arnr = m[2];
+        fbnr = m[3];
+        return { koll, arnr, fbnr };
     }
+
+    m = pidRaw.match(/^(\d{4}[A-Za-z]?(?:-\d+)?)\-(\d{3})$/);
+    if (m) {
+        arnr = m[1];
+        fbnr = m[2];
+        return { koll: '', arnr, fbnr };
+    }
+
+    m = pidRaw.match(/^(\d{4}[A-Za-z]?(?:-\d+)?)$/);
+    if (m) {
+        arnr = m[1];
+        return { koll: '', arnr, fbnr: '' };
+    }
+
+    return null;
+}
 
     function buildSaleUrl(arnr, fbnr, vakn, koll) {
         return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=${encodeURIComponent(
