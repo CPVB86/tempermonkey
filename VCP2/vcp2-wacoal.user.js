@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Wacoal
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.1
+// @version      3.4
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -18,39 +18,43 @@
 
   const g = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const Core = g.VCPCore;
-  const SR   = g.StockRules;
+  const SR = g.StockRules;
 
   if (!Core) {
     console.error('[VCP2|Wacoal] VCPCore ontbreekt. Check @require vcp-core.js');
     return;
   }
+
   if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
     console.error('[VCP2|Wacoal] StockRules ontbreekt of incompleet. Check @require stockrules.js');
     return;
   }
 
-  // ---------- Config ----------
   const TIMEOUT = 15000;
 
   const SUPPORTED_BRANDS = new Set([
-    'wacoal','freya','freya swim','fantasie','fantasie swim','elomi','elomi swim','wacoal group'
+    'wacoal', 'freya', 'freya swim', 'fantasie', 'fantasie swim',
+    'elomi', 'elomi swim', 'wacoal group'
   ]);
 
-  const $ = (s, r=document) => r.querySelector(s);
-  const norm = (s='') => String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
+  const $ = (s, r = document) => r.querySelector(s);
 
-  // ---------- Logger (status -> logboek; mapping -> console) ----------
+  const norm = (s = '') =>
+    String(s).toLowerCase().trim().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+
   const Logger = {
     lb() {
       return (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek)
         ? unsafeWindow.logboek
         : window.logboek;
     },
+
     status(id, txt) {
       const lb = this.lb();
       if (lb?.resultaat) lb.resultaat(String(id), txt);
       else console.info(`[Wacoal][${id}] status: ${txt}`);
     },
+
     perMaat(id, report) {
       console.groupCollapsed(`[Wacoal][${id}] maatvergelijking`);
       try {
@@ -58,317 +62,509 @@
           maat: r.maat,
           local: r.local,
           remoteStatus: r.remoteStatus || '—',
-          remote: Number.isFinite(r.remote) ? r.remote : '—',
+          remote: r.remote ?? '—',
           target: Number.isFinite(r.target) ? r.target : '—',
           delta: Number.isFinite(r.delta) ? r.delta : '—',
           status: r.status
         })));
-      } finally { console.groupEnd(); }
+      } finally {
+        console.groupEnd();
+      }
     }
   };
 
-  // ---------- Helpers ----------
-  function gmFetch(url){
-    return new Promise((resolve,reject)=>{
-      GM_xmlhttpRequest({
-        method:'GET',
-        url,
-        withCredentials:true,
-        timeout: TIMEOUT,
-        headers:{
-          'Accept':'application/json,text/html;q=0.8,*/*;q=0.5',
-          'User-Agent': navigator.userAgent
-        },
-        onload:(r)=> (r.status>=200 && r.status<400)
-          ? resolve(r.responseText||'')
-          : reject(new Error(`HTTP ${r.status} @ ${url}`)),
-        onerror:reject,
-        ontimeout:()=>reject(new Error(`timeout @ ${url}`))
-      });
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function gmFetchOnce(url, meta = {}) {
+  const startedAt = Date.now();
+
+  return new Promise((resolve, reject) => {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url,
+      withCredentials: true,
+      timeout: TIMEOUT,
+      headers: {
+        Accept: 'application/json,text/html;q=0.8,*/*;q=0.5',
+        'User-Agent': navigator.userAgent
+      },
+
+      onload: r => {
+        resolve({
+          ok: true,
+          status: r.status,
+          statusText: r.statusText || '',
+          headers: r.responseHeaders || '',
+          text: r.responseText || '',
+          finalUrl: r.finalUrl || url,
+          duration: Date.now() - startedAt
+        });
+      },
+
+      onerror: r => {
+        reject({
+          type: 'onerror',
+          url,
+          meta,
+          duration: Date.now() - startedAt,
+          status: r?.status,
+          statusText: r?.statusText,
+          finalUrl: r?.finalUrl,
+          responseHeaders: r?.responseHeaders,
+          responseText: r?.responseText,
+          raw: r
+        });
+      },
+
+      ontimeout: r => {
+        reject({
+          type: 'timeout',
+          url,
+          meta,
+          duration: Date.now() - startedAt,
+          timeout: TIMEOUT,
+          raw: r
+        });
+      }
     });
+  });
+}
+
+async function gmFetch(url, meta = {}) {
+  const attempts = 3;
+  const delays = [500, 1500, 3000];
+
+  let lastError = null;
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      console.info(`[VCP2|Wacoal][REQUEST TRY ${i + 1}/${attempts}]`, meta.pid || '', url);
+
+      const res = await gmFetchOnce(url, {
+        ...meta,
+        attempt: i + 1
+      });
+
+      console.info(
+        `[VCP2|Wacoal][REQUEST OK]`,
+        meta.pid || '',
+        `HTTP ${res.status}`,
+        `${res.duration}ms`,
+        `length=${res.text.length}`
+      );
+
+      return res;
+
+    } catch (e) {
+      lastError = e;
+
+      console.warn(
+        `[VCP2|Wacoal][REQUEST FAILED ${i + 1}/${attempts}]`,
+        meta.pid || '',
+        e
+      );
+
+      if (i < attempts - 1) {
+        await sleep(delays[i]);
+      }
+    }
   }
 
-  function isNotFoundError(err){
-    const msg = String(err?.message || err || '').toUpperCase();
+  throw {
+    type: 'all_retries_failed',
+    url,
+    meta,
+    attempts,
+    lastError
+  };
+}
 
-    // hard HTTP codes (auth/blocked/removed)
-    if (/HTTP\s(401|403|404|410)/.test(msg)) return true;
+  function isWacoalServerErrorHtml(text) {
+    const body = String(text || '').toLowerCase();
 
-    // ✅ alle 5xx behandelen als niet-gevonden
-    if (/HTTP\s5\d{2}/.test(msg)) return true;
+    return body.includes('<html') && (
+      body.includes('<h1>server error</h1>') ||
+      body.includes('<h1>erreur du serveur</h1>') ||
+      body.includes('<h1>serverfehler</h1>') ||
+      body.includes('we are currently experiencing technical difficulties') ||
+      body.includes('nous rencontrons actuellement') ||
+      body.includes('wir haben derzeit technische probleme')
+    );
+  }
 
-    // lege/ongeldige response (HTML ipv JSON, etc.)
-    if (/SYNTAXERROR/.test(msg)) return true;
-    if (/UNEXPECTED\s+TOKEN/.test(msg)) return true;
+  function isHardNotFoundResponse(res) {
+    const status = Number(res?.status ?? NaN);
+    const text = String(res?.text || '');
 
-    // expliciete teksten
-    if (msg.includes('NO_RESULTS')) return true;
-    if (msg.includes('NOT FOUND')) return true;
+    if (status === 404 || status === 410) return true;
+    if (isWacoalServerErrorHtml(text)) return true;
 
     return false;
   }
 
-  // ✅ STRICT: alleen letterlijk IN_STOCK telt als "in stock"
-  // Alles anders (incl. WITHIN_STAGE1/2/3) => remote stock = 0
-  function isWacoalInStockStrict(wacoalStatusRaw){
+  function getEffectiveRemoteStock(stockLevel, wacoalStatusRaw) {
     const ws = String(wacoalStatusRaw || '').toUpperCase().trim();
-    return ws === 'IN_STOCK';
+    const qty = Number(stockLevel || 0) || 0;
+
+    if (ws === 'IN_STOCK') return qty;
+
+    return 0;
   }
 
-  // ---------- JSON -> statusMap (wacoalstockStatus leidend) ----------
-  function buildStatusMap(json){
+  function buildStatusMap(json) {
     const map = {};
 
-    // 1D sizing
-    if (!json?.is2DSizing){
+    if (!json?.is2DSizing) {
       for (const cell of (json?.sizeData || [])) {
         const sizeEU = (cell?.countrySizeMap?.EU || cell?.globalSize || '')
-          .toString().trim().toUpperCase();
+          .toString()
+          .trim()
+          .toUpperCase();
+
         if (!sizeEU) continue;
 
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
         const wacoal = String(cell?.stock?.wacoalstockStatus || '').toUpperCase();
+        const effectiveStock = getEffectiveRemoteStock(stockLevel, wacoal);
 
-        const inStock = isWacoalInStockStrict(wacoal);
-        const status  = inStock ? 'IN_STOCK' : 'OUT_OF_STOCK';
-        const stock   = inStock ? stockLevel : 0;
-
-        map[sizeEU] = { status, stock, wacoal };
+        map[sizeEU] = {
+          status: wacoal || 'UNKNOWN',
+          stock: effectiveStock,
+          wacoal
+        };
       }
+
       return map;
     }
 
-    // 2D sizing
     for (const row of (json?.sizeData || [])) {
       for (const cell of (row?.sizeFitData || [])) {
-        const bandEU = (cell?.countrySizeMap?.EU||'').toString().trim();
-        const cupEU  = (cell?.countryFitMap?.EU ||'').toString().trim();
+        const bandEU = (cell?.countrySizeMap?.EU || '').toString().trim();
+        const cupEU = (cell?.countryFitMap?.EU || '').toString().trim();
+
         if (!bandEU || !cupEU) continue;
 
         const key = `${bandEU}${cupEU}`.toUpperCase();
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
         const wacoal = String(cell?.stock?.wacoalstockStatus || '').toUpperCase();
+        const effectiveStock = getEffectiveRemoteStock(stockLevel, wacoal);
 
-        const inStock = isWacoalInStockStrict(wacoal);
-        const status  = inStock ? 'IN_STOCK' : 'OUT_OF_STOCK';
-        const stock   = inStock ? stockLevel : 0;
-
-        map[key] = { status, stock, wacoal };
+        map[key] = {
+          status: wacoal || 'UNKNOWN',
+          stock: effectiveStock,
+          wacoal
+        };
       }
     }
 
     return map;
   }
 
-  // resolveRemote: toleranties + slash-cups
-  function resolveRemote(map, label){
-    const raw = String(label||'').trim().toUpperCase();
+  function resolveRemote(map, label) {
+    const raw = String(label || '').trim().toUpperCase();
+
     if (Object.prototype.hasOwnProperty.call(map, raw)) return map[raw];
 
-    const nospace = raw.replace(/\s+/g,'');
+    const nospace = raw.replace(/\s+/g, '');
     if (Object.prototype.hasOwnProperty.call(map, nospace)) return map[nospace];
 
-    // 75G/H -> best of the two
     const m = raw.match(/^(\d+)\s*([A-Z]{1,2}(?:\/[A-Z]{1,2})+)$/);
+
     if (m) {
       const band = m[1];
       const cups = m[2].split('/');
-      const rank = x => x==='IN_STOCK'?1 : x==='OUT_OF_STOCK'?0 : -1;
-
       let best = null;
+
       for (const cup of cups) {
         const k = `${band}${cup}`.toUpperCase();
-        if (map[k] && (!best || rank(map[k].status) > rank(best.status))) best = map[k];
+        if (map[k] && (!best || map[k].stock > best.stock)) best = map[k];
       }
+
       if (best) return best;
     }
 
     if (raw.includes('/')) {
-      const rank = x => x==='IN_STOCK'?1 : x==='OUT_OF_STOCK'?0 : -1;
       let best = null;
 
       for (const part of raw.split('/').map(s => s.trim())) {
         const k1 = part.toUpperCase();
-        const k2 = part.replace(/\s+/g,'').toUpperCase();
+        const k2 = part.replace(/\s+/g, '').toUpperCase();
         const cand = map[k1] || map[k2];
-        if (cand && (!best || rank(cand.status) > rank(best.status))) best = cand;
+
+        if (cand && (!best || cand.stock > best.stock)) best = cand;
       }
+
       if (best) return best;
     }
 
     return undefined;
   }
 
-  // ---------- Apply rules (VCPCore row marks + StockRules reconcile) ----------
-  function applyRulesAndMark(localTable, statusMap){
+  function markAllLocalAsRemove(table, reason = 'niet gevonden bij Wacoal') {
+    const rows = table.querySelectorAll('tbody tr');
+    const report = [];
+    let firstMut = null;
+
+    rows.forEach(row => {
+      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+
+      if (local > 0) {
+        Core.markRow(row, {
+          action: 'remove',
+          delta: local,
+          title: `Uitboeken ${local} (${reason})`
+        });
+
+        if (!firstMut) firstMut = row;
+
+        report.push({
+          maat,
+          local,
+          remoteStatus: 'NOT_FOUND',
+          remote: 'not found',
+          target: 0,
+          delta: local,
+          status: 'uitboeken'
+        });
+      } else {
+        Core.markRow(row, {
+          action: 'none',
+          delta: 0,
+          title: `Geen lokale voorraad (${reason})`
+        });
+
+        report.push({
+          maat,
+          local,
+          remoteStatus: 'NOT_FOUND',
+          remote: 'not found',
+          target: 0,
+          delta: 0,
+          status: 'ok'
+        });
+      }
+    });
+
+    if (firstMut) Core.jumpFlash(firstMut);
+
+    return report;
+  }
+
+  function applyRulesAndMark(localTable, statusMap) {
     const rows = localTable.querySelectorAll('tbody tr');
     const report = [];
     let firstMut = null;
 
     rows.forEach(row => {
-      const maat  = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
       const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
 
       const remoteEntry = resolveRemote(statusMap, maat);
+      const supplierQty = remoteEntry ? (Number(remoteEntry.stock ?? 0) || 0) : 0;
 
-      // ✅ resumé rule:
-      // IN_STOCK => logica toepassen met stock
-      // NIET IN_STOCK => remote stock 0
-      const supplierQty = (remoteEntry?.status === 'IN_STOCK')
-        ? (Number(remoteEntry?.stock ?? 0) || 0)
+      const target = remoteEntry
+        ? (supplierQty > 0 ? SR.mapRemoteToTarget('wacoal', supplierQty, 5) : 0)
         : 0;
 
-      // target policy:
-      // - remoteEntry bestaat: supplierQty>0 => mapRemoteToTarget, anders 0
-      // - onbekend: target null => local>0 remove all else ignore
-      let target = null;
-      if (remoteEntry) {
-        target = (supplierQty > 0) ? SR.mapRemoteToTarget('wacoal', supplierQty, 5) : 0;
-      } else {
-        target = null;
-      }
+      const res = SR.reconcile(local, target, 5);
+      const delta = res.delta;
 
       let status = 'ok';
-      let delta = 0;
 
-      if (target === null) {
-        if (local > 0) {
-          delta = local;
-          Core.markRow(row, { action: 'remove', delta, title: `Uitboeken ${delta} (maat onbekend bij Wacoal)` });
-          status = 'uitboeken';
-          if (!firstMut) firstMut = row;
-        } else {
-          Core.markRow(row, { action: 'none', delta: 0, title: 'Negeren (maat onbekend bij Wacoal)' });
-          status = 'negeren';
-        }
+      if (res.action === 'bijboeken' && delta > 0) {
+        Core.markRow(row, {
+          action: 'add',
+          delta,
+          title: `Bijboeken ${delta} (target ${target}, supplier qty ${supplierQty})`
+        });
+
+        status = 'bijboeken';
+        if (!firstMut) firstMut = row;
+      } else if (res.action === 'uitboeken' && delta > 0) {
+        Core.markRow(row, {
+          action: 'remove',
+          delta,
+          title: remoteEntry
+            ? `Uitboeken ${delta} (target ${target}, supplier qty ${supplierQty})`
+            : `Uitboeken ${delta} (maat niet gevonden bij Wacoal)`
+        });
+
+        status = 'uitboeken';
+        if (!firstMut) firstMut = row;
       } else {
-        const res = SR.reconcile(local, target, 5);
-        delta = res.delta;
-
-        if (res.action === 'bijboeken' && delta > 0) {
-          Core.markRow(row, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, supplier qty ${supplierQty})` });
-          status = 'bijboeken';
-          if (!firstMut) firstMut = row;
-
-        } else if (res.action === 'uitboeken' && delta > 0) {
-          Core.markRow(row, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, supplier qty ${supplierQty})` });
-          status = 'uitboeken';
-          if (!firstMut) firstMut = row;
-
-        } else {
-          Core.markRow(row, { action: 'none', delta: 0, title: `OK (target ${target}, supplier qty ${supplierQty})` });
-          status = 'ok';
-        }
+        Core.markRow(row, {
+          action: 'none',
+          delta: 0,
+          title: remoteEntry
+            ? `OK (target ${target}, supplier qty ${supplierQty})`
+            : 'OK / geen lokale voorraad (maat niet gevonden bij Wacoal)'
+        });
       }
 
       report.push({
         maat,
         local,
-        remoteStatus: remoteEntry?.wacoal || remoteEntry?.status || '',
-        remote: supplierQty,
-        target: Number.isFinite(target) ? target : NaN,
+        remoteStatus: remoteEntry?.wacoal || remoteEntry?.status || 'NOT_FOUND',
+        remote: remoteEntry ? supplierQty : 'not found',
+        target,
         delta,
         status
       });
     });
 
     if (firstMut) Core.jumpFlash(firstMut);
+
     return report;
   }
 
-  function bepaalLogStatus(report, statusMap){
-    const remoteLeeg = !statusMap || Object.keys(statusMap).length === 0;
-    if (remoteLeeg) return 'niet-gevonden';
-
+  function bepaalLogStatus(report) {
     const diffs = report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
     return diffs === 0 ? 'ok' : 'afwijking';
   }
+          function markAllLocalAsUncertain(table, reason = 'niet betrouwbaar opgehaald') {
+  const rows = table.querySelectorAll('tbody tr');
+  const report = [];
 
-  // ---------- perTable ----------
-  async function perTable(table){
+  rows.forEach(row => {
+    const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+    const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+
+    Core.markRow(row, {
+      action: 'none',
+      delta: 0,
+      title: `Niet muteren (${reason})`
+    });
+
+    report.push({
+      maat,
+      local,
+      remoteStatus: 'REQUEST_ERROR',
+      remote: 'request error',
+      target: NaN,
+      delta: 0,
+      status: 'checken'
+    });
+  });
+
+  return report;
+}
+
+  async function perTable(table) {
     const pid = (table.id || '').trim();
-    const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || pid || 'onbekend';
+
+    const label =
+      table.querySelector('thead th[colspan]')?.textContent?.trim()
+      || pid
+      || 'onbekend';
+
     const anchorId = pid || label;
 
     if (!pid) {
-      Logger.status(anchorId, 'niet-gevonden');
-      Logger.perMaat(anchorId, []);
-      return 0;
+      const report = markAllLocalAsRemove(table, 'geen productcode');
+
+      Logger.status(anchorId, bepaalLogStatus(report));
+      Logger.perMaat(anchorId, report);
+
+      return report.filter(r => r.status === 'uitboeken').length;
     }
 
     const url = `https://b2b.wacoal-europe.com/b2b/en/EUR/json/pdpOrderForm?productCode=${encodeURIComponent(pid)}`;
 
     try {
-      const jsonText = await gmFetch(url);
+      const res = await gmFetch(url, { pid, anchorId });
+
+      if (isHardNotFoundResponse(res)) {
+        const report = markAllLocalAsRemove(table, 'product niet gevonden bij Wacoal');
+
+        Logger.status(anchorId, report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden');
+        Logger.perMaat(anchorId, report);
+
+        return report.filter(r => r.status === 'uitboeken').length;
+      }
 
       let json;
+
       try {
-        json = JSON.parse(jsonText);
+        json = JSON.parse(res.text);
       } catch (e) {
-        // HTML/lege response => niet-gevonden
-        throw new Error(`SyntaxError: bad JSON @ ${url}`);
+        const report = markAllLocalAsRemove(table, 'geen geldige JSON bij Wacoal');
+
+        Logger.status(anchorId, report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden');
+        Logger.perMaat(anchorId, report);
+
+        return report.filter(r => r.status === 'uitboeken').length;
       }
 
       const statusMap = buildStatusMap(json);
+
       if (!statusMap || Object.keys(statusMap).length === 0) {
-        Logger.status(anchorId, 'niet-gevonden');
-        Logger.perMaat(anchorId, []);
-        return 0;
+        const report = markAllLocalAsRemove(table, 'geen stockdata bij Wacoal');
+
+        Logger.status(anchorId, report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden');
+        Logger.perMaat(anchorId, report);
+
+        return report.filter(r => r.status === 'uitboeken').length;
       }
 
       const report = applyRulesAndMark(table, statusMap);
-      const status = bepaalLogStatus(report, statusMap);
+      const status = bepaalLogStatus(report);
+
       Logger.status(anchorId, status);
       Logger.perMaat(anchorId, report);
 
       return report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
 
-    } catch (e) {
-      // ✅ 500 / parse / 404 etc => niet-gevonden
-      if (isNotFoundError(e)) {
-        Logger.status(anchorId, 'niet-gevonden');
-        Logger.perMaat(anchorId, []);
-        return 0;
-      }
+} catch (e) {
+  console.group(`[VCP2|Wacoal][PER TABLE CATCH] ${anchorId}`);
+  console.error('pid:', pid);
+  console.error('url:', url);
+  console.error('error:', e);
+  console.groupEnd();
 
-      // echte afwijking
-      console.error('[VCP2|Wacoal] fout:', anchorId, e);
-      Logger.status(anchorId, 'afwijking');
-      Logger.perMaat(anchorId, []);
-      return 0;
-    }
-  }
+  const report = markAllLocalAsUncertain(
+    table,
+    'request mislukt na retries - niet muteren'
+  );
 
-  // ---------- run ----------
-  async function run(btn){
+  Logger.status(anchorId, 'checken');
+  Logger.perMaat(anchorId, report);
+
+  return 0;
+}
+}
+
+  async function run(btn) {
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) return;
 
     await Core.runTables({
       btn,
       tables,
-      concurrency: 3,
+      concurrency: 1,
       perTable
     });
   }
 
-  // ---------- Supplier match ----------
-  function isSupportedSelected(){
+  function isSupportedSelected() {
     const dd = $('#leverancier-keuze');
     if (!dd) return true;
+
     const byValue = norm(dd.value || '');
-    const byText  = norm(dd.options?.[dd.selectedIndex]?.text || '');
+    const byText = norm(dd.options?.[dd.selectedIndex]?.text || '');
+
     return SUPPORTED_BRANDS.has(byValue) || SUPPORTED_BRANDS.has(byText);
   }
 
-  // ---------- UI ----------
   Core.mountSupplierButton({
     id: 'vcp2-wacoal-btn',
     text: '🔍 Check Stock | Wacoal',
     right: 250,
     top: 8,
     match: () => isSupportedSelected(),
-    onClick: (btn) => run(btn)
+    onClick: btn => run(btn)
   });
 
 })();
