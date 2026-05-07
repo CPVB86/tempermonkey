@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Wacoal
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.4
+// @version      3.5
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -31,6 +31,7 @@
   }
 
   const TIMEOUT = 15000;
+  const DEBUG_REMOTE_KEYS = true;
 
   const SUPPORTED_BRANDS = new Set([
     'wacoal', 'freya', 'freya swim', 'fantasie', 'fantasie swim',
@@ -41,6 +42,15 @@
 
   const norm = (s = '') =>
     String(s).toLowerCase().trim().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+
+  const cleanSize = (s = '') =>
+    String(s).toUpperCase().trim().replace(/\s+/g, '').replace(/[^0-9A-Z/]/g, '');
+
+  function getLocalMaat(row) {
+    const visible = row.children[0]?.textContent || '';
+    const dataSize = row.dataset.size || '';
+    return cleanSize(visible || dataSize);
+  }
 
   const Logger = {
     lb() {
@@ -73,144 +83,149 @@
     }
   };
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 
-function gmFetchOnce(url, meta = {}) {
-  const startedAt = Date.now();
+  function gmFetchOnce(url, meta = {}) {
+    const startedAt = Date.now();
 
-  return new Promise((resolve, reject) => {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url,
-      withCredentials: true,
-      timeout: TIMEOUT,
-      headers: {
-        Accept: 'application/json,text/html;q=0.8,*/*;q=0.5',
-        'User-Agent': navigator.userAgent
-      },
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url,
+        withCredentials: true,
+        timeout: TIMEOUT,
+        headers: {
+          Accept: 'application/json,text/html;q=0.8,*/*;q=0.5',
+          'User-Agent': navigator.userAgent
+        },
 
-      onload: r => {
-        resolve({
-          ok: true,
-          status: r.status,
-          statusText: r.statusText || '',
-          headers: r.responseHeaders || '',
-          text: r.responseText || '',
-          finalUrl: r.finalUrl || url,
-          duration: Date.now() - startedAt
-        });
-      },
+        onload: r => {
+          resolve({
+            ok: true,
+            status: r.status,
+            statusText: r.statusText || '',
+            headers: r.responseHeaders || '',
+            text: r.responseText || '',
+            finalUrl: r.finalUrl || url,
+            duration: Date.now() - startedAt
+          });
+        },
 
-      onerror: r => {
-        reject({
-          type: 'onerror',
-          url,
-          meta,
-          duration: Date.now() - startedAt,
-          status: r?.status,
-          statusText: r?.statusText,
-          finalUrl: r?.finalUrl,
-          responseHeaders: r?.responseHeaders,
-          responseText: r?.responseText,
-          raw: r
-        });
-      },
+        onerror: r => {
+          reject({
+            type: 'onerror',
+            url,
+            meta,
+            duration: Date.now() - startedAt,
+            status: r?.status,
+            statusText: r?.statusText,
+            finalUrl: r?.finalUrl,
+            responseHeaders: r?.responseHeaders,
+            responseText: r?.responseText,
+            raw: r
+          });
+        },
 
-      ontimeout: r => {
-        reject({
-          type: 'timeout',
-          url,
-          meta,
-          duration: Date.now() - startedAt,
-          timeout: TIMEOUT,
-          raw: r
-        });
-      }
-    });
-  });
-}
-
-async function gmFetch(url, meta = {}) {
-  const attempts = 3;
-  const delays = [500, 1500, 3000];
-
-  let lastError = null;
-
-  for (let i = 0; i < attempts; i++) {
-    try {
-      console.info(`[VCP2|Wacoal][REQUEST TRY ${i + 1}/${attempts}]`, meta.pid || '', url);
-
-      const res = await gmFetchOnce(url, {
-        ...meta,
-        attempt: i + 1
+        ontimeout: r => {
+          reject({
+            type: 'timeout',
+            url,
+            meta,
+            duration: Date.now() - startedAt,
+            timeout: TIMEOUT,
+            raw: r
+          });
+        }
       });
+    });
+  }
 
-      console.info(
-        `[VCP2|Wacoal][REQUEST OK]`,
-        meta.pid || '',
-        `HTTP ${res.status}`,
-        `${res.duration}ms`,
-        `length=${res.text.length}`
-      );
+  async function gmFetch(url, meta = {}) {
+    const attempts = 3;
+    const delays = [500, 1500, 3000];
+    let lastError = null;
 
-      return res;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        console.info(`[VCP2|Wacoal][REQUEST TRY ${i + 1}/${attempts}]`, meta.pid || '', url);
 
-    } catch (e) {
-      lastError = e;
+        const res = await gmFetchOnce(url, {
+          ...meta,
+          attempt: i + 1
+        });
 
-      console.warn(
-        `[VCP2|Wacoal][REQUEST FAILED ${i + 1}/${attempts}]`,
-        meta.pid || '',
-        e
-      );
+        console.info(
+          '[VCP2|Wacoal][REQUEST OK]',
+          meta.pid || '',
+          `HTTP ${res.status}`,
+          `${res.duration}ms`,
+          `length=${res.text.length}`
+        );
 
-      if (i < attempts - 1) {
-        await sleep(delays[i]);
+        return res;
+
+      } catch (e) {
+        lastError = e;
+
+        console.warn(
+          `[VCP2|Wacoal][REQUEST FAILED ${i + 1}/${attempts}]`,
+          meta.pid || '',
+          e
+        );
+
+        if (i < attempts - 1) {
+          await sleep(delays[i]);
+        }
       }
     }
+
+    throw {
+      type: 'all_retries_failed',
+      url,
+      meta,
+      attempts,
+      lastError
+    };
   }
 
-  throw {
-    type: 'all_retries_failed',
-    url,
-    meta,
-    attempts,
-    lastError
-  };
-}
+  function classifyWacoalResponse(res) {
+    const status = Number(res?.status ?? 0);
+    const text = String(res?.text || '').trim();
+    const lower = text.toLowerCase();
 
-  function isWacoalServerErrorHtml(text) {
-    const body = String(text || '').toLowerCase();
+    if (!text) {
+      return { type: 'request_error', reason: 'lege response' };
+    }
 
-    return body.includes('<html') && (
-      body.includes('<h1>server error</h1>') ||
-      body.includes('<h1>erreur du serveur</h1>') ||
-      body.includes('<h1>serverfehler</h1>') ||
-      body.includes('we are currently experiencing technical difficulties') ||
-      body.includes('nous rencontrons actuellement') ||
-      body.includes('wir haben derzeit technische probleme')
-    );
-  }
+    if (status === 404 || status === 410) {
+      return { type: 'not_found', reason: `HTTP ${status}` };
+    }
 
-  function isHardNotFoundResponse(res) {
-    const status = Number(res?.status ?? NaN);
-    const text = String(res?.text || '');
+    if (lower.startsWith('<!doctype') || lower.startsWith('<html') || lower.includes('<html')) {
+      return { type: 'not_found', reason: 'HTML response in plaats van JSON' };
+    }
 
-    if (status === 404 || status === 410) return true;
-    if (isWacoalServerErrorHtml(text)) return true;
+    try {
+      const json = JSON.parse(text);
 
-    return false;
+      if (json && Array.isArray(json.sizeData)) {
+        return { type: 'json', json };
+      }
+
+      return { type: 'not_found', reason: 'JSON zonder sizeData' };
+
+    } catch (e) {
+      return { type: 'not_found', reason: 'geen geldige JSON' };
+    }
   }
 
   function getEffectiveRemoteStock(stockLevel, wacoalStatusRaw) {
     const ws = String(wacoalStatusRaw || '').toUpperCase().trim();
     const qty = Number(stockLevel || 0) || 0;
 
-    if (ws === 'IN_STOCK') return qty;
-
-    return 0;
+    return ws === 'IN_STOCK' ? qty : 0;
   }
 
   function buildStatusMap(json) {
@@ -218,11 +233,7 @@ async function gmFetch(url, meta = {}) {
 
     if (!json?.is2DSizing) {
       for (const cell of (json?.sizeData || [])) {
-        const sizeEU = (cell?.countrySizeMap?.EU || cell?.globalSize || '')
-          .toString()
-          .trim()
-          .toUpperCase();
-
+        const sizeEU = cleanSize(cell?.countrySizeMap?.EU || cell?.globalSize || '');
         if (!sizeEU) continue;
 
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
@@ -241,12 +252,12 @@ async function gmFetch(url, meta = {}) {
 
     for (const row of (json?.sizeData || [])) {
       for (const cell of (row?.sizeFitData || [])) {
-        const bandEU = (cell?.countrySizeMap?.EU || '').toString().trim();
-        const cupEU = (cell?.countryFitMap?.EU || '').toString().trim();
+        const bandEU = String(cell?.countrySizeMap?.EU || '').trim();
+        const cupEU = String(cell?.countryFitMap?.EU || '').trim();
 
         if (!bandEU || !cupEU) continue;
 
-        const key = `${bandEU}${cupEU}`.toUpperCase();
+        const key = cleanSize(`${bandEU}${cupEU}`);
         const stockLevel = Number(cell?.stock?.stockLevel ?? 0) || 0;
         const wacoal = String(cell?.stock?.wacoalstockStatus || '').toUpperCase();
         const effectiveStock = getEffectiveRemoteStock(stockLevel, wacoal);
@@ -263,14 +274,11 @@ async function gmFetch(url, meta = {}) {
   }
 
   function resolveRemote(map, label) {
-    const raw = String(label || '').trim().toUpperCase();
+    const raw = cleanSize(label);
 
     if (Object.prototype.hasOwnProperty.call(map, raw)) return map[raw];
 
-    const nospace = raw.replace(/\s+/g, '');
-    if (Object.prototype.hasOwnProperty.call(map, nospace)) return map[nospace];
-
-    const m = raw.match(/^(\d+)\s*([A-Z]{1,2}(?:\/[A-Z]{1,2})+)$/);
+    const m = raw.match(/^(\d+)([A-Z]{1,2}(?:\/[A-Z]{1,2})+)$/);
 
     if (m) {
       const band = m[1];
@@ -278,7 +286,7 @@ async function gmFetch(url, meta = {}) {
       let best = null;
 
       for (const cup of cups) {
-        const k = `${band}${cup}`.toUpperCase();
+        const k = cleanSize(`${band}${cup}`);
         if (map[k] && (!best || map[k].stock > best.stock)) best = map[k];
       }
 
@@ -288,11 +296,8 @@ async function gmFetch(url, meta = {}) {
     if (raw.includes('/')) {
       let best = null;
 
-      for (const part of raw.split('/').map(s => s.trim())) {
-        const k1 = part.toUpperCase();
-        const k2 = part.replace(/\s+/g, '').toUpperCase();
-        const cand = map[k1] || map[k2];
-
+      for (const part of raw.split('/').map(cleanSize)) {
+        const cand = map[part];
         if (cand && (!best || cand.stock > best.stock)) best = cand;
       }
 
@@ -308,7 +313,7 @@ async function gmFetch(url, meta = {}) {
     let firstMut = null;
 
     rows.forEach(row => {
-      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const maat = getLocalMaat(row);
       const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
 
       if (local > 0) {
@@ -329,6 +334,7 @@ async function gmFetch(url, meta = {}) {
           delta: local,
           status: 'uitboeken'
         });
+
       } else {
         Core.markRow(row, {
           action: 'none',
@@ -353,13 +359,41 @@ async function gmFetch(url, meta = {}) {
     return report;
   }
 
+  function markAllLocalAsUncertain(table, reason = 'niet betrouwbaar opgehaald') {
+    const rows = table.querySelectorAll('tbody tr');
+    const report = [];
+
+    rows.forEach(row => {
+      const maat = getLocalMaat(row);
+      const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+
+      Core.markRow(row, {
+        action: 'none',
+        delta: 0,
+        title: `Niet muteren (${reason})`
+      });
+
+      report.push({
+        maat,
+        local,
+        remoteStatus: 'REQUEST_ERROR',
+        remote: 'request error',
+        target: NaN,
+        delta: 0,
+        status: 'checken'
+      });
+    });
+
+    return report;
+  }
+
   function applyRulesAndMark(localTable, statusMap) {
     const rows = localTable.querySelectorAll('tbody tr');
     const report = [];
     let firstMut = null;
 
     rows.forEach(row => {
-      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
+      const maat = getLocalMaat(row);
       const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
 
       const remoteEntry = resolveRemote(statusMap, maat);
@@ -383,6 +417,7 @@ async function gmFetch(url, meta = {}) {
 
         status = 'bijboeken';
         if (!firstMut) firstMut = row;
+
       } else if (res.action === 'uitboeken' && delta > 0) {
         Core.markRow(row, {
           action: 'remove',
@@ -394,6 +429,7 @@ async function gmFetch(url, meta = {}) {
 
         status = 'uitboeken';
         if (!firstMut) firstMut = row;
+
       } else {
         Core.markRow(row, {
           action: 'none',
@@ -424,33 +460,6 @@ async function gmFetch(url, meta = {}) {
     const diffs = report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
     return diffs === 0 ? 'ok' : 'afwijking';
   }
-          function markAllLocalAsUncertain(table, reason = 'niet betrouwbaar opgehaald') {
-  const rows = table.querySelectorAll('tbody tr');
-  const report = [];
-
-  rows.forEach(row => {
-    const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
-    const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
-
-    Core.markRow(row, {
-      action: 'none',
-      delta: 0,
-      title: `Niet muteren (${reason})`
-    });
-
-    report.push({
-      maat,
-      local,
-      remoteStatus: 'REQUEST_ERROR',
-      remote: 'request error',
-      target: NaN,
-      delta: 0,
-      status: 'checken'
-    });
-  });
-
-  return report;
-}
 
   async function perTable(table) {
     const pid = (table.id || '').trim();
@@ -475,35 +484,47 @@ async function gmFetch(url, meta = {}) {
 
     try {
       const res = await gmFetch(url, { pid, anchorId });
+      const classified = classifyWacoalResponse(res);
 
-      if (isHardNotFoundResponse(res)) {
-        const report = markAllLocalAsRemove(table, 'product niet gevonden bij Wacoal');
+      if (classified.type === 'not_found') {
+        const report = markAllLocalAsRemove(table, classified.reason);
 
-        Logger.status(anchorId, report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden');
+        Logger.status(
+          anchorId,
+          report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden'
+        );
+
         Logger.perMaat(anchorId, report);
 
         return report.filter(r => r.status === 'uitboeken').length;
       }
 
-      let json;
+      if (classified.type === 'request_error') {
+        const report = markAllLocalAsUncertain(table, classified.reason);
 
-      try {
-        json = JSON.parse(res.text);
-      } catch (e) {
-        const report = markAllLocalAsRemove(table, 'geen geldige JSON bij Wacoal');
-
-        Logger.status(anchorId, report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden');
+        Logger.status(anchorId, 'checken');
         Logger.perMaat(anchorId, report);
 
-        return report.filter(r => r.status === 'uitboeken').length;
+        return 0;
       }
 
+      const json = classified.json;
       const statusMap = buildStatusMap(json);
+
+      if (DEBUG_REMOTE_KEYS) {
+        console.groupCollapsed(`[Wacoal][${anchorId}] remote keys`);
+        console.log(Object.keys(statusMap));
+        console.groupEnd();
+      }
 
       if (!statusMap || Object.keys(statusMap).length === 0) {
         const report = markAllLocalAsRemove(table, 'geen stockdata bij Wacoal');
 
-        Logger.status(anchorId, report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden');
+        Logger.status(
+          anchorId,
+          report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden'
+        );
+
         Logger.perMaat(anchorId, report);
 
         return report.filter(r => r.status === 'uitboeken').length;
@@ -517,24 +538,24 @@ async function gmFetch(url, meta = {}) {
 
       return report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
 
-} catch (e) {
-  console.group(`[VCP2|Wacoal][PER TABLE CATCH] ${anchorId}`);
-  console.error('pid:', pid);
-  console.error('url:', url);
-  console.error('error:', e);
-  console.groupEnd();
+    } catch (e) {
+      console.group(`[VCP2|Wacoal][PER TABLE CATCH] ${anchorId}`);
+      console.error('pid:', pid);
+      console.error('url:', url);
+      console.error('error:', e);
+      console.groupEnd();
 
-  const report = markAllLocalAsUncertain(
-    table,
-    'request mislukt na retries - niet muteren'
-  );
+      const report = markAllLocalAsUncertain(
+        table,
+        'request mislukt na retries - niet muteren'
+      );
 
-  Logger.status(anchorId, 'checken');
-  Logger.perMaat(anchorId, report);
+      Logger.status(anchorId, 'checken');
+      Logger.perMaat(anchorId, report);
 
-  return 0;
-}
-}
+      return 0;
+    }
+  }
 
   async function run(btn) {
     const tables = Array.from(document.querySelectorAll('#output table'));
