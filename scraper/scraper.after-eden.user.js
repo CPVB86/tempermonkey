@@ -11,8 +11,8 @@
 // @connect      *.googleusercontent.com
 // @run-at       document-end
 // @author       C. P. v. Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-aftereden.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper-aftereden.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper.after-eden.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/scraper/scraper.after-eden.user.js
 // ==/UserScript==
 
 (() => {
