@@ -156,7 +156,25 @@
         return parser.parseFromString(html, 'text/html');
     }
 
-    function extractProductsFromDoc(doc, uuid, orderId) {
+    function todayNlDate() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+function extractOrderDateFromRowNode(node) {
+    if (!node) return todayNlDate();
+
+    const lastCell = node.querySelector('td:last-child');
+    const raw = lastCell ? lastCell.textContent.replace(/\s+/g, ' ').trim() : '';
+
+    const dateMatch = raw.match(/\b\d{2}-\d{2}-\d{4}\b/);
+    if (dateMatch) return dateMatch[0];
+
+    return todayNlDate();
+}
+
+    function extractProductsFromDoc(doc, uuid, orderId, orderDate) {
         const results = [];
 
         // OrderID uit header fallback
@@ -239,7 +257,8 @@ if (!isAllowedLocation) {
                     size,
                     amount,
                     uuid,
-                    orderId: finalOrderId
+                    orderId: finalOrderId,
+                    orderDate: orderDate || todayNlDate()
                 });
             } catch (err) {
                 console.error('Fout bij parsen productregel in order', finalOrderId, uuid, err);
@@ -253,15 +272,16 @@ if (!isAllowedLocation) {
     function buildTsv(products) {
         const escape = v => (v || '').toString().replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
         const lines = products.map(p => [
-            escape(p.orderId),
-            escape(p.title),
-            escape(p.productId),
-            escape(p.ean),
-            escape(p.size),
-            escape(p.amount),
-            escape(p.uuid),
-            '' // Checked leeg
-        ].join('\t'));
+    escape(p.orderId),
+    escape(p.title),
+    escape(p.productId),
+    escape(p.ean),
+    escape(p.size),
+    escape(p.amount),
+    escape(p.uuid),
+    '', // Checked leeg
+    escape(p.orderDate)
+].join('\t'));
         return lines.join('\n');
     }
 
@@ -303,14 +323,15 @@ if (!isAllowedLocation) {
         for (let i = 0; i < targets.length; i++) {
             const full = targets[i];
             const uuid = full.uuid;
-            const orderLabel = full.external_display_id || full.id || '?';
+const orderLabel = full.external_display_id || full.id || '?';
+const orderDate = extractOrderDateFromRowNode(dt.row(i).node());
 
             setButtonDisabled(true, `order ${i + 1}/${targets.length} (${orderLabel})`);
 
             try {
                 const html = await fetchOrderHtml(uuid);
                 const doc = parseOrderHtml(html);
-                const products = extractProductsFromDoc(doc, uuid, orderLabel);
+                const products = extractProductsFromDoc(doc, uuid, orderLabel, orderDate);
                 console.log(`Order ${orderLabel}: ${products.length} externe regels gevonden.`);
                 allProducts.push(...products);
             } catch (err) {
