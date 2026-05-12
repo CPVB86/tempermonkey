@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG | Paste2Select
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.0.1
-// @description  Vinkt GoedGepickt-orders aan op basis van ordernummers op het klembord.
+// @version      1.1.0
+// @description  Vinkt GoedGepickt-orders aan op basis van ordernummers op het klembord + kopieert zichtbare orders.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
 // @run-at       document-end
 // @grant        none
@@ -26,7 +26,9 @@
   }
 
   function getDatatable() {
-    if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.dataTable) return null;
+    if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.dataTable) {
+      return null;
+    }
 
     try {
       return window.jQuery(TABLE_SELECTOR).DataTable();
@@ -87,25 +89,47 @@
     });
   }
 
-  function addButton() {
-    if (document.getElementById(BUTTON_WRAP_ID)) return;
+async function copy2Select() {
+  const ids = [];
 
-    const header = document.querySelector('.orders-index-table-header');
-    const table = document.querySelector(TABLE_SELECTOR);
-    if (!header && !table) return;
+  const dt = getDatatable();
 
-    const target = header?.querySelector('.orders-index-search-container') || header || table.parentNode;
+  if (dt) {
+    dt.rows({ filter: 'applied' }).every(function () {
+      const node = this.node();
+      if (!node) return;
 
-    const wrap = document.createElement('div');
-    wrap.id = BUTTON_WRAP_ID;
-    wrap.style.display = 'inline-flex';
-    wrap.style.alignItems = 'center';
-    wrap.style.marginLeft = '4px';
+      const cb = node.querySelector('input.orders[name="orders[]"]');
+      if (!cb || !cb.checked) return;
 
+      const orderId = getOrderIdFromRowNode(node);
+      if (orderId) ids.push(orderId);
+    });
+  } else {
+    document.querySelectorAll(`${TABLE_SELECTOR} tbody tr`).forEach(row => {
+      const cb = row.querySelector('input.orders[name="orders[]"]');
+      if (!cb || !cb.checked) return;
+
+      const orderId = getOrderIdFromRowNode(row);
+      if (orderId) ids.push(orderId);
+    });
+  }
+
+  if (!ids.length) return;
+
+  try {
+    await navigator.clipboard.writeText(ids.join('\n'));
+  } catch {
+    return;
+  }
+}
+  function createButton(label, onClick) {
     const btn = document.createElement('button');
+
     btn.type = 'button';
     btn.className = 'btn btn-primary ml-2';
-    btn.textContent = '📋 Paste2Select';
+    btn.textContent = label;
+
     btn.style.whiteSpace = 'nowrap';
     btn.style.height = '40px';
     btn.style.lineHeight = '1';
@@ -115,12 +139,41 @@
     btn.style.alignItems = 'center';
     btn.style.justifyContent = 'center';
 
-    btn.addEventListener('click', paste2Select);
+    btn.addEventListener('click', onClick);
 
-    wrap.appendChild(btn);
+    return btn;
+  }
+
+  function addButtons() {
+    if (document.getElementById(BUTTON_WRAP_ID)) return;
+
+    const header = document.querySelector('.orders-index-table-header');
+    const table = document.querySelector(TABLE_SELECTOR);
+
+    if (!header && !table) return;
+
+    const target =
+      header?.querySelector('.orders-index-search-container') ||
+      header ||
+      table.parentNode;
+
+    const wrap = document.createElement('div');
+
+    wrap.id = BUTTON_WRAP_ID;
+    wrap.style.display = 'inline-flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '4px';
+    wrap.style.marginLeft = '4px';
+
+    const pasteBtn = createButton('📋 Paste2Select', paste2Select);
+    const copyBtn = createButton('📄 Copy2Select', copy2Select);
+
+    wrap.appendChild(pasteBtn);
+    wrap.appendChild(copyBtn);
+
     target.appendChild(wrap);
   }
 
-  addButton();
+  addButtons();
 
 })();
