@@ -1,12 +1,14 @@
 // ==UserScript==
-// @name         VCP2 | Wacoal
+// @name         VCP2 | Wacoal new
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.5
+// @version      3.7
 // @description  Vergelijk local stock met die van de leverancier (remote).
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @grant        GM_addStyle
+// @require      https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
 // @run-at       document-idle
 // @connect      b2b.wacoal-europe.com
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-wacoal.user.js
@@ -15,6 +17,23 @@
 
 (() => {
   'use strict';
+
+GM_addStyle(`
+  #vcp2-wacoal-recheck-btn {
+    right: 470px !important;
+    top: 8px !important;
+    display: none !important;
+  }
+
+  #vcp2-wacoal-recheck-btn.vcp-show {
+    display: inline-flex !important;
+  }
+
+  #vcp2-wacoal-export-checken-btn {
+    right: 650px !important;
+    top: 8px !important;
+  }
+`);
 
   const g = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const Core = g.VCPCore;
@@ -31,7 +50,9 @@
   }
 
   const TIMEOUT = 15000;
-  const DEBUG_REMOTE_KEYS = true;
+
+  const DEBUG_REMOTE_KEYS = false;
+  const DEBUG_PER_MAAT = true;
 
   const SUPPORTED_BRANDS = new Set([
     'wacoal', 'freya', 'freya swim', 'fantasie', 'fantasie swim',
@@ -46,10 +67,17 @@
   const cleanSize = (s = '') =>
     String(s).toUpperCase().trim().replace(/\s+/g, '').replace(/[^0-9A-Z/]/g, '');
 
+  const cleanPid = (s = '') =>
+    String(s).trim();
+
   function getLocalMaat(row) {
     const visible = row.children[0]?.textContent || '';
     const dataSize = row.dataset.size || '';
     return cleanSize(visible || dataSize);
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   const Logger = {
@@ -66,6 +94,8 @@
     },
 
     perMaat(id, report) {
+      if (!DEBUG_PER_MAAT) return;
+
       console.groupCollapsed(`[Wacoal][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
@@ -83,8 +113,35 @@
     }
   };
 
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  let recheckButtonUpdateTimer = null;
+
+  function scheduleRecheckButtonVisibility() {
+    clearTimeout(recheckButtonUpdateTimer);
+    recheckButtonUpdateTimer = setTimeout(updateRecheckButtonVisibility, 100);
+  }
+
+  function updateRecheckButtonVisibility() {
+    const btn = document.querySelector('#vcp2-wacoal-recheck-btn');
+    if (!btn) return;
+
+    const count = document.querySelectorAll('#output table[data-wacoal-checken="1"]').length;
+
+    btn.textContent = `🔁 Herchecken: ${count}`;
+    btn.classList.toggle('vcp-show', count > 0);
+  }
+
+  function setTableChecken(table, isChecken) {
+    if (isChecken) {
+      table.dataset.wacoalChecken = '1';
+    } else {
+      delete table.dataset.wacoalChecken;
+    }
+
+    scheduleRecheckButtonVisibility();
+  }
+
+  function setCheckenStatus(anchorId) {
+    Logger.status(anchorId, 'checken');
   }
 
   function gmFetchOnce(url, meta = {}) {
@@ -94,11 +151,10 @@
       GM_xmlhttpRequest({
         method: 'GET',
         url,
-        withCredentials: true,
+        fetch: true,
         timeout: TIMEOUT,
         headers: {
-          Accept: 'application/json,text/html;q=0.8,*/*;q=0.5',
-          'User-Agent': navigator.userAgent
+          Accept: 'application/json'
         },
 
         onload: r => {
@@ -143,51 +199,39 @@
   }
 
   async function gmFetch(url, meta = {}) {
-    const attempts = 3;
-    const delays = [500, 1500, 3000];
-    let lastError = null;
+    try {
+      console.info(`[VCP2|Wacoal][REQUEST TRY 1/1]`, meta.pid || '', url);
 
-    for (let i = 0; i < attempts; i++) {
-      try {
-        console.info(`[VCP2|Wacoal][REQUEST TRY ${i + 1}/${attempts}]`, meta.pid || '', url);
+      const res = await gmFetchOnce(url, {
+        ...meta,
+        attempt: 1
+      });
 
-        const res = await gmFetchOnce(url, {
-          ...meta,
-          attempt: i + 1
-        });
+      console.info(
+        '[VCP2|Wacoal][REQUEST OK]',
+        meta.pid || '',
+        `HTTP ${res.status}`,
+        `${res.duration}ms`,
+        `length=${res.text.length}`
+      );
 
-        console.info(
-          '[VCP2|Wacoal][REQUEST OK]',
-          meta.pid || '',
-          `HTTP ${res.status}`,
-          `${res.duration}ms`,
-          `length=${res.text.length}`
-        );
+      return res;
 
-        return res;
+    } catch (e) {
+      console.warn(
+        `[VCP2|Wacoal][REQUEST FAILED 1/1]`,
+        meta.pid || '',
+        e
+      );
 
-      } catch (e) {
-        lastError = e;
-
-        console.warn(
-          `[VCP2|Wacoal][REQUEST FAILED ${i + 1}/${attempts}]`,
-          meta.pid || '',
-          e
-        );
-
-        if (i < attempts - 1) {
-          await sleep(delays[i]);
-        }
-      }
+      throw {
+        type: 'request_failed_once',
+        url,
+        meta,
+        attempts: 1,
+        lastError: e
+      };
     }
-
-    throw {
-      type: 'all_retries_failed',
-      url,
-      meta,
-      attempts,
-      lastError
-    };
   }
 
   function classifyWacoalResponse(res) {
@@ -474,6 +518,7 @@
     if (!pid) {
       const report = markAllLocalAsRemove(table, 'geen productcode');
 
+      setTableChecken(table, false);
       Logger.status(anchorId, bepaalLogStatus(report));
       Logger.perMaat(anchorId, report);
 
@@ -489,6 +534,7 @@
       if (classified.type === 'not_found') {
         const report = markAllLocalAsRemove(table, classified.reason);
 
+        setTableChecken(table, false);
         Logger.status(
           anchorId,
           report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden'
@@ -502,7 +548,8 @@
       if (classified.type === 'request_error') {
         const report = markAllLocalAsUncertain(table, classified.reason);
 
-        Logger.status(anchorId, 'checken');
+        setTableChecken(table, true);
+        setCheckenStatus(anchorId);
         Logger.perMaat(anchorId, report);
 
         return 0;
@@ -520,6 +567,7 @@
       if (!statusMap || Object.keys(statusMap).length === 0) {
         const report = markAllLocalAsRemove(table, 'geen stockdata bij Wacoal');
 
+        setTableChecken(table, false);
         Logger.status(
           anchorId,
           report.some(r => r.status === 'uitboeken') ? 'afwijking' : 'niet-gevonden'
@@ -533,6 +581,7 @@
       const report = applyRulesAndMark(table, statusMap);
       const status = bepaalLogStatus(report);
 
+      setTableChecken(table, false);
       Logger.status(anchorId, status);
       Logger.perMaat(anchorId, report);
 
@@ -550,24 +599,203 @@
         'request mislukt na retries - niet muteren'
       );
 
-      Logger.status(anchorId, 'checken');
+      setTableChecken(table, true);
+      setCheckenStatus(anchorId);
       Logger.perMaat(anchorId, report);
 
       return 0;
+    } finally {
+      await sleep(0);
     }
   }
 
-  async function run(btn) {
-    const tables = Array.from(document.querySelectorAll('#output table'));
-    if (!tables.length) return;
-
+  async function runTables(btn, tables) {
     await Core.runTables({
       btn,
       tables,
       concurrency: 1,
       perTable
     });
+
+    updateRecheckButtonVisibility();
   }
+
+  async function run(btn) {
+    const tables = Array.from(document.querySelectorAll('#output table'));
+    if (!tables.length) return;
+
+    await runTables(btn, tables);
+  }
+
+  async function rerunChecken(btn) {
+    const tables = Array.from(
+      document.querySelectorAll('#output table[data-wacoal-checken="1"]')
+    );
+
+    if (!tables.length) {
+      console.info('[VCP2|Wacoal] Geen checken-items gevonden.');
+      updateRecheckButtonVisibility();
+      return;
+    }
+
+    console.info(`[VCP2|Wacoal] Hercheck ${tables.length} checken-item(s).`);
+
+    await runTables(btn, tables);
+  }
+
+function getTableHeaderCell(table) {
+  return table.querySelector('thead th[colspan]');
+}
+
+function getTableMeta(table) {
+  const th = getTableHeaderCell(table);
+  const text = th?.childNodes?.[0]?.textContent?.trim() || th?.textContent?.trim() || '';
+
+  const supplierPid = cleanPid(table.id || '');
+
+  const productLink = th
+    ? Array.from(th.querySelectorAll('a[href*="section=products"][href*="id="]'))[0]
+    : null;
+
+  let localProductId = '';
+
+  if (productLink) {
+    const href = productLink.getAttribute('href') || '';
+    const idMatch = href.match(/[?&]id=([^&]+)/);
+
+    if (idMatch) {
+      localProductId = decodeURIComponent(idMatch[1]).split('-')[0];
+    } else {
+      localProductId = (productLink.textContent || '').trim();
+    }
+  }
+
+  const cleanTitle = text
+    .replace(/\s*[–-]\s*$/, '')
+    .trim();
+
+  let model = cleanTitle;
+  let color = '';
+
+  const parts = cleanTitle.split(/\s+/);
+
+  if (parts.length > 1) {
+    color = parts.pop();
+    model = parts.join(' ');
+  }
+
+  return {
+    model,
+    color,
+    supplierPid,
+    localProductId
+  };
+}
+
+function getCheckenTables() {
+  return Array.from(document.querySelectorAll('#output table[data-wacoal-checken="1"]'));
+}
+
+function getValueFromRow(row, keys = []) {
+  for (const key of keys) {
+    if (row.dataset?.[key]) return String(row.dataset[key]).trim();
+
+    const el = row.querySelector(
+      `[data-${key}], input[name*="${key}" i], input[id*="${key}" i], [name*="${key}" i], [id*="${key}" i]`
+    );
+
+    if (el) {
+      const val = el.value || el.dataset?.[key] || el.textContent || '';
+      if (String(val).trim()) return String(val).trim();
+    }
+  }
+
+  return '';
+}
+
+function getRowEAN(row) {
+  const direct = getValueFromRow(row, [
+    'ean',
+    'barcode',
+    'gtin'
+  ]);
+
+  if (direct) return direct;
+
+  const txt = row.textContent || '';
+  const match = txt.match(/\b\d{8,14}\b/);
+
+  return match ? match[0] : '';
+}
+
+function getCheckenExportRows() {
+  const rows = [];
+
+  for (const table of getCheckenTables()) {
+    const meta = getTableMeta(table);
+
+    if (!meta.supplierPid) continue;
+
+    const trList = Array.from(table.querySelectorAll('tbody tr'));
+
+    for (const row of trList) {
+      const maat = getLocalMaat(row);
+      const stock = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+
+      rows.push([
+        '',                    // A leeg
+        meta.model,            // B Model, bijv. Brianna
+        meta.supplierPid,      // C Product ID leverancier, bijv. EL8085BLK
+        meta.color,            // D Color, bijv. Zwart
+        maat,                  // E Size
+        stock,                 // F Stock
+        '',                    // G Advice Price
+        '',                    // H Price
+        getRowEAN(row),        // I EAN
+        meta.localProductId    // J lokale Product ID, bijv. 37045
+      ]);
+    }
+  }
+
+  return rows;
+}
+
+function exportCheckenXlsx() {
+  if (typeof XLSX === 'undefined') {
+    alert('XLSX-library is niet geladen. Exporteren kan niet.');
+    return;
+  }
+
+  const header = [
+    '',
+    'Model',
+    'Product ID',
+    'Color',
+    'Size',
+    'Stock',
+    'Advice Price',
+    'Price',
+    'EAN',
+    'Product ID'
+  ];
+
+  const rows = getCheckenExportRows();
+
+  if (!rows.length) {
+    alert('Geen checken-items om te exporteren.');
+    return;
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Variant');
+
+  const date = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `variant_wacoal_checken_${date}.xlsx`);
+
+  console.info(`[VCP2|Wacoal] ${rows.length} checken-regel(s) geëxporteerd.`);
+}
 
   function isSupportedSelected() {
     const dd = $('#leverancier-keuze');
@@ -587,5 +815,25 @@
     match: () => isSupportedSelected(),
     onClick: btn => run(btn)
   });
+
+  Core.mountSupplierButton({
+    id: 'vcp2-wacoal-recheck-btn',
+    text: '🔁 Herchecken: 0',
+    right: 470,
+    top: 8,
+    match: () => isSupportedSelected(),
+    onClick: btn => rerunChecken(btn)
+  });
+
+  Core.mountSupplierButton({
+    id: 'vcp2-wacoal-export-checken-btn',
+    text: '💾 Download Checkers',
+    right: 650,
+    top: 20,
+    match: () => isSupportedSelected(),
+    onClick: () => exportCheckenXlsx()
+  });
+
+  updateRecheckButtonVisibility();
 
 })();
