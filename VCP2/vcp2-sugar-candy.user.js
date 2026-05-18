@@ -9,8 +9,8 @@
 // @run-at       document-idle
 // @connect      b2b.cakelingerie.eu
 // @require      https://lingerieoutlet.nl/tools/stock/common/stockkit.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-sugar-candy.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP/vcp-sugar-candy.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-sugar-candy.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/VCP2/vcp2-sugar-candy.user.js
 // ==/UserScript==
 
 (() => {
