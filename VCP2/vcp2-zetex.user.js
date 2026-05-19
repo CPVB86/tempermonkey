@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VCP2 | Zetex
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      5.1
+// @version      5.2
 // @description  Vergelijk local stock met die van de leverancier (remote) via Zetex validate.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stock/Voorraadchecker%20Proxy.htm
@@ -53,9 +53,6 @@
     };
   }
 
-  // ========================================================================
-  // 1) BRIDGE OP ZETEX (auth-capture + grid-call + validate-call)
-  // ========================================================================
   if (ON_ZETEX) {
     const w = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
     let pageFetch = null;
@@ -342,9 +339,6 @@
     return;
   }
 
-  // ========================================================================
-  // 2) CLIENT OP TOOL
-  // ========================================================================
   if (!ON_TOOL) return;
 
   if (!Core) {
@@ -381,7 +375,9 @@
           remote: Number.isFinite(r.remote) ? r.remote : '—',
           target: Number.isFinite(r.target) ? r.target : '—',
           delta: Number.isFinite(r.delta) ? r.delta : '—',
-          ean: r.ean || '—',
+          localEan: r.localEan || '—',
+          remoteEan: r.remoteEan || '—',
+          match: r.match || '—',
           status: r.status,
           exact: r.exact === true ? 'ja' : (r.exact === false ? 'nee' : '—')
         })));
@@ -483,10 +479,36 @@
     return Array.from(set);
   }
 
-  function resolveRemote(statusMap, label) {
-    for (const c of aliasCandidates(label)) {
-      if (statusMap && statusMap[c]) return statusMap[c];
+  function getLocalEanFromRow(row) {
+    return String(
+      row.dataset.ean ||
+      row.children[2]?.textContent ||
+      row.querySelector('[data-ean]')?.dataset.ean ||
+      row.querySelector('input[name*="ean"]')?.value ||
+      row.querySelector('.ean')?.textContent ||
+      ''
+    ).trim();
+  }
+
+  function resolveRemote(statusMap, label, ean = '') {
+    const cleanEan = String(ean || '').trim();
+
+    if (cleanEan && statusMap?.byEan?.[cleanEan]) {
+      return {
+        ...statusMap.byEan[cleanEan],
+        match: 'ean'
+      };
     }
+
+    for (const c of aliasCandidates(label)) {
+      if (statusMap?.bySize?.[c]) {
+        return {
+          ...statusMap.bySize[c],
+          match: 'size'
+        };
+      }
+    }
+
     return undefined;
   }
 
@@ -556,7 +578,7 @@
         return parsed;
       }
 
-      const q = c.match(/[?&]q=([^&]+)/i);
+      const q = c.match(/[?&](?:q|search)=([^&]+)/i);
       if (q) {
         const decoded = decodeURIComponent(q[1] || '').trim();
         parsed = parseZetexStyleColor(decoded);
@@ -586,116 +608,101 @@
 
     const wanted = String(wantedColorCode || '').trim().toUpperCase();
 
-    return list.map(prod => {
-      const prodColor = String(prod.colorCode || '').trim().toUpperCase();
-      const deliveryDate =
-        prod.deliveryDate ||
-        prod.requestedDeliveryStartDate ||
-        prod.selectableRequestedDeliveryRangeStartDate ||
-        null;
+    return list
+      .filter(prod =>
+        String(prod.colorCode || '').trim().toUpperCase() === wanted
+      )
+      .map(prod => {
+        const deliveryDate =
+          prod.deliveryDate ||
+          prod.requestedDeliveryStartDate ||
+          prod.selectableRequestedDeliveryRangeStartDate ||
+          null;
 
-      const entries = Array.isArray(prod.skus) ? prod.skus.map(sku => {
-        const ean = String(sku.eanCode || '').trim();
+        const entries = Array.isArray(prod.skus) ? prod.skus.map(sku => {
+          const ean = String(sku.eanCode || '').trim();
+
+          return {
+            sizeName: String(sku.sizeName || sku.sizeDisplayName || '').trim() || null,
+            subsizeName: String(sku.subSizeName || '').trim() || null,
+            eanCode: ean,
+            quantity: Number(probeQtyByEan[ean] || 0)
+          };
+        }) : [];
 
         return {
-          sizeName: String(sku.sizeName || sku.sizeDisplayName || '').trim() || null,
-          subsizeName: String(sku.subSizeName || '').trim() || null,
-          eanCode: ean,
-          quantity: prodColor === wanted
-            ? Number(probeQtyByEan[ean] || 0)
-            : 0
+          productUniqueId: String(
+            prod.productUniqueId ||
+            prod.styleId ||
+            prod.productId ||
+            styleIdFallback ||
+            ''
+          ).trim(),
+          productColorCode: String(prod.colorCode || '').trim(),
+          manualDiscountPercentage: 0,
+          deliveryDate,
+          deliveryWindowCode: null,
+          lockDelivery: true,
+          entries,
+          productCollectionId: String(
+            prod.collectionId ||
+            prod.productCollectionId ||
+            'Zetex_01'
+          ).trim(),
+          discountGroupCode: null,
+          orderLineTypeCode: '',
+          remark: null
         };
-      }) : [];
-
-      return {
-        productUniqueId: String(
-          prod.productUniqueId ||
-          prod.styleId ||
-          prod.productId ||
-          styleIdFallback ||
-          ''
-        ).trim(),
-        productColorCode: String(prod.colorCode || '').trim(),
-        manualDiscountPercentage: 0,
-        deliveryDate,
-        deliveryWindowCode: null,
-        lockDelivery: true,
-        entries,
-        productCollectionId: String(
-          prod.collectionId ||
-          prod.productCollectionId ||
-          'Zetex_01'
-        ).trim(),
-        discountGroupCode: null,
-        orderLineTypeCode: '',
-        remark: null
-      };
-    });
+      });
   }
 
   function buildProbeQtyMapForTable(localTable, gridJson, wantedColorCode, probeQty = PROBE_QTY) {
     const qtyMap = {};
     const rows = Array.from(localTable.querySelectorAll('tbody tr'));
-    const wanted = String(wantedColorCode || '').trim().toUpperCase();
-
-    const list = Array.isArray(gridJson)
-      ? gridJson
-      : (gridJson && Array.isArray(gridJson.products))
-        ? gridJson.products
-        : [];
-
-    const products = list.filter(p =>
-      String(p.colorCode || '').trim().toUpperCase() === wanted
-    );
-
-    const eanBySize = {};
-
-    for (const prod of products) {
-      for (const sku of (prod.skus || [])) {
-        let label =
-          String(sku.sizeDisplayName || '').trim().toUpperCase() ||
-          String(sku.sizeName || '').trim().toUpperCase();
-
-        if (!label) {
-          const base = String(sku.sizeName || '').trim().toUpperCase();
-          const sub  = String(sku.subSizeName || '').trim().toUpperCase();
-          label = (base + (sub || '')).trim();
-        }
-
-        const ean = String(sku.eanCode || '').trim();
-        if (!label || !ean) continue;
-
-        for (const k of aliasCandidates(label)) {
-          eanBySize[k] = ean;
-        }
-      }
-    }
 
     for (const row of rows) {
-      const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
-      const ean = eanBySize[maat];
+      const ean = getLocalEanFromRow(row);
       if (ean) qtyMap[ean] = probeQty;
     }
+
+    console.log('[Zetex][DEBUG] probeQtyMap by local EAN', qtyMap);
 
     return qtyMap;
   }
 
   function buildStatusMapFromValidate(validateJson) {
-    const map = {};
+    const map = {
+      byEan: {},
+      bySize: {}
+    };
+
     const lines = Array.isArray(validateJson?.lines) ? validateJson.lines : [];
 
     for (const line of lines) {
       const entries = Array.isArray(line?.cartLineEntries) ? line.cartLineEntries : [];
 
       for (const entry of entries) {
-        const maat = String(
+        const requestedQty = Number(entry?.quantity) || 0;
+        if (requestedQty <= 0) continue;
+
+        const baseSize = String(
           entry?.skuSizeDisplayName ||
           entry?.skuSizeName ||
           ''
         ).trim().toUpperCase();
 
+        const subSize = String(
+          entry?.skuSubSizeName ||
+          entry?.skuSubsizeName ||
+          entry?.subSizeName ||
+          ''
+        ).trim().toUpperCase();
+
+        const maat = baseSize && subSize && !baseSize.includes(subSize)
+          ? `${baseSize}${subSize}`
+          : baseSize;
+
         const ean = String(entry?.skuEanCode || '').trim();
-        const requestedQty = Number(entry?.quantity) || 0;
         const errs = Array.isArray(entry?.errors) ? entry.errors : [];
 
         let stock = requestedQty;
@@ -716,24 +723,27 @@
           }
         }
 
-        // Fallback:
-        // wel voorraadfout, maar exacte hoeveelheid niet uit de melding te halen
-        // => behandel als beperkt leverbaar en zet stock op 1
         if (hasInsufficientStockError && !exact) {
           stock = 1;
         }
 
-        if (!maat) continue;
+        const data = {
+          status: stock > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK',
+          stock,
+          ean,
+          exact,
+          requestedQty,
+          hasInsufficientStockError
+        };
 
-        for (const key of aliasCandidates(maat)) {
-          map[key] = {
-            status: stock > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK',
-            stock,
-            ean,
-            exact,
-            requestedQty,
-            hasInsufficientStockError
-          };
+        if (ean) {
+          map.byEan[ean] = data;
+        }
+
+        if (maat) {
+          for (const key of aliasCandidates(maat)) {
+            map.bySize[key] = data;
+          }
         }
       }
     }
@@ -764,12 +774,14 @@
     rows.forEach(row => {
       const maat = (row.dataset.size || row.children[0]?.textContent || '').trim().toUpperCase();
       const local = parseInt((row.children[1]?.textContent || '').trim(), 10) || 0;
+      const localEan = getLocalEanFromRow(row);
 
-      const remoteEntry = resolveRemote(statusMap, maat);
+      const remoteEntry = resolveRemote(statusMap, maat, localEan);
       const supplierQty = Number(remoteEntry?.stock) || 0;
-      const ean         = String(remoteEntry?.ean || '').trim();
+      const remoteEan   = String(remoteEntry?.ean || '').trim();
       const st          = remoteEntry?.status;
       const exact       = remoteEntry?.exact;
+      const match       = remoteEntry?.match || '';
 
       let target = null;
       const maxCap = (typeof Core.getMaxCap === 'function') ? Core.getMaxCap(localTable) : 5;
@@ -787,7 +799,7 @@
           Core.markRow(row, {
             action: 'remove',
             delta,
-            title: `Uitboeken ${delta} (maat onbekend bij Zetex)`
+            title: `Uitboeken ${delta} (EAN/maat onbekend bij Zetex)`
           });
           status = 'uitboeken';
           if (!firstMut) firstMut = row;
@@ -795,7 +807,7 @@
           Core.markRow(row, {
             action: 'none',
             delta: 0,
-            title: 'Negeren (maat onbekend bij Zetex)'
+            title: 'Negeren (EAN/maat onbekend bij Zetex)'
           });
           status = 'negeren';
         }
@@ -803,12 +815,13 @@
         const res = SR.reconcile(local, target, maxCap);
         delta = Number(res?.delta || 0);
         const qtyLabel = Number.isFinite(supplierQty) ? `${supplierQty}${exact ? '' : '+'}` : '—';
+        const matchLabel = match === 'ean' ? 'EAN match' : 'maat match';
 
         if (res?.action === 'bijboeken' && delta > 0) {
           Core.markRow(row, {
             action: 'add',
             delta,
-            title: `Bijboeken ${delta} (target ${target}, supplier qty ${qtyLabel})`
+            title: `Bijboeken ${delta} (${matchLabel}, target ${target}, supplier qty ${qtyLabel})`
           });
           status = 'bijboeken';
           if (!firstMut) firstMut = row;
@@ -817,7 +830,7 @@
           Core.markRow(row, {
             action: 'remove',
             delta,
-            title: `Uitboeken ${delta} (target ${target}, supplier qty ${qtyLabel})`
+            title: `Uitboeken ${delta} (${matchLabel}, target ${target}, supplier qty ${qtyLabel})`
           });
           status = 'uitboeken';
           if (!firstMut) firstMut = row;
@@ -826,7 +839,7 @@
           Core.markRow(row, {
             action: 'none',
             delta: 0,
-            title: `OK (target ${target}, supplier qty ${qtyLabel})`
+            title: `OK (${matchLabel}, target ${target}, supplier qty ${qtyLabel})`
           });
           status = 'ok';
         }
@@ -838,9 +851,11 @@
         remote: supplierQty,
         target: Number.isFinite(target) ? target : NaN,
         delta,
-        ean,
+        localEan,
+        remoteEan,
         status,
-        exact
+        exact,
+        match
       });
     });
 
@@ -849,7 +864,13 @@
   }
 
   function bepaalLogStatus(report, statusMap) {
-    const leeg = !statusMap || Object.keys(statusMap).length === 0;
+    const leeg =
+      !statusMap ||
+      (
+        Object.keys(statusMap.byEan || {}).length === 0 &&
+        Object.keys(statusMap.bySize || {}).length === 0
+      );
+
     if (leeg) return 'niet-gevonden';
 
     const diffs = report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
@@ -879,7 +900,13 @@
     const statusMap = buildStatusMapFromValidate(validateJson);
     console.log('[Zetex][DEBUG] validate statusMap for color', colorCode, statusMap);
 
-    if (!statusMap || Object.keys(statusMap).length === 0) {
+    if (
+      !statusMap ||
+      (
+        Object.keys(statusMap.byEan || {}).length === 0 &&
+        Object.keys(statusMap.bySize || {}).length === 0
+      )
+    ) {
       Logger.status(anchorId, 'niet-gevonden');
       Logger.perMaat(anchorId, []);
       return 0;
