@@ -52,7 +52,7 @@ GM_addStyle(`
   const TIMEOUT = 15000;
 
   const DEBUG_REMOTE_KEYS = false;
-  const DEBUG_PER_MAAT = true;
+  const DEBUG_PER_MAAT = false;
 
   const SUPPORTED_BRANDS = new Set([
     'wacoal', 'freya', 'freya swim', 'fantasie', 'fantasie swim',
@@ -121,14 +121,21 @@ GM_addStyle(`
   }
 
   function updateRecheckButtonVisibility() {
-    const btn = document.querySelector('#vcp2-wacoal-recheck-btn');
-    if (!btn) return;
+  const btn = document.querySelector('#vcp2-wacoal-recheck-btn');
+  if (!btn) return;
 
-    const count = document.querySelectorAll('#output table[data-wacoal-checken="1"]').length;
+  const count = document.querySelectorAll(
+    '#output table[data-wacoal-checken="1"]'
+  ).length;
 
+  const isRunning = btn.dataset.running === '1';
+
+  if (!isRunning) {
     btn.textContent = `🔁 Herchecken: ${count}`;
-    btn.classList.toggle('vcp-show', count > 0);
   }
+
+  btn.classList.toggle('vcp-show', count > 0);
+}
 
   function setTableChecken(table, isChecken) {
     if (isChecken) {
@@ -627,61 +634,98 @@ GM_addStyle(`
     await runTables(btn, tables);
   }
 
-  async function rerunChecken(btn) {
-    const tables = Array.from(
-      document.querySelectorAll('#output table[data-wacoal-checken="1"]')
+async function rerunChecken(btn) {
+  const tables = Array.from(
+    document.querySelectorAll(
+      '#output table[data-wacoal-checken="1"]'
+    )
+  );
+
+  if (!tables.length) {
+    console.info(
+      '[VCP2|Wacoal] Geen checken-items gevonden.'
     );
 
-    if (!tables.length) {
-      console.info('[VCP2|Wacoal] Geen checken-items gevonden.');
-      updateRecheckButtonVisibility();
-      return;
-    }
-
-    console.info(`[VCP2|Wacoal] Hercheck ${tables.length} checken-item(s).`);
-
-    await runTables(btn, tables);
+    updateRecheckButtonVisibility();
+    return;
   }
+
+  console.info(
+    `[VCP2|Wacoal] Hercheck ${tables.length} checken-item(s).`
+  );
+
+  btn.dataset.running = '1';
+
+  try {
+    await runTables(btn, tables);
+
+  } finally {
+    delete btn.dataset.running;
+
+    updateRecheckButtonVisibility();
+  }
+}
 
 function getTableHeaderCell(table) {
   return table.querySelector('thead th[colspan]');
 }
 
 function getTableMeta(table) {
-  const th = getTableHeaderCell(table);
-  const text = th?.childNodes?.[0]?.textContent?.trim() || th?.textContent?.trim() || '';
+  const th = table.querySelector(
+    'thead th[colspan]'
+  );
 
-  const supplierPid = cleanPid(table.id || '');
+  const raw =
+    th?.childNodes?.[0]?.textContent?.trim()
+    || '';
 
-  const productLink = th
-    ? Array.from(th.querySelectorAll('a[href*="section=products"][href*="id="]'))[0]
-    : null;
+  const supplierPid = cleanPid(
+    table.id || ''
+  );
+
+  let model = '';
+  let color = '';
+
+  const match = raw.match(
+    /^(.+?)\s+([^-–]+)$/
+  );
+
+  if (match) {
+    model = match[1].trim();
+    color = match[2].trim();
+
+  } else {
+    model = raw.trim();
+  }
+
+  const productLink =
+    th?.querySelector(
+      'a[href*="section=products"]'
+    );
 
   let localProductId = '';
 
   if (productLink) {
-    const href = productLink.getAttribute('href') || '';
-    const idMatch = href.match(/[?&]id=([^&]+)/);
 
-    if (idMatch) {
-      localProductId = decodeURIComponent(idMatch[1]).split('-')[0];
+    const href =
+      productLink.getAttribute(
+        'href'
+      ) || '';
+
+    const m = href.match(
+      /id=([0-9]+)/
+    );
+
+    if (m) {
+      localProductId = m[1];
+
     } else {
-      localProductId = (productLink.textContent || '').trim();
+      localProductId =
+        (
+          productLink.textContent
+          || ''
+        ).trim();
     }
-  }
-
-  const cleanTitle = text
-    .replace(/\s*[–-]\s*$/, '')
-    .trim();
-
-  let model = cleanTitle;
-  let color = '';
-
-  const parts = cleanTitle.split(/\s+/);
-
-  if (parts.length > 1) {
-    color = parts.pop();
-    model = parts.join(' ');
   }
 
   return {
@@ -826,13 +870,13 @@ function exportCheckenXlsx() {
   });
 
   Core.mountSupplierButton({
-    id: 'vcp2-wacoal-export-checken-btn',
-    text: '💾 Download Checkers',
-    right: 650,
-    top: 20,
-    match: () => isSupportedSelected(),
-    onClick: () => exportCheckenXlsx()
-  });
+  id: 'vcp2-wacoal-export-checken-btn',
+  text: '💾 Download Checkers',
+  right: 650,
+  top: 8,
+  match: () => isSupportedSelected(),
+  onClick: () => exportCheckenXlsx()
+});
 
   updateRecheckButtonVisibility();
 
