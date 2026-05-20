@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sparkle 2 | Chantelle
-// @version      1.1
-// @description  Kopieert een SPARKLE payload naar het klembord (chantelle-lingerie.my.site.com) incl. descriptionHtml + reference + kleur in name.
+// @version      1.2
+// @description  Kopieert een SPARKLE payload naar het klembord (chantelle-lingerie.my.site.com) incl. optionele descriptionHtml + reference + kleur in name.
 // @match        https://chantelle-lingerie.my.site.com/*
 // @grant        none
 // @run-at       document-idle
@@ -16,9 +16,6 @@
   const BUTTON_CLASS = "copy-sparkle";
   const BUTTON_TEXT = "✨";
 
-  /******************************************************************
-   * Helpers
-   ******************************************************************/
   const txt = (el) => (el?.textContent || "").replace(/\s+/g, " ").trim();
 
   function normalizePrice(text) {
@@ -36,13 +33,6 @@
       .replace(/'/g, "&#39;");
   }
 
-  function safeSlug(s) {
-    return (s || "")
-      .trim()
-      .replace(/\s+/g, "-")
-      .replace(/[^\w\-]/g, "");
-  }
-
   function bestModelFromTitle(title) {
     const raw = String(title || "").replace(/\s+/g, " ").trim();
     if (!raw) return "";
@@ -56,8 +46,8 @@
     ]);
 
     const parts = raw.split(" ").filter(Boolean);
-
     const modelParts = [];
+
     for (const p of parts) {
       const clean = p.replace(/[^\p{L}\p{N}\-]/gu, "");
       if (!clean) continue;
@@ -81,8 +71,7 @@
   }
 
   function getSkuFromPage() {
-    const skuEl = document.querySelector(".sku.cc_sku .value.cc_value");
-    return txt(skuEl);
+    return txt(document.querySelector(".sku.cc_sku .value.cc_value"));
   }
 
   function getTitle() {
@@ -90,22 +79,17 @@
   }
 
   function getRrp() {
-    const priceEl = document.querySelector("p.price-pvp.cc_price .value.cc_value.cc_price");
-    return normalizePrice(txt(priceEl));
+    return normalizePrice(txt(document.querySelector("p.price-pvp.cc_price .value.cc_value.cc_price")));
   }
 
   function getColorNameOnly() {
-    // <div class="colorName cc_color_name"> ... <span class="value cc_value">011-Zwart</span>
     const el = document.querySelector(".colorName.cc_color_name .value.cc_value");
-    const raw = txt(el); // "011-Zwart"
+    const raw = txt(el);
     if (!raw) return "";
 
-    // pak alles ná het eerste streepje (of laatste), trim spaties
-    // werkt ook voor "011 - Zwart" of "011-Zwart Mat"
     const parts = raw.split("-").map(s => s.trim()).filter(Boolean);
     if (parts.length >= 2) return parts.slice(1).join("-").trim();
 
-    // fallback: strip leading digits
     return raw.replace(/^\d+\s*/g, "").trim();
   }
 
@@ -124,52 +108,46 @@
     ).trim();
   }
 
-  /******************************************************************
-   * Payload builder
-   ******************************************************************/
   function buildSparklePayload() {
-    const supplierId = getSkuFromPage(); // C010PF-011
+    const supplierId = getSkuFromPage();
     const productCode = supplierId;
 
-    const title = getTitle(); // "Slash Wirefree triangle bra"
-    const colorName = getColorNameOnly(); // "Zwart"
-    const name = [title, colorName].filter(Boolean).join(" ").trim(); // ✅ title + kleur
+    const title = getTitle();
+    const colorName = getColorNameOnly();
+    const name = [title, colorName].filter(Boolean).join(" ").trim();
 
     const modelName = bestModelFromTitle(title) || "";
     const rrp = getRrp();
     const descriptionHtml = buildDescriptionHtml();
 
-    const compositionUrl =
-      supplierId
-        ? `https://chantelle-lingerie.my.site.com/DefaultStore/ccrz__ProductDetails?sku=${encodeURIComponent(supplierId)}`
-        : location.href;
+    const compositionUrl = supplierId
+      ? `https://chantelle-lingerie.my.site.com/DefaultStore/ccrz__ProductDetails?sku=${encodeURIComponent(supplierId)}`
+      : location.href;
 
     const reference = " - [ext]";
 
-    return {
+    const payload = {
       name,
       rrp,
       productCode,
       modelName,
-      descriptionHtml,
       compositionUrl,
       reference,
       supplierId
     };
+
+    if (descriptionHtml) {
+      payload.descriptionHtml = descriptionHtml;
+    }
+
+    return payload;
   }
 
-  /******************************************************************
-   * Clipboard
-   ******************************************************************/
   async function copySparklePayload(reason = "unknown") {
     const payload = buildSparklePayload();
 
     if (!payload.name || !payload.rrp || !payload.productCode) {
       console.error("❌ Sparkle: payload mist verplichte velden:", payload);
-      return;
-    }
-    if (!payload.descriptionHtml) {
-      console.error("❌ Sparkle: descriptionHtml leeg/niet gevonden:", payload);
       return;
     }
 
@@ -181,9 +159,6 @@
     }
   }
 
-  /******************************************************************
-   * UI
-   ******************************************************************/
   function insertButton() {
     const anchor =
       document.querySelector("h4.product_title.cc_product_title") ||
@@ -216,7 +191,6 @@
     anchor.insertAdjacentElement("afterend", btn);
   }
 
-  // Hotkey: Ctrl+Shift+V / Cmd+Shift+V
   document.addEventListener("keydown", (e) => {
     const keyV = (e.key?.toLowerCase() === "v") || (e.code === "KeyV");
     const modOK = (e.ctrlKey || e.metaKey) && e.shiftKey;
@@ -227,6 +201,7 @@
       tag === "input" ||
       tag === "textarea" ||
       document.activeElement?.isContentEditable;
+
     if (editable) return;
 
     e.preventDefault();
