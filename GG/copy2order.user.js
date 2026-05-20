@@ -30,6 +30,17 @@
         const m = location.pathname.match(/\/orders\/view\/([^\/?#]+)/);
         return m ? m[1] : '';
     }
+    function getTodayNlDate() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+function getOrderDate() {
+    const text = document.body.textContent || '';
+    const m = text.match(/\b\d{2}-\d{2}-\d{4}\b/);
+    return m ? m[0] : getTodayNlDate();
+}
 
     function findPickingHeader() {
         const headers = document.querySelectorAll('.m-portlet__head-text');
@@ -42,6 +53,7 @@
     function collectMatches() {
         const orderId = getOrderId();
         const orderUuid = getOrderUuid();
+const orderDate = getOrderDate();
         const rows = document.querySelectorAll('#local_data table tbody tr.normal');
         const lines = [];
 
@@ -67,14 +79,16 @@
             const amount = qty.includes('/') ? qty.split('/')[1].trim() : qty.trim();
 
             const cols = [
-                orderId,
-                rawTitle,
-                productId,
-                ean,
-                size,
-                amount,
-                orderUuid   // ← nu als laatste
-            ].map(s => (s || '').replace(/\t/g, ' ').replace(/\n/g, ' '));
+    orderId,
+    rawTitle,
+    productId,
+    ean,
+    size,
+    amount,
+    orderUuid,
+    '',          // Checked leeg
+    orderDate    // Besteldatum
+].map(s => (s || '').replace(/\t/g, ' ').replace(/\n/g, ' '));
 
             lines.push(cols.join('\t'));
         });
