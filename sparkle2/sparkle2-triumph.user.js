@@ -1,335 +1,318 @@
 // ==UserScript==
-// @name         Sparkle 2 | Triumph
-// @version      2.2
-// @description  Klik op de kleur-swatch om SPARKLE export te kopiëren die direct compatible is met Sparkle 2 | DDO.
-// @match        https://b2b.triumph.com/*
+// @name         Sparkle | DDO
+// @version      2.5
+// @description  Plakt HTML uit het klembord, vult backend velden in en zet description direct in de TinyMCE iframe-body (fallback-only). Klik ✨ of gebruik Ctrl+Shift+V / Cmd+Shift+V
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant        none
-// @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle2/sparkle2-triumph.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle2/sparkle2-triumph.user.js
+// @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-ddo.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/sparkle/sparkle-ddo.user.js
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  console.log('[Sparkle | Triumph] script geladen (v2.2)');
+  // --- UI injectie ---
+  const observer = new MutationObserver(() => {
+    const tab1 = document.querySelector('#tabs-1');
+    const messageBestaatAl = document.querySelector('#magicMsg');
+    if (tab1 && !messageBestaatAl) addMagicMessage();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
-  const $$ = (sel, root = document) => Array.from((root || document).querySelectorAll(sel));
+  function addMagicMessage() {
+    const h2 = document.querySelector('#tabs-1 h2');
+    if (!h2) return;
 
-  const escapeHtml = (str = '') =>
-    String(str)
+    const msg = document.createElement('div');
+    msg.id = 'magicMsg';
+    msg.textContent = '✨';
+    Object.assign(msg.style, {
+      fontSize: '1.2em',
+      fontWeight: 'bold',
+      color: '#d35400',
+      marginTop: '10px',
+      marginBottom: '10px',
+      cursor: 'pointer',
+      userSelect: 'none'
+    });
+
+    h2.insertAdjacentElement('afterend', msg);
+  }
+
+  // --- Helpers ---
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  const isEditableTarget = (el) => {
+    if (!el) return false;
+    const tag = el.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || el.isContentEditable) return true;
+    try { if (el.ownerDocument?.body?.id === 'tinymce') return true; } catch (_) {}
+    return false;
+  };
+
+  function escapeHtml(str = '') {
+    return (str || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-
-  const capitalizeWords = (str = '') =>
-    str.replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-
-  function getBrandName() {
-    const rowNameEl = document.querySelector('.product-row__name');
-    const pageTitleEl = document.querySelector('h1, .product-details-information__title');
-    const source = (rowNameEl?.textContent || pageTitleEl?.textContent || '').trim();
-
-    if (/^sloggi\s+men\b/i.test(source)) return 'Sloggi Men';
-    if (/^sloggi\b/i.test(source)) return 'Sloggi';
-    if (/^triumph\b/i.test(source)) return 'Triumph';
-    return 'Triumph';
+      .replace(/>/g, '&gt;');
   }
 
-  function stripBrandPrefix(str = '') {
-    return String(str)
-      .trim()
-      .replace(/^sloggi\s+men\s+/i, '')
-      .replace(/^sloggi\s+/i, '')
-      .replace(/^triumph\s+/i, '')
-      .trim();
-  }
+  async function setContentIframeOnly(htmlToSet) {
+    const selectors = [
+      'iframe.tox-edit-area__iframe',
+      'iframe#mce_1_ifr',
+      'iframe#mce_0_ifr',
+      'iframe[id^="mce_"]'
+    ];
 
-  function getCompositionUrl() {
-    return location.origin + location.pathname;
-  }
+    let iframe = null;
+    for (const sel of selectors) {
+      iframe = document.querySelector(sel);
+      if (iframe) break;
+    }
+    if (!iframe) {
+      console.warn('⚠️ Geen TinyMCE iframe gevonden');
+      return false;
+    }
 
-  // ─────────────────────────────────────────────
-  // Style + kleurcode + kleurnaam uit description:
-  // 10004928 - 0026 - SKIN
-  // ─────────────────────────────────────────────
-  function getStyleColorInfo() {
-    const p = document.querySelector('.product-details-information__description');
-    if (!p) return { styleNumber: '', colorCode: '', colorName: '' };
+    const doc = iframe.contentDocument;
+    if (!doc) {
+      console.warn('⚠️ Geen contentDocument op TinyMCE iframe');
+      return false;
+    }
 
-    const txt = (p.textContent || '').trim();
-    if (!txt) return { styleNumber: '', colorCode: '', colorName: '' };
-
-    const parts = txt.split(/\s*-\s*/);
-    const styleNumber = (parts[0] || '').trim();
-    const colorCode = (parts[1] || '').trim();
-    const rawColor = (parts[2] || '').trim();
-    const colorName = rawColor ? capitalizeWords(rawColor.toLowerCase()) : '';
-
-    return { styleNumber, colorCode, colorName };
-  }
-
-  // ─────────────────────────────────────────────
-  // RSP-prijs pakken UIT HET JUISTE BLOK
-  // ─────────────────────────────────────────────
-  function getPrice() {
-    const wrapper = document.querySelector('.product-details-information__prices');
-    if (!wrapper) return '';
-
-    const priceBlocks = $$('.product-price', wrapper);
-    for (const block of priceBlocks) {
-      const labelEl = block.querySelector('.product-price__item.label');
-      if (!labelEl) continue;
-
-      const labelText = (labelEl.textContent || '').trim().toUpperCase();
-      if (labelText === 'RSP') {
-        const regularEl = block.querySelector('.product-price__item.regular');
-        if (!regularEl) continue;
-
-        return (regularEl.textContent || '').trim();
+    for (let i = 0; i < 15; i++) {
+      const body = doc.getElementById('tinymce') || doc.body;
+      if (body) {
+        body.innerHTML = htmlToSet;
+        try { iframe.contentWindow?.focus?.(); } catch (_) {}
+        console.log('✅ Description direct in iframe-body gezet');
+        return true;
       }
+      await sleep(120);
     }
-    return '';
+
+    console.warn('⚠️ TinyMCE body niet gevonden na retries');
+    return false;
   }
 
-  // ─────────────────────────────────────────────
-  // Productinformatie
-  // ─────────────────────────────────────────────
-  function getProductInfo() {
-    const result = { summary: '', material: '', model: '' };
+  // --- Events ---
+  document.addEventListener('click', (e) => {
+    if (e.target.id !== 'magicMsg') return;
+    e.preventDefault();
+    runSparkle();
+  });
 
-    const section = document.querySelector(
-      'section.product-details-information__section.productinformatie'
-    );
+  // Hotkey: Ctrl+Shift+V / Cmd+Shift+V
+  document.addEventListener('keydown', (e) => {
+    const keyV = e.key?.toLowerCase() === 'v' || e.code === 'KeyV';
+    const modOK = (e.ctrlKey || e.metaKey) && e.shiftKey;
+    if (!modOK || !keyV) return;
 
-    if (section) {
-      const fields = $$('.product-details-extra-field', section);
-      fields.forEach(field => {
-        const titleEl = field.querySelector('.product-details-extra-field__title');
-        const valueEl = field.querySelector('.product-details-extra-field__value');
-        if (!titleEl || !valueEl) return;
+    if (isEditableTarget(document.activeElement)) return;
 
-        const title = (titleEl.textContent || '').trim().toLowerCase();
-        const value = (valueEl.textContent || '').trim();
+    e.preventDefault();
+    runSparkle(true);
+  });
 
-        if (title.includes('samenvatting')) {
-          result.summary = value;
-        } else if (title.includes('materiaal')) {
-          result.material = value;
-        } else if (title.includes('beschrijving')) {
-          result.model = stripBrandPrefix(value);
-        }
-      });
-    }
-
-    const rowNameEl = document.querySelector('.product-row__name');
-    if (rowNameEl) {
-      const name = stripBrandPrefix((rowNameEl.textContent || '').trim());
-      if (name) result.model = name;
-    }
-
-    return result;
-  }
-
-  // ─────────────────────────────────────────────
-  // Productcode uit grid-rij:
-  // "10151218 - 0003" → "10151218-0003"
-  // ─────────────────────────────────────────────
-  function getProductCodeFromRow(row) {
-    if (!row) return '';
-
-    const idEl = row.querySelector('.product-row__id');
-    if (!idEl) return '';
-
-    const raw = (idEl.textContent || '').trim();
-    if (!raw) return '';
-
-    const parts = raw.split('-');
-    if (parts.length >= 2) {
-      const left = (parts[0] || '').trim();
-      const right = (parts[1] || '').trim();
-      if (left && right) return `${left}-${right}`;
-    }
-
-    return raw.replace(/\s+/g, '');
-  }
-
-  function buildDescriptionHtml(summary, material) {
-    const parts = [];
-
-    if (summary) {
-      parts.push(`<p>${escapeHtml(summary).replace(/\r?\n/g, '<br>')}</p>`);
-    }
-
-    if (material) {
-      parts.push(`<p>Materiaal: ${escapeHtml(material)}</p>`);
-    }
-
-    return parts.join('\n').trim();
-  }
-
-  function buildDescriptionText(summary, material) {
-    const parts = [];
-
-    if (summary) parts.push(summary.trim());
-    if (material) parts.push(`Materiaal: ${material.trim()}`);
-
-    return parts.join('\n\n').trim();
-  }
-
-  // ─────────────────────────────────────────────
-  // SPARKLE payload bouwen voor DDO-reader
-  // ─────────────────────────────────────────────
-  function buildSparkleComment({
-    productCode,
-    summary,
-    material,
-    model,
-    colorName,
-    price,
-    fromGrid,
-    swatchLabel,
-    rowName
-  }) {
-    let displayColor = colorName || '';
-    if (fromGrid && swatchLabel) {
-      displayColor = capitalizeWords(String(swatchLabel).toLowerCase());
-    }
-
-    let modelForHeading = model || '';
-    if (fromGrid && rowName) {
-      modelForHeading = stripBrandPrefix(rowName);
-    }
-
-    const brandName = getBrandName();
-
-    const nameParts = [];
-    if (modelForHeading) nameParts.push(modelForHeading);
-    if (displayColor) nameParts.push(displayColor);
-
-    const supplierTitle = nameParts.join(' ').trim();
-    const descriptionHtml = buildDescriptionHtml(summary, material);
-    const descriptionText = buildDescriptionText(summary, material);
-
-    const payload = {
-      name: supplierTitle || '',
-      title: supplierTitle || '',
-      rrp: String(price || ''),
-      price: '',
-      productCode: String(productCode || ''),
-      modelName: modelForHeading || '',
-      descriptionHtml: descriptionHtml || '',
-      descriptionText: descriptionText || '',
-      compositionUrl: getCompositionUrl(),
-      reference: '[ext]',
-      supplierId: String(productCode || ''),
-      brand: brandName
-    };
-
-    return `<!--SPARKLE:${JSON.stringify(payload)}-->`;
-  }
-
-  // ─────────────────────────────────────────────
-  // Click op ✨ bij de kleur-swatch
-  // ─────────────────────────────────────────────
-  async function onSparkleClick(ev) {
-    ev.preventDefault();
-    ev.stopPropagation();
-
-    const sparkle = ev.currentTarget;
-    const label = sparkle.closest('.product-swatch__label');
-    const button = label?.closest('button.product-swatch');
-    if (!button) return;
-
-    let swatchLabel = '';
-    if (label) swatchLabel = (label.textContent || '').replace('✨', '').trim();
-
-    const fromGrid = button.classList.contains('product-row__swatch');
-
-    let rowName = '';
-    let productCode = '';
-
-    if (fromGrid) {
-      const row = button.closest('.product-row');
-      const nameEl = row?.querySelector('.product-row__name');
-      if (nameEl) rowName = (nameEl.textContent || '').trim();
-      productCode = getProductCodeFromRow(row);
-    }
-
-    const { styleNumber, colorCode, colorName } = getStyleColorInfo();
-    const info = getProductInfo();
-    const price = getPrice();
-
-    if (!fromGrid || !productCode) {
-      productCode = (styleNumber && colorCode)
-        ? `${styleNumber}-${colorCode}`
-        : (styleNumber || colorCode || '');
-    }
-
-    const out = buildSparkleComment({
-      productCode,
-      summary: info.summary,
-      material: info.material,
-      model: info.model,
-      colorName,
-      price,
-      fromGrid,
-      swatchLabel,
-      rowName
-    });
+  // --- Hoofdflow ---
+  async function runSparkle(fromHotkey = false) {
+    console.clear();
+    console.log(`▶️ Start script ${fromHotkey ? '(hotkey)' : '(click)'}`);
 
     try {
-      await navigator.clipboard.writeText(out);
-      console.log(
-        `[Sparkle | Triumph] Gekopieerd: ProductCode=${productCode} | Model=${info.model} | Color=${colorName} | Swatch="${swatchLabel}" | Price=${price} | fromGrid=${fromGrid}`
-      );
+      const nameInput = document.querySelector('input[name="name"]');
+      const localName = nameInput?.value.trim() || '';
+
+      const html = await navigator.clipboard.readText();
+      console.log('📋 HTML gekopieerd:', html.slice(0, 300));
+
+      const dom = new DOMParser().parseFromString(html, 'text/html');
+
+      const name = dom.querySelector('.pdp-details_heading')?.textContent.trim() || '';
+      console.log('🧾 Naam leverancier:', name);
+
+      const priceText = dom.querySelector('.pdp-details_price__discounted')?.textContent.replace(/[^\d,\.]/g, '') || '0.00';
+      const rrpText = dom.querySelector('.pdp-details_price__offer')?.textContent.replace(/[^\d,\.]/g, '') || '0.00';
+      const price = priceText.replace(',', '.');
+      const rrp = rrpText.replace(',', '.');
+
+      const productCode = [...dom.querySelectorAll('.pdp-details_product-code')]
+        .find(p => p.textContent.includes('Product Code'))
+        ?.querySelector('span')?.textContent.trim() || '';
+
+      const aMatch = dom.querySelector('a');
+      const reference = aMatch ? ` - [ext]` : '';
+
+      const modelName = dom.querySelector('.pdp-details_model span')?.textContent.trim() || '';
+
+      // 📌 DESCRIPTION (platte tekst) uit export oppakken
+      const descriptionText = dom.querySelector('.pdp-details_description')?.textContent.trim() || '';
+      console.log('📝 Description:', descriptionText ? `${descriptionText.slice(0, 80)}…` : '(leeg)');
+
+      const set = (selector, value) => {
+        const el = document.querySelector(selector);
+        if (el) el.value = value;
+      };
+
+      const fullTitle = `${localName} ${name}`.trim();
+
+      // Velden vullen
+      set('input[name="name"]', fullTitle);
+      set('input[name="title"]', fullTitle);
+      set('input[name="price"]', rrp);
+      set('input[name="price_advice"]', rrp);
+      set('input[name="price_vip"]', '0.00');
+      set('input[name="supplier_pid"]', productCode);
+      set('input[name="reference"]', reference);
+
+      const publicNo = document.querySelector('input[name="public"][value="0"]');
+      if (publicNo) publicNo.checked = true;
+
+      const deliverySelect = document.querySelector('select[name="delivery"]');
+      if (deliverySelect) {
+        deliverySelect.value = '1-2d';
+        deliverySelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      const brandSelect = document.querySelector('select[name="brand_id"]');
+      if (brandSelect) {
+        const match = [...brandSelect.options].find(opt =>
+          opt.text.trim().toLowerCase() === localName.toLowerCase());
+        if (match) {
+          brandSelect.value = match.value;
+          brandSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+
+      selectModel(modelName);
+
+      const tagInput = document.querySelector('input[name="tags_csv"]');
+      if (tagInput) {
+        tagInput.value = 'SYST - Promo, SYST - Extern, SYST - Webwinkelkeur, SYST - To Do';
+        console.log('🏷️ Tags ingevuld via inputveld');
+      }
+
+      // 🔗 NIEUW: URL uit .url naar composition veld
+      try {
+        const urlEl = dom.querySelector('.url');
+        if (urlEl) {
+          let compositionVal = '';
+
+          // 1) <a class="url" href="...">variant
+          if (urlEl.tagName?.toLowerCase() === 'a' && urlEl.getAttribute('href')) {
+            compositionVal = urlEl.getAttribute('href').trim();
+          }
+
+          // 2) Element met href/content attribuut (fallback)
+          if (!compositionVal) {
+            const href = urlEl.getAttribute?.('href') || urlEl.getAttribute?.('content') || '';
+            if (href) compositionVal = href.trim();
+          }
+
+          // 3) Tekstinhoud als laatste redmiddel
+          if (!compositionVal) {
+            const txt = (urlEl.textContent || '').trim();
+            if (txt) compositionVal = txt;
+          }
+
+          // Normaliseren naar absolute URL indien mogelijk
+          if (compositionVal) {
+            try {
+              const u = new URL(compositionVal, location.href);
+              compositionVal = u.href;
+            } catch (_) { /* laat zoals geplakt */ }
+          }
+
+          if (compositionVal) {
+            const compInput = document.querySelector('input[name="composition"]');
+            if (compInput) {
+              compInput.value = compositionVal;
+              compInput.dispatchEvent(new Event('input', { bubbles: true }));
+              compInput.dispatchEvent(new Event('change', { bubbles: true }));
+              console.log('🔗 Composition URL gezet:', compositionVal);
+            } else {
+              console.warn('⚠️ Veld input[name="composition"] niet gevonden.');
+            }
+          } else {
+            console.log('ℹ️ .url gevonden maar geen bruikbare waarde.');
+          }
+        } else {
+          console.log('ℹ️ Geen .url element in de geplakte HTML.');
+        }
+      } catch (e) {
+        console.warn('⚠️ Fout bij verwerken .url → composition:', e);
+      }
+
+      // ✅ Alleen fallback: description direct in TinyMCE iframe-body zetten
+      if (descriptionText) {
+        const safe = escapeHtml(descriptionText);
+        const htmlToSet = `<p>${safe}</p>`;
+        await setContentIframeOnly(htmlToSet);
+      } else {
+        console.log('ℹ️ Geen description gevonden in klembord (oké om leeg te laten).');
+      }
+
+      console.log('✅ Klaar!');
     } catch (err) {
-      console.error('[Sparkle | Triumph] Kopiëren mislukt:', err);
-      alert('Kon niet naar klembord kopiëren. Sta toegang tot het klembord toe.');
+      console.error('❌ Fout:', err);
     }
   }
 
-  // ─────────────────────────────────────────────
-  // ✨ vóór de kleur-tekst plaatsen
-  // ─────────────────────────────────────────────
-  function decorateSwatches() {
-    const buttons = $$('.product-swatch');
-    if (!buttons.length) return;
+  // Modelselectie (ongewijzigd)
+  function selectModel(name) {
+    const maxWaitTime = 5000;
+    const intervalTime = 200;
+    let waited = 0;
 
-    buttons.forEach(btn => {
-      if (btn.dataset.sparkleReady === '1') return;
+    const nameLower = (name || '').toLowerCase();
 
-      const label = btn.querySelector('.product-swatch__label');
-      if (!label) return;
+    const interval = setInterval(() => {
+      const modelSelect = document.querySelector('select[name="model_id"]');
+      if (modelSelect && modelSelect.options.length > 1) {
+        let bestMatch = null;
+        let bestScore = 0;
 
-      const sparkle = document.createElement('span');
-      sparkle.textContent = '✨ ';
-      sparkle.style.cursor = 'pointer';
-      sparkle.title = 'Klik om SPARKLE export voor deze kleur te kopiëren';
-      sparkle.addEventListener('click', onSparkleClick);
+        [...modelSelect.options].forEach(opt => {
+          const optionText = (opt.textContent || '').toLowerCase();
+          if (!optionText) return;
 
-      label.insertBefore(sparkle, label.firstChild);
-      btn.dataset.sparkleReady = '1';
-    });
+          if (optionText === nameLower) {
+            bestMatch = opt;
+            bestScore = 999;
+            return;
+          }
 
-    console.log(`[Sparkle | Triumph] sparkle geactiveerd op ${buttons.length} kleur-swatch(es)`);
-  }
+          const words = optionText.split(/[^a-z0-9]+/).filter(Boolean);
+          let score = words.reduce((acc, word) => acc + (nameLower.includes(word) ? 1 : 0), 0);
 
-  function init() {
-    decorateSwatches();
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = opt;
+          }
+        });
 
-    const mo = new MutationObserver(() => {
-      decorateSwatches();
-    });
+        if (bestMatch && bestScore > 0) {
+          modelSelect.value = bestMatch.value;
+          if (typeof window.$ === 'function') {
+            window.$(modelSelect).trigger('change');
+          } else {
+            modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          console.log(`✅ Beste modelmatch: ${bestMatch.textContent} (score: ${bestScore})`);
+        } else {
+          console.warn(`⚠️ Geen geschikte modelmatch gevonden in: "${name}"`);
+        }
 
-    mo.observe(document.body, { childList: true, subtree: true });
-  }
+        clearInterval(interval);
+      }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+      waited += intervalTime;
+      if (waited >= maxWaitTime) {
+        console.warn('⏰ Timeout bij zoeken naar model-selectie');
+        clearInterval(interval);
+      }
+    }, intervalTime);
   }
 })();
