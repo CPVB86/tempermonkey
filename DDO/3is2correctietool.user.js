@@ -94,19 +94,30 @@ const correction = oldCalc.discount - newCalc.discount;
     font: 14px Arial, sans-serif;
   `;
 
+  if (originalExpanded.length === 0) {
+
   box.innerHTML = `
-  <strong>3 halen 2 betalen retourcorrectie</strong><br><br>
+    <strong>3 halen 2 betalen retourcorrectie</strong><br><br>
+    Geen promo-items gevonden.
+  `;
 
-  Promo-items oorspronkelijk: ${originalExpanded.length}<br>
-  Gratis items: ${oldCalc.freeItems.length}<br>
-  Korting: <strong>${formatMoney(oldCalc.discount)}</strong><br><br>
+} else {
 
-  Promo-items na retour: ${returnedExpanded.length}<br>
-  Gratis items na herberekening: ${newCalc.freeItems.length}<br>
-  Korting: <strong>${formatMoney(newCalc.discount)}</strong><br><br>
+  box.innerHTML = `
+    <strong>3 halen 2 betalen retourcorrectie</strong><br><br>
 
-  Te corrigeren: <strong>${formatMoney(correction)}</strong>
-`;
+    Promo-items oorspronkelijk: ${originalExpanded.length}<br>
+    Gratis items: ${oldCalc.freeItems.length}<br>
+    Korting: <strong>${formatMoney(oldCalc.discount)}</strong><br><br>
+
+    Promo-items na retour: ${returnedExpanded.length}<br>
+    Gratis items na herberekening: ${newCalc.freeItems.length}<br>
+    Korting: <strong>${formatMoney(newCalc.discount)}</strong><br><br>
+
+    Te corrigeren: <strong>${formatMoney(correction)}</strong>
+  `;
+
+}
 
   const returnContent = [...document.querySelectorAll('h2')]
     .find(h2 => h2.innerText.includes('Return content'));
