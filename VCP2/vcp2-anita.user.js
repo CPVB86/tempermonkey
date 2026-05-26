@@ -50,7 +50,7 @@
 
   const ALLOWED_SUPPLIERS = new Set([
     'anita','anita-active','anita-badmode','anita-care','anita-maternity','anita-group',
-    'rosa-faia','rosa-faia-group'
+    'rosa-faia','rosa-faia-badmode','rosa-faia-group'
   ]);
 
   const $  = (s, r=document) => r.querySelector(s);
