@@ -3,8 +3,8 @@
 // @namespace    ddo-tools
 // @version      1.1.0
 // @description  Vinkt orders aan op basis van order-ID's op het klembord
-// @match        https://www.dutchdesignersoutlet.com/admin.php?section=orders&action=viewstatus&id=3
-// @match        https://www.dutchdesignersoutlet.com/admin.php?section=orders&action=viewstatus&id=10
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=orders&action=viewstatus&id=3*
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=orders&action=viewstatus&id=10*
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/paste2select.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/paste2select.user.js
