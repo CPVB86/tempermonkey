@@ -6,6 +6,8 @@
 // @author       Codex
 // @match        https://www.dutchdesignersoutlet.com/*
 // @match        http://www.dutchdesignersoutlet.com/*
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/SEO/ddo-seo-gen-v3.0.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/SEO/ddo-seo-gen-v3.0.user.js
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
