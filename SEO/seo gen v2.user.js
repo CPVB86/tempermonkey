@@ -724,6 +724,7 @@
       brand_link: "merkpagina-link toevoegen",
       missed_link_opportunities: "gemiste linkkansen toevoegen",
       forbidden_formulas: "verboden GPT-formules herschrijven",
+      repeated_starters: "herhalende zinsstarters herschrijven",
       page_title_length: "page title lengte verbeteren",
       meta_description_length: "meta description lengte verbeteren",
       keyword_first_paragraph: "hoofdzoekwoord in eerste alinea",
@@ -744,6 +745,7 @@
       brand_link: "Voeg een relevante merkpagina-link toe uit de kandidaten, alleen bij een genoemd of passend merk.",
       missed_link_opportunities: "Voeg gemiste linkkansen toe waar ze natuurlijk passen. Gebruik vooral links waarvan de anchor of context al in de tekst voorkomt.",
       forbidden_formulas: "Herschrijf generieke GPT-formules naar natuurlijke, specifieke zinnen.",
+      repeated_starters: "Varieer zinsstarters en herschrijf herhalingen zoals meerdere zinnen die met 'Handig' beginnen.",
       page_title_length: `Maak page_title natuurlijker en sterker, tussen ${DEFAULT_SETTINGS.pageTitleMinLength}-${DEFAULT_SETTINGS.pageTitleMaxLength} tekens, zonder dubbele punt.`,
       meta_description_length: `Breng meta_description terug tot maximaal ${DEFAULT_SETTINGS.metaDescriptionMaxLength} tekens, zonder dubbele punt.`,
       keyword_first_paragraph: "Zorg dat het hoofdzoekwoord natuurlijk in de eerste alinea staat, liefst in de eerste zin.",
@@ -764,7 +766,8 @@
       `Maak alinea's meestal ${DEFAULT_SETTINGS.paragraphWordMin}-${DEFAULT_SETTINGS.paragraphWordMax} woorden en behandel een onderwerp per alinea.`,
       "Schrijf liever iets inhoudelijker dan te kort. Rond 70 woorden per alinea is prima als de uitleg daardoor beter wordt.",
       "De H1 bevat het hoofdzoekwoord.",
-      "Gebruik het hoofdzoekwoord in 60-75% van de H2-koppen.",
+      "Gebruik het hoofdzoekwoord in maximaal 70% van de H2-koppen. Niet elk kopje hoeft het zoekwoord te bevatten.",
+      "Varieer H2-koppen met synoniemen, deelonderwerpen en natuurlijke vragen. Voorkom SEO-overkill in koppen.",
       "Gebruik het hoofdzoekwoord in de eerste alinea, bij voorkeur in de eerste zin.",
       "Gebruik het hoofdzoekwoord in de laatste alinea.",
       "Mik op 1-2% zoekwoorddichtheid, ongeveer 2% als dat natuurlijk blijft.",
@@ -793,6 +796,8 @@
       "Overweeg een bloglink als die echt iets toevoegt, maar forceer geen bloglink in elke tekst.",
       "Varieer in blogverwijzingen en invalshoeken. Kies niet steeds automatisch voor een algemeen blog over soorten bh's als een specifieker blog over kleur, onderhoud, wassen, huidtint, styling of badmode beter aansluit.",
       "Maak kleurpagina's onderling onderscheidend. Varieer de invalshoek tussen styling, huidtint, onder kleding dragen, materiaal, onderhoud, modellen, merken, seizoen en draagmoment.",
+      "Gebruik het woord ton-sur-ton niet.",
+      "Werk minder herhalend in zinsstarters. Begin niet meerdere voordeelzinnen met hetzelfde woord zoals 'Handig'. Gebruik zo'n starter hooguit een keer per tekst.",
       "Gebruik interne links alleen als ze inhoudelijk echt relevant zijn.",
       "Gebruik dezelfde URL maximaal een keer.",
       "Gebruik geen interne link naar de huidige pagina.",
@@ -1493,6 +1498,7 @@
     const missedLinkOpportunities = findMissedLinkOpportunities(html, text, linkAnalysis.urls, result);
     const firstLastKeyword = analyzeFirstLastKeyword(result);
     const forbiddenFormulas = findForbiddenFormulas([result.pageTitle, result.headerTitle, result.metaDescription, text].join(" "));
+    const repeatedStarters = findRepeatedSentenceStarters(sentences);
     const pageTitleCheck = {
       length: cleanWhitespace(result.pageTitle || "").length,
       ok: cleanWhitespace(result.pageTitle || "").length >= DEFAULT_SETTINGS.pageTitleMinLength && cleanWhitespace(result.pageTitle || "").length <= DEFAULT_SETTINGS.pageTitleMaxLength,
@@ -1519,6 +1525,7 @@
       missedLinkOpportunities,
       firstLastKeyword,
       forbiddenFormulas,
+      repeatedStarters,
       pageTitleCheck,
       metaDescriptionCheck,
     });
@@ -1538,6 +1545,7 @@
       missedLinkOpportunities,
       firstLastKeyword,
       forbiddenFormulas,
+      repeatedStarters,
       pageTitleCheck,
       metaDescriptionCheck,
       readingMinutes,
@@ -1847,9 +1855,26 @@
       "in ons blog met advies over",
       "het blog met advies over",
       "lees je snel",
+      "ton sur ton",
+      "ton-sur-ton",
     ];
 
     return formulas.filter((formula) => normalized.includes(normalizeForSearch(formula)));
+  }
+
+  function findRepeatedSentenceStarters(sentences) {
+    const watched = new Set(["handig"]);
+    const counts = new Map();
+
+    sentences.forEach((sentence) => {
+      const first = normalizeForSearch(sentence).split(" ").filter(Boolean)[0] || "";
+      if (!watched.has(first)) return;
+      counts.set(first, (counts.get(first) || 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([starter, count]) => `${starter} (${count}x)`);
   }
 
   function formatSuggestions(suggestions) {
@@ -1874,6 +1899,7 @@
     if (context.linkAnalysis.category === 0) suggestions.push({ code: "category_link", message: "Er is nog geen duidelijke categoriepagina gelinkt." });
     if (context.linkAnalysis.brand === 0) suggestions.push({ code: "brand_link", message: "Er is nog geen duidelijke merkpagina gelinkt." });
     if (context.forbiddenFormulas.length) suggestions.push({ code: "forbidden_formulas", message: `Verboden GPT-formules gevonden: ${context.forbiddenFormulas.join(", ")}.` });
+    if (context.repeatedStarters.length) suggestions.push({ code: "repeated_starters", message: `Herhalende zinsstarters gevonden: ${context.repeatedStarters.join(", ")}.` });
     if (!context.pageTitleCheck.ok) suggestions.push({ code: "page_title_length", message: `Page title is ${context.pageTitleCheck.length} tekens. Richting is ${DEFAULT_SETTINGS.pageTitleMinLength}-${DEFAULT_SETTINGS.pageTitleMaxLength}.` });
     if (!context.metaDescriptionCheck.ok) suggestions.push({ code: "meta_description_length", message: `Meta description is ${context.metaDescriptionCheck.length} tekens. Maximaal ${DEFAULT_SETTINGS.metaDescriptionMaxLength}.` });
     if (!context.firstLastKeyword.first) suggestions.push({ code: "keyword_first_paragraph", message: "Het hoofdzoekwoord staat niet in de eerste alinea." });
