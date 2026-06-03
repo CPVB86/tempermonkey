@@ -1,0 +1,143 @@
+
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brands Watcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="brands.css">
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <div class="ambient ambient-three" aria-hidden="true"></div>
+  <main>
+    <header class="hero">
+      <div>
+        <span class="eyebrow">Assortiment monitor</span>
+        <h1>Brands Watcher</h1>
+        <p>Controleer assortiment, ontbrekende leveranciersmaten en prijsverschillen per Supplier ID.</p>
+      </div>
+      <div class="hero-mark" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+    </header>
+
+    <section class="toolbar surface" aria-label="Acties">
+      <select id="download-brand" aria-label="Merk voor DDO-download">
+        <option value="" selected>Kies een merk</option>
+        <option value="chantelle" data-brand="Chantelle" data-label="Chantelle" data-tag-id="237">Chantelle</option>
+        <option value="anita" data-brand="Anita" data-label="Anita" data-tag-id="196">Anita</option>
+        <option value="anita-maternity" data-brand="Anita" data-label="Anita Maternity" data-tag-id="200">Anita Maternity</option>
+        <option value="anita-care" data-brand="Anita" data-label="Anita Care" data-tag-id="199">Anita Care</option>
+        <option value="anita-active" data-brand="Anita" data-label="Anita Active" data-tag-id="197">Anita Active</option>
+        <option value="anita-badmode" data-brand="Anita" data-label="Anita Badmode" data-tag-id="198">Anita Badmode</option>
+        <option value="rosa-faia" data-brand="Anita" data-label="Rosa Faia" data-tag-id="195">Rosa Faia</option>
+        <option value="rosa-faia-badmode" data-brand="Anita" data-label="Rosa Faia Badmode" data-tag-id="194">Rosa Faia Badmode</option>
+      </select>
+      <button id="load-ddo" class="icon-button" type="button" title="DDO-export ophalen" aria-label="DDO-export ophalen">
+        <i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i>
+      </button>
+      <button id="import-ddo" class="icon-button" type="button" title="DDO-bestand importeren" aria-label="DDO-bestand importeren">
+        <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+      </button>
+      <input id="ddo-file" type="file" accept=".xlsx,.xls,.csv" hidden>
+      <button id="start" class="icon-button primary" type="button" disabled title="Start controle" aria-label="Start controle">
+        <i class="fa-solid fa-play" aria-hidden="true"></i>
+      </button>
+      <button id="save-session" class="icon-button" type="button" title="Sessie bewaren" aria-label="Sessie bewaren">
+        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+      </button>
+      <button id="import-session" class="icon-button" type="button" title="Sessie uploaden" aria-label="Sessie uploaden">
+        <i class="fa-solid fa-upload" aria-hidden="true"></i>
+      </button>
+      <input id="session-file" type="file" accept=".json,application/json" hidden>
+      <button id="clear" class="icon-button" type="button" title="Resultaten wissen" aria-label="Resultaten wissen">
+        <i class="fa-solid fa-broom" aria-hidden="true"></i>
+      </button>
+      <button id="csv" class="icon-button" type="button" title="CSV downloaden" aria-label="CSV downloaden">
+        <i class="fa-solid fa-download" aria-hidden="true"></i>
+      </button>
+      <div id="status" class="status" role="status" aria-live="polite">
+        <span class="dot"></span>
+        <span id="status-text">Klaar om te starten.</span>
+      </div>
+    </section>
+
+    <section class="summary" aria-label="Samenvatting">
+      <div class="card">Producten<strong id="count-products">0</strong></div>
+      <div class="card">Met afwijking<strong id="count-issues">0</strong></div>
+      <div class="card">Ontbrekende maten<strong id="count-sizes">0</strong></div>
+      <div class="card">Adviesprijs wijkt af<strong id="count-advice">0</strong></div>
+      <div class="card">DDO meer korting<strong id="count-ddo-discount">0</strong></div>
+      <div class="card">Korting gemist<strong id="count-missed-discount">0</strong></div>
+      <div class="card">Leverancier meer korting<strong id="count-supplier-discount">0</strong></div>
+      <div class="card">Niet bestelbaar<strong id="count-not-orderable">0</strong></div>
+      <div class="card">Overgeslagen<strong id="count-skipped">0</strong></div>
+    </section>
+
+    <section class="filters surface" aria-label="Filters">
+      <select id="filter">
+        <option value="issues">Alleen afwijkingen</option>
+        <option value="all">Alle producten</option>
+        <option value="sizes">Ontbrekende maten</option>
+        <option value="prices">Alle prijswaarschuwingen</option>
+        <option value="warning:Adviesprijs wijkt af">Adviesprijs wijkt af</option>
+        <option value="warning:DDO meer korting">DDO meer korting</option>
+        <option value="warning:Korting leverancier gemist">Korting leverancier gemist</option>
+        <option value="warning:Leverancier meer korting">Leverancier meer korting</option>
+        <option value="warning:Niet bestelbaar">Niet bestelbaar</option>
+        <option value="warning:Overgeslagen">Overgeslagen</option>
+      </select>
+      <select id="brand-filter">
+        <option value="">Alle merken</option>
+      </select>
+    </section>
+
+    <div class="table-wrap">
+      <table>
+        <colgroup>
+          <col style="width:6%">
+          <col style="width:9%">
+          <col style="width:11%">
+          <col style="width:8%">
+          <col style="width:7%">
+          <col style="width:7%">
+          <col style="width:6%">
+          <col style="width:7%">
+          <col style="width:6%">
+          <col style="width:33%">
+        </colgroup>
+        <thead>
+          <tr class="group-row">
+            <th rowspan="2">Magazijn</th>
+            <th rowspan="2">Supplier ID</th>
+            <th rowspan="2">Product</th>
+            <th rowspan="2">Maten</th>
+            <th colspan="3">DDO</th>
+            <th colspan="2">Leverancier</th>
+            <th rowspan="2">Waarschuwingen</th>
+          </tr>
+          <tr class="column-row">
+            <th>Advies</th>
+            <th>Prijs</th>
+            <th>Korting</th>
+            <th>Advies</th>
+            <th>Korting</th>
+          </tr>
+        </thead>
+        <tbody id="results"></tbody>
+      </table>
+      <div id="empty" class="empty">Start de controle om resultaten te laden.</div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="brands.js"></script>
+</body>
+</html>
+
