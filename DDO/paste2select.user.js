@@ -22,29 +22,37 @@
     );
   }
 
-  async function selectOrdersFromClipboard() {
-    let text = '';
+async function selectOrdersFromClipboard(btn) {
+  let text = '';
 
-    try {
-      text = await navigator.clipboard.readText();
-    } catch {
-      return;
-    }
-
-    const wantedIds = parseOrderIds(text);
-    if (!wantedIds.size) return;
-
-    document
-      .querySelectorAll('input[type="checkbox"][name="orders[]"]')
-      .forEach(cb => {
-        const orderId = String(cb.value || '').trim();
-
-        if (wantedIds.has(orderId)) {
-          cb.checked = true;
-          cb.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      });
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    return;
   }
+
+  const wantedIds = parseOrderIds(text);
+  if (!wantedIds.size) return;
+
+  let selectedCount = 0;
+
+  document
+    .querySelectorAll('input[type="checkbox"][name="orders[]"]')
+    .forEach(cb => {
+      const orderId = String(cb.value || '').trim();
+
+      if (wantedIds.has(orderId)) {
+        if (!cb.checked) {
+          selectedCount++;
+        }
+
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+  btn.textContent = `✅ ${selectedCount} Externe orders geselecteerd`;
+}
 
   function addButton() {
     const table = document.querySelector('table.control');
@@ -55,8 +63,8 @@
 
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = '✅ Selecteer orders van klembord';
-    btn.addEventListener('click', selectOrdersFromClipboard);
+    btn.textContent = '✅ Selecteer Externe orders';
+    btn.addEventListener('click', () => selectOrdersFromClipboard(btn));
 
     wrapper.appendChild(btn);
     table.parentNode.insertBefore(wrapper, table);
