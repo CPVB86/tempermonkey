@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG | Paste2Select
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Vinkt GoedGepickt-orders aan op basis van ordernummers op het klembord + kopieert zichtbare orders.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
 // @run-at       document-end
@@ -49,80 +49,76 @@
     cb.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  async function paste2Select() {
-    let text = '';
+async function paste2Select(btn) {
+  let text = '';
 
-    try {
-      text = await navigator.clipboard.readText();
-    } catch {
-      return;
-    }
-
-    const wantedIds = parseOrderIds(text);
-    if (!wantedIds.size) return;
-
-    const dt = getDatatable();
-
-    if (dt) {
-      dt.rows({ filter: 'applied' }).every(function () {
-        const node = this.node();
-        if (!node) return;
-
-        const orderId = getOrderIdFromRowNode(node);
-        const cb = node.querySelector('input.orders[name="orders[]"]');
-
-        if (wantedIds.has(orderId)) {
-          setCheckbox(cb, true);
-        }
-      });
-
-      return;
-    }
-
-    document.querySelectorAll(`${TABLE_SELECTOR} tbody tr`).forEach(row => {
-      const orderId = getOrderIdFromRowNode(row);
-      const cb = row.querySelector('input.orders[name="orders[]"]');
-
-      if (wantedIds.has(orderId)) {
-        setCheckbox(cb, true);
-      }
-    });
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    return;
   }
 
-async function copy2Select() {
-  const ids = [];
+  const wantedIds = parseOrderIds(text);
+  if (!wantedIds.size) return;
+
+  let selectedCount = 0;
+
+  const handleRow = row => {
+    const orderId = getOrderIdFromRowNode(row);
+    const cb = row.querySelector('input.orders[name="orders[]"]');
+
+    if (wantedIds.has(orderId) && cb) {
+      if (!cb.checked) selectedCount++;
+      setCheckbox(cb, true);
+    }
+  };
 
   const dt = getDatatable();
 
   if (dt) {
     dt.rows({ filter: 'applied' }).every(function () {
       const node = this.node();
-      if (!node) return;
-
-      const cb = node.querySelector('input.orders[name="orders[]"]');
-      if (!cb || !cb.checked) return;
-
-      const orderId = getOrderIdFromRowNode(node);
-      if (orderId) ids.push(orderId);
+      if (node) handleRow(node);
     });
   } else {
-    document.querySelectorAll(`${TABLE_SELECTOR} tbody tr`).forEach(row => {
-      const cb = row.querySelector('input.orders[name="orders[]"]');
-      if (!cb || !cb.checked) return;
+    document.querySelectorAll(`${TABLE_SELECTOR} tbody tr`).forEach(handleRow);
+  }
 
-      const orderId = getOrderIdFromRowNode(row);
-      if (orderId) ids.push(orderId);
+  btn.textContent = `${selectedCount} orders geselecteerd`;
+}
+
+async function copy2Select(btn) {
+  const ids = [];
+
+  const handleRow = row => {
+    const cb = row.querySelector('input.orders[name="orders[]"]');
+    if (!cb || !cb.checked) return;
+
+    const orderId = getOrderIdFromRowNode(row);
+    if (orderId) ids.push(orderId);
+  };
+
+  const dt = getDatatable();
+
+  if (dt) {
+    dt.rows({ filter: 'applied' }).every(function () {
+      const node = this.node();
+      if (node) handleRow(node);
     });
+  } else {
+    document.querySelectorAll(`${TABLE_SELECTOR} tbody tr`).forEach(handleRow);
   }
 
   if (!ids.length) return;
 
   try {
     await navigator.clipboard.writeText(ids.join('\n'));
+    btn.textContent = `${ids.length} orders gekopieerd`;
   } catch {
     return;
   }
 }
+
   function createButton(label, onClick) {
     const btn = document.createElement('button');
 
@@ -165,8 +161,13 @@ async function copy2Select() {
     wrap.style.gap = '4px';
     wrap.style.marginLeft = '4px';
 
-    const pasteBtn = createButton('📋 Paste2Select', paste2Select);
-    const copyBtn = createButton('📄 Copy2Select', copy2Select);
+    const pasteBtn = createButton('📋 Paste2Select', function () {
+  paste2Select(pasteBtn);
+});
+
+const copyBtn = createButton('📄 Copy2Select', function () {
+  copy2Select(copyBtn);
+});
 
     wrap.appendChild(pasteBtn);
     wrap.appendChild(copyBtn);
