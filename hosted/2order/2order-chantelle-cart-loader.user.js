@@ -5,6 +5,8 @@
 // @match        https://chantelle-lingerie.my.site.com/DefaultStore/*
 // @match        https://chantelle-lingerie.my.site.com/DefaultStore/ccrz__Cart*
 // @author       C. P. v. Beek + GPT
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/hosted/2order/2order-chantelle-cart-loader.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/hosted/2order/2order-chantelle-cart-loader.user.js
 // @grant        unsafeWindow
 // @run-at       document-idle
 // ==/UserScript==
