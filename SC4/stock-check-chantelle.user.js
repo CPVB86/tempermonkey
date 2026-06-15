@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Chantelle & Femilet
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.3
 // @description  Vergelijk de lokale voorraad van Chantelle en Femilet met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -31,7 +31,7 @@
     const detail = {
       id: 'stock-check-chantelle',
       name: 'Stock Check | Chantelle & Femilet',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -51,6 +51,9 @@
   const $     = (s, r=document) => r.querySelector(s);
 
   const TIMEOUT_MS = 75000;
+  const CHECK_CONCURRENCY = 6;
+  const STOCK_CACHE_TTL_MS = 15 * 60 * 1000;
+  const LOG_SIZE_REPORTS = false;
 
   // -----------------------
   // Tool-side prerequisites
@@ -134,10 +137,11 @@ function isSizeLabel(s) {
     },
     status(anchorId, txt) {
       const lb = this.lb();
-      if (lb?.resultaat) lb.resultaat(String(anchorId), String(txt));
+      if (lb?.resultaat) lb.resultaat(String(anchorId), String(txt), { autoJump: false });
       else console.info(`[Chantelle][${anchorId}] status: ${txt}`);
     },
     perMaat(anchorId, report) {
+      if (!LOG_SIZE_REPORTS) return;
       console.groupCollapsed(`[Chantelle][${anchorId}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
@@ -215,7 +219,6 @@ function isSizeLabel(s) {
   // -----------------------
   function applyCompareAndMark(localRows, stockMap) {
     const report = [];
-    let firstMut = null;
 
     for (const { tr } of localRows) Core.clearRowMarks(tr);
 
@@ -242,12 +245,10 @@ function isSizeLabel(s) {
       if (res.action === 'bijboeken' && delta > 0) {
         Core.markRow(tr, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, remote ${remoteRaw})` });
         status = 'bijboeken';
-        if (!firstMut) firstMut = tr;
 
       } else if (res.action === 'uitboeken' && delta > 0) {
         Core.markRow(tr, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, remote ${remoteRaw})` });
         status = 'uitboeken';
-        if (!firstMut) firstMut = tr;
 
       } else {
         Core.markRow(tr, { action: 'none', delta: 0, title: `OK (target ${target}, remote ${remoteRaw})` });
@@ -257,7 +258,6 @@ function isSizeLabel(s) {
       report.push({ maat, local, remoteRaw, target, delta, status });
     }
 
-    if (firstMut) Core.jumpFlash(firstMut);
     return report;
   }
 
@@ -307,7 +307,7 @@ function isSizeLabel(s) {
     await Core.runTables({
       btn,
       tables,
-      concurrency: 2,
+      concurrency: CHECK_CONCURRENCY,
       perTable
     });
   }
@@ -352,6 +352,8 @@ function isSizeLabel(s) {
   // =====================================================================
   function workerInit() {
     const extractFirst = (html, re) => (html.match(re)?.[1] || '');
+    const stockCache = new Map();
+    let cachedCtx = null;
 
     setInterval(() => {
       try { GM_setValue(HEARTBEAT_KEY, Date.now()); } catch {}
@@ -458,6 +460,26 @@ function isSizeLabel(s) {
       }
 
       return { csrf, vid, authorization, ver: verStr ? Number(verStr) : 45, effAccountId, cartId, priceGroupId, portalUserId, storeName, sitePrefix, currSiteURL };
+    }
+
+    async function getWorkerContext() {
+      if (
+        cachedCtx?.csrf &&
+        cachedCtx?.vid &&
+        cachedCtx?.authorization &&
+        cachedCtx?.effAccountId &&
+        cachedCtx?.cartId
+      ) {
+        return cachedCtx;
+      }
+
+      let ctx = getCtxFromCurrentPage();
+      if (!ctx?.effAccountId) {
+        await delay(800);
+        ctx = getCtxFromCurrentPage();
+      }
+      cachedCtx = ctx;
+      return ctx;
     }
 
     function makeInputContext(ctx, sku) {
@@ -579,15 +601,21 @@ function isSizeLabel(s) {
         const sku = String(req.sku || '').trim();
         if (!sku) throw new Error('Worker: missing sku.');
 
-        let ctx = getCtxFromCurrentPage();
-        if (!ctx?.effAccountId) { await delay(800); ctx = getCtxFromCurrentPage(); }
+        const ctx = await getWorkerContext();
 
         if (!ctx?.csrf || !ctx?.vid || !ctx?.authorization) throw new Error('Worker: tokens missing. Open a PDP + refresh once.');
         if (!ctx?.effAccountId) throw new Error('Worker: effAccountId missing.');
         if (!ctx?.cartId) throw new Error('Worker: cartId missing. Open PDP with cartId once.');
 
-        const stockPayload = await fetchStock(ctx, sku);
-        const stockMapFull = parseStockMap(stockPayload);
+        const cached = stockCache.get(sku);
+        let stockMapFull;
+        if (cached && Date.now() - cached.timestamp < STOCK_CACHE_TTL_MS) {
+          stockMapFull = cached.stockMap;
+        } else {
+          const stockPayload = await fetchStock(ctx, sku);
+          stockMapFull = parseStockMap(stockPayload);
+          stockCache.set(sku, { timestamp: Date.now(), stockMap: stockMapFull });
+        }
 
         const wanted = new Set((req.sizes || []).map(normalizeSizeKey).filter(isSizeLabel));
         const stockMap = Object.fromEntries(
