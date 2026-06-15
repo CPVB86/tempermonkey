@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Chantelle & Femilet
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.0
+// @version      4.2
 // @description  Vergelijk de lokale voorraad van Chantelle en Femilet met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
+// @grant        GM_info
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/SC4/stock-check-chantelle.user.js
@@ -25,6 +26,19 @@
   const g    = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   const Core = g.VCPCore;
   const SR   = g.StockRules;
+
+  function registerUserscript() {
+    const detail = {
+      id: 'stock-check-chantelle',
+      name: 'Stock Check | Chantelle & Femilet',
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+    };
+    g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
+    g.__stockCheckUserscripts[detail.id] = detail;
+    try {
+      g.dispatchEvent(new g.CustomEvent('stockcheck:userscript-register', { detail }));
+    } catch {}
+  }
 
   // Bridge channel (GM keys)
   const BRIDGE_KEY     = 'chantelle_vcp2_bridge';
@@ -315,31 +329,15 @@ function isSizeLabel(s) {
   // ✅ UI badge zoals Triumph (rood/groen)
   // -----------------------
   function installHeartbeatBadge(btn) {
-    if (!btn || btn.querySelector('.vcp2-hb-badge')) return;
+    if (!btn || btn.querySelector('.supplier-bridge-badge')) return;
 
     btn.style.position = 'relative';
 
     const badge = document.createElement('span');
-    badge.className = 'vcp2-hb-badge';
-    Object.assign(badge.style, {
-      position: 'absolute',
-      top: '-6px',
-      right: '-7px',
-      minWidth: '18px',
-      height: '18px',
-      borderRadius: '50%',
-      color: '#fff',
-      fontSize: '10px',
-      fontWeight: '700',
-      lineHeight: '18px',
-      textAlign: 'center',
-      boxShadow: '0 0 0 2px #fff',
-      pointerEvents: 'none',
-      background: 'red'
-    });
-    badge.textContent = '';
+    badge.className = 'supplier-bridge-badge';
+    badge.setAttribute('aria-hidden', 'true');
 
-    const setBadge = (ok) => { badge.style.background = ok ? '#24b300' : 'red'; };
+    const setBadge = (ok) => badge.classList.toggle('is-online', !!ok);
     setBadge(bridgeOnline());
 
     btn.appendChild(badge);
@@ -616,6 +614,7 @@ function isSizeLabel(s) {
   // TOOL UI (VCP2)
   // =====================================================================
   if (ON_TOOL) {
+    registerUserscript();
     const mounted = Core.mountSupplierButton({
       id: 'vcp2-chantelle-btn',
       text: 'Controleer Chantelle',
