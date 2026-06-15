@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Stock Check | Lisca
-// @version      4.1
+// @version      4.3
 // @description  Vergelijkt de lokale voorraad met de Lisca-voorraad en markeert de benodigde mutaties.
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_info
 // @grant        unsafeWindow
 // @connect      www.dutchdesignersoutlet.com
 // @connect      dutchdesignersoutlet.com
@@ -27,6 +28,19 @@
   const SHEET_ID = '1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww';
   const GID = '933070542';
   const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+  function registerUserscript() {
+    const detail = {
+      id: 'stock-check-lisca',
+      name: 'Stock Check | Lisca',
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
+    };
+    page.__stockCheckUserscripts = page.__stockCheckUserscripts || Object.create(null);
+    page.__stockCheckUserscripts[detail.id] = detail;
+    try {
+      page.dispatchEvent(new page.CustomEvent('stockcheck:userscript-register', { detail }));
+    } catch {}
+  }
 
   function waitForCore(timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
@@ -207,15 +221,35 @@
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) return;
 
+    const originalHTML = button.innerHTML;
+    const originalLabel = button.dataset.skBaseLabel || 'Controleer voorraad bij Lisca';
+    button.dataset.skBaseLabel = originalLabel;
+    button.disabled = true;
+    button.classList.add('is-busy');
+    button.dataset.skState = 'busy';
+    button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    button.setAttribute('aria-label', `${originalLabel}: Lisca-voorraad laden`);
+    button.title = 'Lisca-voorraad laden...';
+
     let remoteMap;
     try {
       remoteMap = parseCsvToStockMap(await fetchLiscaCsv());
       if (!remoteMap.size) throw new Error('De Lisca CSV bevat geen voorraadregels.');
     } catch (error) {
       console.error('[Stock Check | Lisca]', error);
+      button.classList.remove('is-busy');
+      button.disabled = false;
+      button.dataset.skState = 'fail';
+      button.innerHTML = originalHTML;
+      button.setAttribute('aria-label', `${originalLabel}: laden mislukt`);
+      button.title = error.message || 'Lisca-voorraad laden mislukt';
       alert(error.message);
       return;
     }
+
+    button.innerHTML = originalHTML;
+    button.setAttribute('aria-label', originalLabel);
+    button.title = originalLabel;
 
     await Core.runTables({
       btn: button,
@@ -233,6 +267,7 @@
 
   waitForCore()
     .then(({ Core, Rules }) => {
+      registerUserscript();
       const mounted = Core.mountSupplierButton({
         id: 'stock-check-lisca',
         text: 'Check Lisca',
