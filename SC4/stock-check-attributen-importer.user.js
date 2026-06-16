@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Stock Check | Attributen Importer
-// @version      4.1
+// @version      4.2
 // @description  Haalt de DDO Attributes-export voor de geselecteerde leverancier op en importeert deze in Stock Check.
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
+// @grant        GM_info
+// @grant        unsafeWindow
 // @connect      www.dutchdesignersoutlet.com
 // @connect      dutchdesignersoutlet.com
 // @require      https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
@@ -18,6 +20,19 @@
   const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   const $ = (selector, root = document) => root.querySelector(selector);
+
+  function registerUserscript() {
+    const detail = {
+      id: 'stock-check-attributen-importer',
+      name: 'Stock Check | Attributen Importer',
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+    };
+    page.__stockCheckUserscripts = page.__stockCheckUserscripts || Object.create(null);
+    page.__stockCheckUserscripts[detail.id] = detail;
+    try {
+      page.dispatchEvent(new page.CustomEvent('stockcheck:userscript-register', { detail }));
+    } catch {}
+  }
 
   function waitFor(getValue, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
@@ -145,6 +160,8 @@
     select.addEventListener('change', refresh);
     refresh();
   }
+
+  registerUserscript();
 
   init().catch(error => {
     console.error('[Stock Check | Attributen Importer]', error);
