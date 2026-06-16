@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | RJ Bodywear
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk DDO-voorraad met RJ Bodywear.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -30,7 +30,7 @@
     const detail = {
       id: 'stock-check-rj-bodywear',
       name: 'Stock Check | RJ Bodywear',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -89,6 +89,7 @@
       else console.info(`[RJ][${id}] status: ${txt}`);
     },
     perMaat(id, report) {
+      if (g.StockCheckConfig?.detailLogging !== true) return;
       console.groupCollapsed(`[RJ][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
