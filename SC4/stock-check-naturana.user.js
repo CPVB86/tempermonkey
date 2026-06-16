@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Naturana
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.3
 // @description  Vergelijk de lokale voorraad van Naturana en Naturana Swim met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -31,7 +31,7 @@
     const detail = {
       id: 'stock-check-naturana',
       name: 'Stock Check | Naturana',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -58,6 +58,7 @@
     { req:`${BRIDGE_KEY}_req_v2`,  resp:`${BRIDGE_KEY}_resp_v2`,  ping:`${BRIDGE_KEY}_ping_v2`,  pong:`${BRIDGE_KEY}_pong_v2`  },
     { req:`${BRIDGE_KEY}_req_v1`,  resp:`${BRIDGE_KEY}_resp_v1`,  ping:`${BRIDGE_KEY}_ping_v1`,  pong:`${BRIDGE_KEY}_pong_v1`  },
   ];
+  const PRIMARY_CHANNEL = CHANNELS[0];
 
   const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
   const delay = (ms) => new Promise(r => setTimeout(r, ms));
@@ -97,6 +98,7 @@
       else console.info(`[Naturana][${anchorId}] status: ${txt}`);
     },
     perMaat(anchorId, report) {
+      if (g.StockCheckConfig?.detailLogging !== true) return;
       console.groupCollapsed(`[Naturana][${anchorId}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
@@ -228,19 +230,15 @@
         handles.forEach(h => { try { GM_removeValueChangeListener(h); } catch {} });
       };
 
-      CHANNELS.forEach(ch => {
-        const h = GM_addValueChangeListener(ch.resp, (_n, _o, msg) => {
-          if (settled || !msg || msg.id !== id) return;
-          settled = true;
-          off();
-          msg.ok ? resolve(msg) : reject(new Error(msg.error || 'bridge error'));
-        });
-        handles.push(h);
+      const h = GM_addValueChangeListener(PRIMARY_CHANNEL.resp, (_n, _o, msg) => {
+        if (settled || !msg || msg.id !== id) return;
+        settled = true;
+        off();
+        msg.ok ? resolve(msg) : reject(new Error(msg.error || 'bridge error'));
       });
+      handles.push(h);
 
-      CHANNELS.forEach(ch => {
-        GM_setValue(ch.req, { id, url, method, headers, body, timeout });
-      });
+      GM_setValue(PRIMARY_CHANNEL.req, { id, url, method, headers, body, timeout });
 
       setTimeout(() => {
         if (settled) return;
@@ -556,7 +554,6 @@
   // =========================================================
   function applyCompareAndMark(localRows, stockMap, maxCap) {
     const report = [];
-    let firstMut = null;
 
     for (const { tr } of localRows) Core.clearRowMarks(tr);
 
@@ -575,12 +572,10 @@
       if (res?.action === 'bijboeken' && delta > 0) {
         Core.markRow(tr, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, remote ${remote})` });
         status = 'bijboeken';
-        if (!firstMut) firstMut = tr;
 
       } else if (res?.action === 'uitboeken' && delta > 0) {
         Core.markRow(tr, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, remote ${remote})` });
         status = 'uitboeken';
-        if (!firstMut) firstMut = tr;
 
       } else {
         Core.markRow(tr, { action: 'none', delta: 0, title: `OK (target ${target}, remote ${remote})` });
@@ -590,7 +585,6 @@
       report.push({ maat, local, remote, target, delta, status });
     }
 
-    if (firstMut) Core.jumpFlash(firstMut);
     return report;
   }
 
