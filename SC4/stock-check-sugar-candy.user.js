@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Sugar Candy
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk DDO-voorraad met Sugar Candy.
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
 // @grant        GM_info
@@ -23,7 +23,7 @@
     const detail = {
       id: 'stock-check-sugar-candy',
       name: 'Stock Check | Sugar Candy',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -94,6 +94,7 @@
       }
     },
     perMaat(id,report){
+      if(g.StockCheckConfig?.detailLogging!==true) return;
       if(!this._on('console','perMaat')) return;
       console.groupCollapsed(`[Sugar][${id}] maatvergelijking`);
       try{
