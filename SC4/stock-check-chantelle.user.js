@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Chantelle & Femilet
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.3
+// @version      4.4
 // @description  Vergelijk de lokale voorraad van Chantelle en Femilet met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -31,7 +31,7 @@
     const detail = {
       id: 'stock-check-chantelle',
       name: 'Stock Check | Chantelle & Femilet',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.4'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -51,7 +51,9 @@
   const $     = (s, r=document) => r.querySelector(s);
 
   const TIMEOUT_MS = 75000;
-  const CHECK_CONCURRENCY = 6;
+  const CHECK_CONCURRENCY = 4;
+  const CHECK_BATCH_SIZE = 120;
+  const CHECK_BATCH_DELAY_MS = 650;
   const STOCK_CACHE_TTL_MS = 15 * 60 * 1000;
   const LOG_SIZE_REPORTS = false;
 
@@ -308,6 +310,8 @@ function isSizeLabel(s) {
       btn,
       tables,
       concurrency: CHECK_CONCURRENCY,
+      batchSize: CHECK_BATCH_SIZE,
+      batchDelayMs: CHECK_BATCH_DELAY_MS,
       perTable
     });
   }
@@ -353,6 +357,7 @@ function isSizeLabel(s) {
   function workerInit() {
     const extractFirst = (html, re) => (html.match(re)?.[1] || '');
     const stockCache = new Map();
+    const stockInFlight = new Map();
     let cachedCtx = null;
 
     setInterval(() => {
@@ -611,10 +616,17 @@ function isSizeLabel(s) {
         let stockMapFull;
         if (cached && Date.now() - cached.timestamp < STOCK_CACHE_TTL_MS) {
           stockMapFull = cached.stockMap;
+        } else if (stockInFlight.has(sku)) {
+          stockMapFull = await stockInFlight.get(sku);
         } else {
-          const stockPayload = await fetchStock(ctx, sku);
-          stockMapFull = parseStockMap(stockPayload);
-          stockCache.set(sku, { timestamp: Date.now(), stockMap: stockMapFull });
+          const request = fetchStock(ctx, sku).then(stockPayload => parseStockMap(stockPayload));
+          stockInFlight.set(sku, request);
+          try {
+            stockMapFull = await request;
+            stockCache.set(sku, { timestamp: Date.now(), stockMap: stockMapFull });
+          } finally {
+            stockInFlight.delete(sku);
+          }
         }
 
         const wanted = new Set((req.sizes || []).map(normalizeSizeKey).filter(isSizeLabel));
