@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Anita & Rosa Faia
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk de lokale voorraad van Anita en Rosa Faia met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -27,7 +27,7 @@
     const detail = {
       id: 'stock-check-anita',
       name: 'Stock Check | Anita & Rosa Faia',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -73,9 +73,11 @@
   // -----------------------
   // Performance / caching
   // -----------------------
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 8;
+  const LOG_SIZE_REPORTS = false;
 
   const DETAIL_CACHE = new Map();
+  const PARSED_DETAIL_CACHE = new Map();
   let SESSION_HIDDEN_PROMISE = null;
   const NOT_FOUND = Symbol('not_found');
 
@@ -116,6 +118,17 @@
     return DETAIL_CACHE.get(key);
   }
 
+  async function fetchParsedDetailCached(params) {
+    const key = detailCacheKey(params);
+    if (!PARSED_DETAIL_CACHE.has(key)) {
+      PARSED_DETAIL_CACHE.set(key, (async () => {
+        const html = await fetchDetailHtmlCached(params);
+        return html === NOT_FOUND ? NOT_FOUND : parseAnitaStock(html);
+      })());
+    }
+    return PARSED_DETAIL_CACHE.get(key);
+  }
+
   // -----------------------
   // Logger (status -> logboek, mapping -> console.table)
   // -----------------------
@@ -125,10 +138,11 @@
     },
     status(anchorId, txt) {
       const lb = this.lb();
-      if (lb?.resultaat) lb.resultaat(String(anchorId), String(txt));
+      if (lb?.resultaat) lb.resultaat(String(anchorId), String(txt), { autoJump: false });
       else console.info(`[Anita][${anchorId}] status: ${txt}`);
     },
     perMaat(anchorId, report) {
+      if (!LOG_SIZE_REPORTS) return;
       console.groupCollapsed(`[Anita][${anchorId}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
@@ -463,7 +477,6 @@
   // -----------------------
   function applyCompareAndMark(localRows, remoteMap, maxCap) {
     const report = [];
-    let firstMut = null;
 
     for (const { tr } of localRows) Core.clearRowMarks(tr);
 
@@ -480,12 +493,10 @@
       if (res?.action === 'bijboeken' && delta > 0) {
         Core.markRow(tr, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, remote ${remoteQty})` });
         status = 'bijboeken';
-        if (!firstMut) firstMut = tr;
 
       } else if (res?.action === 'uitboeken' && delta > 0) {
         Core.markRow(tr, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, remote ${remoteQty})` });
         status = 'uitboeken';
-        if (!firstMut) firstMut = tr;
 
       } else {
         Core.markRow(tr, { action: 'none', delta: 0, title: `OK (target ${target}, remote ${remoteQty})` });
@@ -495,7 +506,6 @@
       report.push({ maat, local, remote: remoteQty, target, delta, status });
     }
 
-    if (firstMut) Core.jumpFlash(firstMut);
     return report;
   }
 
@@ -523,14 +533,30 @@
       return 0;
     }
 
-    let html = '';
+    let remote;
+    let remoteMap;
     try {
-      html = await fetchDetailHtmlCached({ arnr, koll, fbnr, zicht: 'A' });
+      remote = await fetchParsedDetailCached({ arnr, koll, fbnr: '', zicht: 'A' });
+      if (remote === NOT_FOUND) {
+        if (!fbnr) {
+          Logger.status(anchorId, 'niet-gevonden');
+          Logger.perMaat(anchorId, []);
+          return 0;
+        }
+        remote = await fetchParsedDetailCached({ arnr, koll, fbnr, zicht: 'A' });
+        if (remote === NOT_FOUND) {
+          Logger.status(anchorId, 'niet-gevonden');
+          Logger.perMaat(anchorId, []);
+          return 0;
+        }
+      }
 
-      if (html === NOT_FOUND) {
-        Logger.status(anchorId, 'niet-gevonden');
-        Logger.perMaat(anchorId, []);
-        return 0;
+      remoteMap = chooseColor(remote, table, fbnr);
+
+      // Sommige Anita-pagina's leveren zonder kleurfilter niet alle kleuren terug.
+      if ((!remoteMap || Object.keys(remoteMap).length === 0) && fbnr) {
+        remote = await fetchParsedDetailCached({ arnr, koll, fbnr, zicht: 'A' });
+        if (remote !== NOT_FOUND) remoteMap = chooseColor(remote, table, fbnr);
       }
     } catch (e) {
       const msg = String(e?.message || e);
@@ -542,17 +568,6 @@
           return 0;
         }
       }
-      Logger.status(anchorId, 'niet-gevonden');
-      Logger.perMaat(anchorId, []);
-      return 0;
-    }
-
-    let remote;
-    let remoteMap;
-    try {
-      remote = parseAnitaStock(html);
-      remoteMap = chooseColor(remote, table, fbnr);
-    } catch {
       Logger.status(anchorId, 'niet-gevonden');
       Logger.perMaat(anchorId, []);
       return 0;
