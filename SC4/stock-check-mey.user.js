@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Mey
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.4
 // @description  Vergelijk de lokale voorraad van Mey met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -25,7 +25,7 @@
     const detail = {
       id: 'stock-check-mey',
       name: 'Stock Check | Mey',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.4'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -139,8 +139,15 @@
     return String(raw || '').toUpperCase().trim().replace(/\s+/g, '');
   }
 
-  // BH-sleutels zoals "D;38;75" worden omgezet naar "75D".
-  function keyToMaat(k, v) {
+  function looksLikeSize(value) {
+    const s = normSize(value);
+    return /^(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL|TU|OS)$/.test(s)
+      || /^\d{1,3}$/.test(s)
+      || /^\d{2,3}[A-Z]{1,4}$/.test(s);
+  }
+
+  // BH-sleutels zoals "D;1752;75" worden omgezet naar "75D".
+  function keyToMaat(k, v, colorKey = '') {
     const ks = String(k || '');
 
     // bra key: CUP;something;BAND
@@ -153,7 +160,12 @@
 
     // apparel: use v.size
     const size = normSize(v?.size);
-    return size || '';
+    if (size) return size;
+
+    const parts = ks.split(/[;|/:_\-\s]+/).map(part => part.trim()).filter(Boolean);
+    const keyColor = String(colorKey || '').trim();
+    const sizePart = parts.find(part => part !== keyColor && looksLikeSize(part));
+    return normSize(sizePart || '');
   }
 
   // Haal de kleurcode uit BH- en kledingvarianten.
@@ -164,10 +176,55 @@
     return '';
   }
 
+  function entryMatchesColor(k, v, colorKey) {
+    const wanted = String(colorKey || '').trim();
+    if (!wanted) return true;
+
+    const keyParts = String(k || '').split(/[;|/:_\-\s]+/).map(part => part.trim()).filter(Boolean);
+    if (keyParts.includes(wanted)) return true;
+
+    const candidates = [
+      v?.yattrib,
+      v?.yattribid,
+      v?.color,
+      v?.colorid,
+      v?.colour,
+      v?.colourid,
+      v?.variantid,
+      v?.variant,
+      v?.itemid,
+      v?.key
+    ];
+
+    return candidates.some(value =>
+      String(value || '').split(/[;|/:_\-\s]+/).map(part => part.trim()).includes(wanted)
+    );
+  }
+
   function orderableFromOrderDetail(v) {
     const stock = Number(v?.stock ?? 0);
     const blocked = !!v?.blocked;
     return !blocked && Number.isFinite(stock) && stock > 0;
+  }
+
+  function setRemoteSize(map, maat, next) {
+    const current = map[maat];
+    if (!current) {
+      map[maat] = next;
+      return;
+    }
+
+    // Nooit optellen of naar een ruimere waarde gokken. Bij dubbele remote entries
+    // voor dezelfde exacte maat/kleur kiezen we conservatief de laagste voorraad.
+    const currentStock = Number(current.stock ?? 0);
+    const nextStock = Number(next.stock ?? 0);
+    if (nextStock < currentStock) {
+      map[maat] = { ...next, conflict: true };
+    } else if (nextStock === currentStock) {
+      map[maat] = { ...current, conflict: true };
+    } else {
+      map[maat] = { ...current, conflict: true };
+    }
   }
 
   // ---------- AssortmentDetail (allowed sizes) ----------
@@ -263,13 +320,12 @@
 
     // map: maat -> { stock, orderable, rawStock }
     const map = {};
+    let colorMatchedEntries = 0;
 
     for (const [k, v] of Object.entries(xvalues)) {
-      // kleurfilter voor alle keys
-      if (colorKey) {
-        const ck = colorFromKey(k);
-        if (ck && ck !== String(colorKey)) continue;
-      }
+      // Strikt kleurfilter: geen bekende exacte kleur = niet gebruiken.
+      if (!entryMatchesColor(k, v, colorKey)) continue;
+      colorMatchedEntries++;
 
       const rawStock = Number(v?.stock ?? 0);
       const ean = String(v?.ean || '').trim();
@@ -277,7 +333,7 @@
       // ghost variant skip
       if ((!ean || ean.length < 8) && (!Number.isFinite(rawStock) || rawStock <= 0)) continue;
 
-      const maat = keyToMaat(k, v);
+      const maat = keyToMaat(k, v, colorKey);
       if (!maat) continue;
 
       const orderable = (allowedSetOrNull instanceof Set)
@@ -286,8 +342,13 @@
 
       const effectiveStock = orderable ? rawStock : 0;
 
-      map[maat] = { stock: effectiveStock, orderable, rawStock };
+      setRemoteSize(map, maat, { stock: effectiveStock, orderable, rawStock, sourceKey: String(k) });
     }
+
+    Object.defineProperty(map, '__meyMeta', {
+      value: { colorMatchedEntries },
+      enumerable: false
+    });
 
     return map;
   }
@@ -303,10 +364,9 @@
       const maat  = normSize(row.dataset.size || sizeCell?.textContent || '');
       const local = parseInt(String(localCell?.textContent || '').trim(), 10) || 0;
 
-      // alleen toepassen op maten die remote heeft
-      if (!Object.prototype.hasOwnProperty.call(remoteMapObj, maat)) return;
-
-      const remoteInfo = remoteMapObj[maat] || {};
+      // Als de exacte kleur remote bestaat, betekent een ontbrekende maat: remote 0.
+      // Niet gokken op andere kleuren of fallback-maten.
+      const remoteInfo = remoteMapObj[maat] || { stock: 0, orderable: false, rawStock: 0, missingSize: true };
       const remoteRaw  = Number(remoteInfo.stock ?? 0);
 
       // target via StockRules (default strategy)
@@ -346,7 +406,7 @@
         target,
         delta,
         status,
-        hint: remoteInfo.orderable === false ? 'NOT-ORDERABLE (remote forced 0)' : 'orderable'
+        hint: remoteInfo.missingSize ? 'SIZE-MISSING-FOR-EXACT-COLOR (remote forced 0)' : (remoteInfo.orderable === false ? 'NOT-ORDERABLE (remote forced 0)' : 'orderable')
       });
     });
 
@@ -354,7 +414,8 @@
   }
 
   function bepaalLogStatus(report, remoteMapObj) {
-    const remoteLeeg = !remoteMapObj || Object.keys(remoteMapObj).length === 0;
+    const colorSeen = Number(remoteMapObj?.__meyMeta?.colorMatchedEntries || 0) > 0;
+    const remoteLeeg = !remoteMapObj || (!colorSeen && Object.keys(remoteMapObj).length === 0);
     if (remoteLeeg) return 'niet-gevonden';
 
     const diffs = report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
@@ -410,7 +471,8 @@
       throw e;
     }
 
-    if (!remoteMapObj || Object.keys(remoteMapObj).length === 0) {
+    const colorSeen = Number(remoteMapObj?.__meyMeta?.colorMatchedEntries || 0) > 0;
+    if (!remoteMapObj || (!colorSeen && Object.keys(remoteMapObj).length === 0)) {
       Logger.status(anchorId, 'niet-gevonden');
       Logger.perMaat(anchorId, []);
       return 0;
