@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Stock Check | Lisca
-// @version      4.3
+// @version      4.4
 // @description  Vergelijkt de lokale voorraad met de Lisca-voorraad en markeert de benodigde mutaties.
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
 // @run-at       document-idle
@@ -33,7 +33,7 @@
     const detail = {
       id: 'stock-check-lisca',
       name: 'Stock Check | Lisca',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.4'
     };
     page.__stockCheckUserscripts = page.__stockCheckUserscripts || Object.create(null);
     page.__stockCheckUserscripts[detail.id] = detail;
@@ -60,12 +60,28 @@
     });
   }
 
-  function csvUrl(authUser = null, userPath = null) {
+  function csvUrl(authUser = null, userPath = null, endpoint = 'gviz') {
+    const path = userPath !== null
+      ? `https://docs.google.com/u/${userPath}/spreadsheets/d/${SHEET_ID}`
+      : `https://docs.google.com/spreadsheets/d/${SHEET_ID}`;
+    const suffix = endpoint === 'export'
+      ? `export?format=csv&gid=${GID}`
+      : `gviz/tq?tqx=out:csv&gid=${GID}`;
+
     if (userPath !== null) {
-      return `https://docs.google.com/u/${userPath}/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
+      return `${path}/${suffix}`;
     }
-    const base = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
+    const base = `${path}/${suffix}`;
     return authUser === null ? base : `${base}&authuser=${authUser}`;
+  }
+
+  function csvCandidates(account) {
+    return [
+      csvUrl(account, null, 'gviz'),
+      csvUrl(null, account, 'gviz'),
+      csvUrl(account, null, 'export'),
+      csvUrl(null, account, 'export')
+    ];
   }
 
   function requestCsv(url) {
@@ -110,13 +126,18 @@
     const cached = loadCache();
     if (cached) return cached;
 
+    const errors = [];
     for (let account = 0; account <= 4; account++) {
-      const candidates = [csvUrl(account, null), csvUrl(null, account)];
+      const candidates = csvCandidates(account);
       for (const url of candidates) {
-        const response = await requestCsv(url);
-        if (isCsvResponse(response)) {
-          saveCache(response.responseText);
-          return response.responseText;
+        try {
+          const response = await requestCsv(url);
+          if (isCsvResponse(response)) {
+            saveCache(response.responseText);
+            return response.responseText;
+          }
+        } catch (error) {
+          errors.push(error);
         }
       }
     }
