@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | After Eden
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk DDO-voorraad met After Eden.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -27,7 +27,7 @@
     const detail = {
       id: 'stock-check-after-eden',
       name: 'Stock Check | After Eden',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -103,6 +103,7 @@
       else console.info(`[AfterEden][${id}] status: ${txt}`, extra || '');
     },
     perMaat(id, report) {
+      if (g.StockCheckConfig?.detailLogging !== true) return;
       if (!report?.length) return;
       console.groupCollapsed(`[AfterEden][${id}] maatvergelijking`);
       try {
