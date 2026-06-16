@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Sugar Candy
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.3
 // @description  Vergelijk DDO-voorraad met Sugar Candy.
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
 // @grant        GM_info
@@ -23,7 +23,7 @@
     const detail = {
       id: 'stock-check-sugar-candy',
       name: 'Stock Check | Sugar Candy',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -227,18 +227,19 @@
 
       let actie='ok';
       let delta=0;
+      const target = isAvail ? 2 : 0;
       if (local > 0 && !isAvail){
         delta=local;
-        Core.markRow(row,{action:'remove',delta,title:`Uitboeken ${delta} (Sugar Candy niet beschikbaar)`});
+        Core.markRow(row,{action:'remove',delta,remote:supNum,target,title:`Uitboeken ${delta} (Sugar Candy niet beschikbaar, supplier qty ${supNum})`});
         actie='uitboeken';
         if(!firstMut) firstMut=row;
       } else if (local === 0 && isAvail){
         delta=2;
-        Core.markRow(row,{action:'add',delta,title:`Bijboeken ${delta} (Sugar Candy beschikbaar)`});
+        Core.markRow(row,{action:'add',delta,remote:supNum,target,title:`Bijboeken ${delta} (Sugar Candy beschikbaar, supplier qty ${supNum})`});
         actie='bijboeken';
         if(!firstMut) firstMut=row;
       } else {
-        Core.markRow(row,{action:'none',delta:0,title:`OK (leverancier qty ${supNum})`});
+        Core.markRow(row,{action:'none',delta:0,remote:supNum,target,title:`OK (leverancier qty ${supNum})`});
       }
       report.push({ maat, local, sup: isAvail ? supNum : 0, actie, delta });
     });
