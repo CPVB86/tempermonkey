@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Mey
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk de lokale voorraad van Mey met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -25,7 +25,7 @@
     const detail = {
       id: 'stock-check-mey',
       name: 'Stock Check | Mey',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -35,6 +35,7 @@
   }
 
   const TIMEOUT = 15000;
+  const ORDER_DETAIL_CACHE = new Map();
 
   // ---- Mey context (zoals je script) ----
   const MEY_CTX = {
@@ -72,6 +73,7 @@
       else console.info(`[Mey][${id}] status: ${txt}`);
     },
     perMaat(id, report) {
+      if (g.StockCheckConfig?.detailLogging !== true) return;
       console.groupCollapsed(`[Mey][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
@@ -219,7 +221,10 @@
   }
 
   // ---------- OrderDetail remoteMap ----------
-  async function fetchRemoteMap(styleid, colorKey, allowedSetOrNull) {
+  async function fetchOrderDetail(styleid) {
+    const cacheKey = String(styleid);
+    if (ORDER_DETAIL_CACHE.has(cacheKey)) return ORDER_DETAIL_CACHE.get(cacheKey);
+
     const url = buildMeyUrl('OrderDetail/collection');
 
     const payload = [{
@@ -241,11 +246,20 @@
       ordertypeid: MEY_CTX.ordertypeid
     }];
 
-    const text = await gmPost(url, payload);
-    const json = JSON.parse(text);
+    const request = gmPost(url, payload)
+      .then(text => JSON.parse(text)?.[0]?.result?.[0]?.xvalues || {})
+      .catch(error => {
+        ORDER_DETAIL_CACHE.delete(cacheKey);
+        throw error;
+      });
 
-    const res0 = json?.[0]?.result?.[0];
-    const xvalues = res0?.xvalues || {};
+    ORDER_DETAIL_CACHE.set(cacheKey, request);
+    return request;
+  }
+
+  // ---------- OrderDetail remoteMap ----------
+  async function fetchRemoteMap(styleid, colorKey, allowedSetOrNull) {
+    const xvalues = await fetchOrderDetail(styleid);
 
     // map: maat -> { stock, orderable, rawStock }
     const map = {};
@@ -281,7 +295,6 @@
   function applyRulesAndMark(localTable, remoteMapObj) {
     const rows = localTable.querySelectorAll('tbody tr');
     const report = [];
-    let firstMut = null;
 
     rows.forEach(row => {
       const sizeCell  = row.children[0];
@@ -311,7 +324,6 @@
           title: `Bijboeken ${delta} (target ${target}, remote ${remoteRaw})`
         });
         status = 'bijboeken';
-        if (!firstMut) firstMut = row;
 
       } else if (action === 'uitboeken' && delta > 0) {
         Core.markRow(row, {
@@ -320,7 +332,6 @@
           title: `Uitboeken ${delta} (target ${target}, remote ${remoteRaw})`
         });
         status = 'uitboeken';
-        if (!firstMut) firstMut = row;
 
       } else {
         // ok/none
@@ -339,7 +350,6 @@
       });
     });
 
-    if (firstMut) Core.jumpFlash(firstMut);
     return report;
   }
 
@@ -420,11 +430,13 @@
     const tables = Array.from(document.querySelectorAll('#output table'));
     if (!tables.length) return;
 
+    ORDER_DETAIL_CACHE.clear();
+
     try {
       await Core.runTables({
         btn,
         tables,
-        concurrency: 3,
+        concurrency: 6,
         perTable
       });
     } catch (e) {
