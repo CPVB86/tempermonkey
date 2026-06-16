@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Zetex
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.3
 // @description  Vergelijk DDO-voorraad met Zetex via de ingelogde B2B-bridge.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -28,7 +28,7 @@
     const detail = {
       id: 'stock-check-zetex',
       name: 'Stock Check | Zetex',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -535,7 +535,8 @@
   function getLocalEanFromRow(row) {
     return String(
       row.dataset.ean ||
-      row.children[2]?.textContent ||
+      row.children[row.children.length - 1]?.childNodes?.[0]?.textContent ||
+      row.children[row.children.length - 1]?.textContent ||
       row.querySelector('[data-ean]')?.dataset.ean ||
       row.querySelector('input[name*="ean"]')?.value ||
       row.querySelector('.ean')?.textContent ||
