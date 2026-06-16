@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Stock Check | Lisca
-// @version      4.4
+// @version      4.5
 // @description  Vergelijkt de lokale voorraad met de Lisca-voorraad en markeert de benodigde mutaties.
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
 // @run-at       document-idle
@@ -33,7 +33,7 @@
     const detail = {
       id: 'stock-check-lisca',
       name: 'Stock Check | Lisca',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.4'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.5'
     };
     page.__stockCheckUserscripts = page.__stockCheckUserscripts || Object.create(null);
     page.__stockCheckUserscripts[detail.id] = detail;
@@ -173,12 +173,14 @@
     const report = [];
 
     table.querySelectorAll('tbody tr').forEach(row => {
-      const [sizeCell, stockCell, eanCell] = row.querySelectorAll('td');
+      const cells = row.querySelectorAll('td');
+      const [sizeCell, stockCell] = cells;
+      const eanCell = cells[cells.length - 1];
       if (!eanCell) return;
 
       const size = String(sizeCell.textContent || '').trim();
       const local = Number.parseInt(String(stockCell.textContent || '0').trim(), 10) || 0;
-      const ean = String(eanCell.textContent || '').trim();
+      const ean = String(eanCell?.childNodes?.[0]?.textContent || eanCell?.textContent || '').trim();
       const remoteRaw = ean ? remoteMap.get(ean) : undefined;
       const target = normalizeRemoteStock(remoteRaw);
 
@@ -207,7 +209,7 @@
         Core.markRow(row, {
           action: 'add',
           delta: result.delta,
-          title: `Bijboeken ${result.delta} (doel ${target})`
+          title: `Bijboeken ${result.delta} (target ${target}, remote ${remoteRaw})`
         });
         changes++;
         if (!firstMarkedRow) firstMarkedRow = row;
@@ -215,12 +217,12 @@
         Core.markRow(row, {
           action: 'remove',
           delta: result.delta,
-          title: `Uitboeken ${result.delta} (doel ${target})`
+          title: `Uitboeken ${result.delta} (target ${target}, remote ${remoteRaw})`
         });
         changes++;
         if (!firstMarkedRow) firstMarkedRow = row;
       } else {
-        Core.markRow(row, { action: 'none', title: `OK (doel ${target})` });
+        Core.markRow(row, { action: 'none', title: `OK (target ${target}, remote ${remoteRaw})` });
       }
 
       report.push({
