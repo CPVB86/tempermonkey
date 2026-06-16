@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Triumph & Sloggi
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk DDO-voorraad met Triumph en Sloggi via de ingelogde B2B-bridge.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -28,7 +28,7 @@
     const detail = {
       id: 'stock-check-triumph',
       name: 'Stock Check | Triumph & Sloggi',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -281,6 +281,7 @@
       else console.info(`[Triumph][${id}] status: ${txt}`);
     },
     perMaat(id, report) {
+      if (g.StockCheckConfig?.detailLogging !== true) return;
       console.groupCollapsed(`[Triumph][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
