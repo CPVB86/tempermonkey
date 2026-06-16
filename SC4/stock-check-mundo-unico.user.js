@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Mundo Unico
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk DDO-voorraad met Mundo Unico via de Colomoda-bridge.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -33,7 +33,7 @@
     const detail = {
       id: 'stock-check-mundo-unico',
       name: 'Stock Check | Mundo Unico',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -256,6 +256,7 @@
       else console.info(`[MundoUnico][${id}] status: ${txt}`);
     },
     perMaat(id, report) {
+      if (g.StockCheckConfig?.detailLogging !== true) return;
       console.groupCollapsed(`[MundoUnico][${id}] maatvergelijking`);
       try {
         console.table(report.map(r => ({
