@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | LingaDore
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.1
+// @version      4.2
 // @description  Vergelijk de lokale voorraad met een geimporteerd LingaDore-voorraadbestand.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -24,7 +24,7 @@
     const detail = {
       id: 'stock-check-lingadore',
       name: 'Stock Check | LingaDore',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.1'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -66,6 +66,8 @@
 
   // ---------- Console report (Mundo-style) ----------
   function consoleReport(anchorId, report) {
+    if (g.StockCheckConfig?.detailLogging !== true) return;
+
     console.groupCollapsed(`[LingaDore][${anchorId}] maatvergelijking`);
     try {
       console.table(report.map(r => ({
