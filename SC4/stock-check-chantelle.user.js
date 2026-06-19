@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Chantelle & Femilet
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.4
+// @version      4.7
 // @description  Vergelijk de lokale voorraad van Chantelle en Femilet met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -31,7 +31,7 @@
     const detail = {
       id: 'stock-check-chantelle',
       name: 'Stock Check | Chantelle & Femilet',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.4'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.7'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -90,6 +90,20 @@ function normalizeSizeKey(raw) {
   v = normSize(v);
   if (!v) return '';
 
+  const namedSizes = {
+    EXTRASMALL: 'XS',
+    XSMALL: 'XS',
+    SMALL: 'S',
+    MEDIUM: 'M',
+    LARGE: 'L',
+    EXTRALARGE: 'XL',
+    XLARGE: 'XL',
+    EXTRAEXTRALARGE: '2XL',
+    XXLARGE: '2XL',
+    XXLarge: '2XL'
+  };
+  if (namedSizes[v]) return namedSizes[v];
+
   // normaliseer schrijfwijzen
   v = v.replace(/XXL/g, '2XL');
   v = v.replace(/XXXL/g, '3XL');
@@ -128,6 +142,11 @@ function isSizeLabel(s) {
   if (/^(XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)\/(XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return true;
 
   return false;
+}
+
+function isAlphaApparelSize(s) {
+  const v = normalizeSizeKey(s);
+  return /^(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL|TU)$/.test(v);
 }
 
   // -----------------------
@@ -225,9 +244,8 @@ function isSizeLabel(s) {
     for (const { tr } of localRows) Core.clearRowMarks(tr);
 
     for (const { tr, maat, local } of localRows) {
-      if (!Object.prototype.hasOwnProperty.call(stockMap, maat)) continue;
-
-      const remoteRaw = String(stockMap[maat] ?? '').trim();
+      const hasRemoteSize = Object.prototype.hasOwnProperty.call(stockMap, maat);
+      const remoteRaw = hasRemoteSize ? String(stockMap[maat] ?? '').trim() : '0';
 
       // ✅ centrale mapping (brand = 'chantelle')
       // (StockRules hoort "<3", "5+", "—", "-" etc. te begrijpen)
@@ -543,15 +561,53 @@ function isSizeLabel(s) {
       });
     }
 
+    function sizeFromStockInfo(info) {
+      const candidates = [
+        info?.size,
+        info?.sizeLabel,
+        info?.sizelabel,
+        info?.sizeName,
+        info?.sizeCode,
+        info?.label,
+        info?.displayLabel,
+        info?.attributeValue,
+        info?.xvalue,
+        info?.xValue
+      ];
+
+      for (const candidate of candidates) {
+        const key = normalizeSizeKey(candidate);
+        if (isSizeLabel(key)) return key;
+      }
+
+      const skuCandidates = [info?.sku, info?.extSku, info?.label];
+      for (const candidate of skuCandidates) {
+        const tail = String(candidate || '').trim().match(/(?:^|\s)(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|5XL|6XL|TU|\d{2,3}[A-Z]{1,4}|\d{1,3})$/i)?.[1] || '';
+        const key = normalizeSizeKey(tail);
+        if (isSizeLabel(key)) return key;
+      }
+      return '';
+    }
+
+    function stockValueFromInfo(info) {
+      return String(
+        info?.stockValue ??
+        info?.stock ??
+        ''
+      ).trim();
+    }
+
     function parseStockMap(stockPayload) {
       const sd = stockPayload?.stockData || {};
       const out = {};
 
       if (sd?.values && typeof sd.values === 'object') {
         for (const [sizeKey, info] of Object.entries(sd.values)) {
-          const key = normalizeSizeKey(sizeKey);
+          const explicitKey = sizeFromStockInfo(info);
+          const fallbackKey = normalizeSizeKey(sizeKey);
+          const key = explicitKey || (isAlphaApparelSize(fallbackKey) ? '' : fallbackKey);
           if (!isSizeLabel(key)) continue;
-          const raw = String(info?.stockValue ?? '').trim();
+          const raw = stockValueFromInfo(info);
           out[key] = (!raw || raw === '-' || raw === ' - ') ? '' : raw;
         }
         return out;
@@ -562,14 +618,16 @@ function isSizeLabel(s) {
         const values = cupObj?.values || {};
 
         for (const [bandKey, info] of Object.entries(values)) {
-          const bandNorm = normalizeSizeKey(bandKey);
+          const explicitKey = sizeFromStockInfo(info);
+          const fallbackKey = normalizeSizeKey(bandKey);
+          const bandNorm = explicitKey || (isAlphaApparelSize(fallbackKey) ? '' : fallbackKey);
           if (!bandNorm) continue;
 
           const isDummyCup = !cup || cup === '-' || cup === '—';
           const key = isDummyCup ? bandNorm : normalizeSizeKey(`${bandNorm}${cup}`);
           if (!isSizeLabel(key)) continue;
 
-          const raw = String(info?.stockValue ?? '').trim();
+          const raw = stockValueFromInfo(info);
           out[key] = (!raw || raw === '-' || raw === ' - ') ? '' : raw;
         }
       }
