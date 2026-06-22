@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Chantelle & Femilet
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.7
+// @version      4.8
 // @description  Vergelijk de lokale voorraad van Chantelle en Femilet met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -31,7 +31,7 @@
     const detail = {
       id: 'stock-check-chantelle',
       name: 'Stock Check | Chantelle & Femilet',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.7'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.8'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -104,13 +104,17 @@ function normalizeSizeKey(raw) {
   };
   if (namedSizes[v]) return namedSizes[v];
 
-  // normaliseer schrijfwijzen
-  v = v.replace(/XXL/g, '2XL');
-  v = v.replace(/XXXL/g, '3XL');
+  // normaliseer schrijfwijzen, langste variant eerst
   v = v.replace(/XXXXL/g, '4XL');
+  v = v.replace(/XXXL/g, '3XL');
+  v = v.replace(/XXL/g, '2XL');
+
+  // Leveranciers gebruiken zowel XS/S als XS-S voor combinatiematen.
+  const combined = v.match(/^(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)[\/-](XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)$/);
+  if (combined) return `${combined[1]}/${combined[2]}`;
 
   // combinatiematen behouden
-  if (/^(XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)\/(XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) {
+  if (/^(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)\/(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) {
     return v;
   }
 
@@ -139,7 +143,7 @@ function isSizeLabel(s) {
 
   if (/^(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL|TU)$/.test(v)) return true;
 
-  if (/^(XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)\/(XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return true;
+  if (/^(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)\/(XXXS|XXS|XS|S|M|L|XL|2XL|3XL|4XL|5XL|6XL)$/.test(v)) return true;
 
   return false;
 }
@@ -580,9 +584,11 @@ function isAlphaApparelSize(s) {
         if (isSizeLabel(key)) return key;
       }
 
-      const skuCandidates = [info?.sku, info?.extSku, info?.label];
+      const skuCandidates = [info?.sku, info?.extSku, info?.label, info?.displayLabel];
       for (const candidate of skuCandidates) {
-        const tail = String(candidate || '').trim().match(/(?:^|\s)(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|5XL|6XL|TU|\d{2,3}[A-Z]{1,4}|\d{1,3})$/i)?.[1] || '';
+        const apparel = '(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL)';
+        const tailPattern = new RegExp(`(?:^|\\s)(${apparel}(?:\\s*[\\/-]\\s*${apparel})?|TU|\\d{2,3}[A-Z]{1,4}|\\d{1,3})$`, 'i');
+        const tail = String(candidate || '').trim().match(tailPattern)?.[1] || '';
         const key = normalizeSizeKey(tail);
         if (isSizeLabel(key)) return key;
       }
@@ -602,10 +608,11 @@ function isAlphaApparelSize(s) {
       const out = {};
 
       if (sd?.values && typeof sd.values === 'object') {
+        const valuesAreArray = Array.isArray(sd.values);
         for (const [sizeKey, info] of Object.entries(sd.values)) {
           const explicitKey = sizeFromStockInfo(info);
           const fallbackKey = normalizeSizeKey(sizeKey);
-          const key = explicitKey || (isAlphaApparelSize(fallbackKey) ? '' : fallbackKey);
+          const key = explicitKey || (!valuesAreArray && !isAlphaApparelSize(fallbackKey) ? fallbackKey : '');
           if (!isSizeLabel(key)) continue;
           const raw = stockValueFromInfo(info);
           out[key] = (!raw || raw === '-' || raw === ' - ') ? '' : raw;
@@ -624,7 +631,8 @@ function isAlphaApparelSize(s) {
           if (!bandNorm) continue;
 
           const isDummyCup = !cup || cup === '-' || cup === '—';
-          const key = isDummyCup ? bandNorm : normalizeSizeKey(`${bandNorm}${cup}`);
+          const explicitBraSize = /^\d{2,3}[A-Z]{1,4}$/.test(explicitKey);
+          const key = (isDummyCup || explicitBraSize) ? bandNorm : normalizeSizeKey(`${bandNorm}${cup}`);
           if (!isSizeLabel(key)) continue;
 
           const raw = stockValueFromInfo(info);
