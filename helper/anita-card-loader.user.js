@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Anita Order Tool
-// @version      0.3
+// @version      0.4
 // @description  Reads Anita item/color/size/qty rows from clipboard and adds exact matches to the order.
 // @match        https://b2b.anita.com/nl/shop/bestelling*
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/anita-card-loader.user.js
@@ -136,7 +136,16 @@
     const groups = new Map();
 
     rows.forEach((row) => {
-      const key = row.productUrl || row.itemNumber;
+      let campaign = "";
+      if (row.productUrl) {
+        try {
+          campaign = new URL(row.productUrl, location.origin).searchParams.get("vakn") || "";
+        } catch {}
+      }
+
+      // One Anita POST replaces the complete matrix for an article. Keep all
+      // requested colors/sizes for that article in the same request.
+      const key = `${row.itemNumber}|${campaign}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(row);
     });
@@ -183,8 +192,16 @@
       body.set(name, el.value || "");
     });
 
+    const totals = new Map();
     rows.forEach((row) => {
-      body.set(row.resolvedInputName, String(row.quantity));
+      totals.set(
+        row.resolvedInputName,
+        (totals.get(row.resolvedInputName) || 0) + row.quantity
+      );
+    });
+
+    totals.forEach((quantity, inputName) => {
+      body.set(inputName, String(quantity));
     });
 
     body.set("abkz", "W");
