@@ -3,6 +3,8 @@
 // @version      0.3
 // @description  Reads style/size/qty rows from clipboard and adds Wacoal Group items to the cart.
 // @match        https://b2b.wacoal-europe.com/b2b/en/EUR/cart*
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/wacoal-card-loader.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/wacoal-card-loader.user.js
 // @author       C. P. v. Beek + GPT
 // @grant        unsafeWindow
 // @run-at       document-start
