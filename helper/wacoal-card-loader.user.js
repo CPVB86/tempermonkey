@@ -1,13 +1,11 @@
 // ==UserScript==
 // @name         Wacoal Order Tool
-// @version      0.1
+// @version      0.3
 // @description  Reads style/size/qty rows from clipboard and adds Wacoal Group items to the cart.
 // @match        https://b2b.wacoal-europe.com/b2b/en/EUR/cart*
 // @author       C. P. v. Beek + GPT
 // @grant        unsafeWindow
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/wacoal-card-loader.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/wacoal-card-loader.user.js
 // ==/UserScript==
 
 (function () {
@@ -84,10 +82,26 @@
     return String(styleProductCode || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
 
-  function convertEuBraSizeToGlobal(size) {
+  function convertEuSizeToGlobal(size) {
     const normalized = normalizeVariantSize(size);
     const match = normalized.match(/^(\d{2,3})([A-Z]+)$/);
-    if (!match) return normalized;
+    if (!match) {
+      const apparelSizeMap = {
+        32: "6",
+        34: "8",
+        36: "10",
+        38: "12",
+        40: "14",
+        42: "16",
+        44: "18",
+        46: "20",
+        48: "22",
+        50: "24",
+        52: "26",
+        54: "28",
+      };
+      return apparelSizeMap[normalized] || normalized;
+    }
 
     const euBand = parseInt(match[1], 10);
     const euCup = match[2];
@@ -120,7 +134,7 @@
 
   function buildVariantSku(styleProductCode, size) {
     const style = normalizeStyleProductCode(styleProductCode);
-    const variantSize = convertEuBraSizeToGlobal(size);
+    const variantSize = convertEuSizeToGlobal(size);
     if (!style || !variantSize) return "";
     if (style.endsWith(variantSize)) return style;
     return style + variantSize;
