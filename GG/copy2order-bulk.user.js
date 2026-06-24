@@ -208,9 +208,14 @@ function extractOrderDateFromRowNode(node) {
                 if (!titleLink) return;
                 const rawTitle = titleLink.textContent.replace(/\s+/g, ' ').trim();
 
-                if (!rawTitle.toLowerCase().includes('[ext')) {
-                    return;
-                }
+                const titleLower = rawTitle.toLowerCase();
+
+const isExt = titleLower.includes('[ext');
+const isBar = titleLower.includes('[bar');
+
+if (!isExt && !isBar) {
+    return;
+}
 
                 const locSpan = tr.querySelector('td.productPicklocation .stockLocationName');
 if (!locSpan) return;
