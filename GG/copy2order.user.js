@@ -60,10 +60,23 @@ const orderDate = getOrderDate();
         rows.forEach(row => {
             const titleLink = row.querySelector('.productDataTd a[data-product-uuid]');
             const rawTitle = titleLink ? titleLink.textContent.trim() : '';
-            if (!rawTitle.includes('[ext]')) return;
+            const titleLower = rawTitle.toLowerCase();
+
+const isExt = titleLower.includes('[ext]');
+const isBar = titleLower.includes('[bar]');
+
+if (!isExt && !isBar) return;
 
             const locationSpan = row.querySelector('td.productPicklocation .stockLocationName');
-            if (!locationSpan || !locationSpan.textContent.includes('00. Extern')) return;
+            if (!locationSpan) return;
+
+const locText = locationSpan.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+
+const isAllowedLocation =
+    locText.startsWith('00. extern') ||
+    locText.startsWith('00. tussenstop');
+
+if (!isAllowedLocation) return;
 
             const productId = (row.querySelector('.productSku')?.textContent || '').trim();
             const details = row.querySelector('.productDataTd .align-middle')?.textContent || '';
