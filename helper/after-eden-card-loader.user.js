@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         After Eden Cart Loader
-// @version      1.6
+// @name         After Eden Order Tool
+// @version      2.1
 // @description  Reads After Eden item/size/qty rows from clipboard and adds exact matches to the basket.
 // @match        https://bcg.fashionportal.shop/basket
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/after-eden-card-loader.user.js
@@ -69,7 +69,6 @@
         text-decoration: none !important;
         box-shadow: none !important;
         cursor: pointer !important;
-        min-width: unset !important;
       }
 
       #after-eden-order-tool .ae-button-drop {
@@ -205,7 +204,14 @@
   }
 
   function normalizeSize(value) {
-    return String(value || "").trim().toUpperCase().replace(/\s+/g, "").replace(/[/-]/g, "");
+    let normalized = String(value || "").trim().toUpperCase().replace(/\s+/g, "").replace(/[/-]/g, "");
+    normalized = normalized.replace(/LARGE$/, "L");
+
+    const numericX = normalized.match(/^(\d+)X(?:L)?$/);
+    if (numericX) return `${numericX[1]}XL`;
+
+    const repeatedX = normalized.match(/^(X{2,})L$/);
+    return repeatedX ? `${repeatedX[1].length}XL` : normalized;
   }
 
   function parseProductRef(raw) {
@@ -402,6 +408,39 @@
     return null;
   }
 
+  function findExact1DInput(root, size) {
+    const target = normalizeSize(size);
+    const containers = Array.from(root.querySelectorAll(".qty-by-size"));
+
+    for (const container of containers) {
+      const boxes = Array.from(container.querySelectorAll(".add-qty-box"));
+      for (const box of boxes) {
+        const boxSize = normalizeSize(box.querySelector(".size-for")?.textContent || "");
+        if (boxSize !== target) continue;
+
+        const input = box.querySelector('input[name^="proquantity_"]');
+        if (input) return input;
+      }
+
+      const labels = Array.from(container.querySelectorAll(".size-for:not(.cup-size)"))
+        .map((el) => normalizeSize(el.textContent));
+      const sizeIndex = labels.indexOf(target);
+      if (sizeIndex === -1) continue;
+
+      const rows = Array.from(container.querySelectorAll(".qty-by-size-3D"));
+      const inputRows = rows.length
+        ? rows.filter((row) => row.querySelector('input[name^="proquantity_"]'))
+        : [container];
+
+      for (const row of inputRows) {
+        const inputs = Array.from(row.querySelectorAll('input[name^="proquantity_"]'));
+        if (inputs[sizeIndex]) return inputs[sizeIndex];
+      }
+    }
+
+    return null;
+  }
+
   function findExactInput(form, row) {
     const blocks = getProductBlocks(form, row);
     if (!blocks.length) return null;
@@ -409,6 +448,9 @@
     for (const block of blocks) {
       const exact3D = findExact3DInput(block, row.size);
       if (exact3D) return exact3D;
+
+      const exact1D = findExact1DInput(block, row.size);
+      if (exact1D) return exact1D;
     }
 
     const target = normalizeSize(row.size);
@@ -424,7 +466,11 @@
 
   function buildPostBody(form, rows) {
     const body = new URLSearchParams();
-    const selected = new Map(rows.map((row) => [row.resolvedInputName, String(row.quantity)]));
+    const selected = new Map();
+    rows.forEach((row) => {
+      const currentQty = selected.get(row.resolvedInputName) || 0;
+      selected.set(row.resolvedInputName, currentQty + row.quantity);
+    });
     const selectedBlocks = new Set(rows.map((row) => row.resolvedBlock).filter(Boolean));
     const selectedVariantIds = new Set(
       Array.from(selected.keys())
@@ -440,7 +486,7 @@
       if (selectedBlocks.size && productBlock && !selectedBlocks.has(productBlock)) return;
 
       if (/^proquantity_/i.test(name)) {
-        if (selected.has(name)) body.set(name, selected.get(name));
+        if (selected.has(name)) body.set(name, String(selected.get(name)));
         return;
       }
 
@@ -748,26 +794,47 @@
           return;
         }
 
+        row.resolvedInput = input;
         row.resolvedInputName = input.name;
         row.resolvedBlock = input.closest(".selectqty-wrap") || null;
         orderableRows.push(row);
       });
 
-      if (!orderableRows.length) continue;
+      const rowsByInput = new Map();
+      orderableRows.forEach((row) => {
+        if (!rowsByInput.has(row.resolvedInputName)) rowsByInput.set(row.resolvedInputName, []);
+        rowsByInput.get(row.resolvedInputName).push(row);
+      });
 
-      setRowsState(orderableRows, "busy", "Toevoegen");
+      const rejectedRows = new Set();
+      rowsByInput.forEach((variantRows) => {
+        const totalQty = variantRows.reduce((sum, row) => sum + row.quantity, 0);
+        const orderability = getOrderability(variantRows[0].resolvedInput, totalQty);
+        if (orderability.ok) return;
+
+        variantRows.forEach((row) => {
+          setRowError(row, orderability.detail);
+          failedRows.add(row);
+          rejectedRows.add(row);
+        });
+      });
+
+      const postableRows = orderableRows.filter((row) => !rejectedRows.has(row));
+      if (!postableRows.length) continue;
+
+      setRowsState(postableRows, "busy", "Toevoegen");
       try {
-        const response = await postRows(form, orderableRows);
+        const response = await postRows(form, postableRows);
         if (responseHasStockIssue(response)) {
-          setRowsError(orderableRows, "Onvoldoende voorraad volgens winkelmandje");
-          orderableRows.forEach((row) => failedRows.add(row));
+          setRowsError(postableRows, "Onvoldoende voorraad volgens winkelmandje");
+          postableRows.forEach((row) => failedRows.add(row));
           continue;
         }
 
         const confirmedRows = [];
         const unconfirmedRows = [];
 
-        orderableRows.forEach((row) => {
+        postableRows.forEach((row) => {
           if (responseConfirmsRow(response, row)) confirmedRows.push(row);
           else unconfirmedRows.push(row);
         });
@@ -778,8 +845,8 @@
           unconfirmedRows.forEach((row) => failedRows.add(row));
         }
       } catch (err) {
-        setRowsError(orderableRows, err?.message || "Toevoegen mislukt");
-        orderableRows.forEach((row) => failedRows.add(row));
+        setRowsError(postableRows, err?.message || "Toevoegen mislukt");
+        postableRows.forEach((row) => failedRows.add(row));
       }
 
       await new Promise((resolve) => setTimeout(resolve, 700));
