@@ -7,6 +7,8 @@
 // @run-at       document-idle
 // @grant        GM_download
 // @author       C. P. v. Beek
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-rlj.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/gallery-grabber/grabber-rlj.user.js
 // ==/UserScript==
 
 (function () {
