@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Gallery Grabber | RLK
+// @name         Gallery Grabber | RLJ
 // @version      1.0
 // @description  Download alle PDP-afbeeldingen van Royal Lounge in original resolutie
 // @match        https://royal-lounge.eu/*
@@ -14,8 +14,8 @@
 (function () {
   'use strict';
 
-  const BTN_ID = 'ddo-rlk-download-btn';
-  const LOG_PREFIX = '[RLK Grabber v1.0]';
+  const BTN_ID = 'ddo-rlj-download-btn';
+  const LOG_PREFIX = '[RLJ Grabber v1.0]';
 
   function log(...args) {
     console.log(LOG_PREFIX, ...args);
@@ -53,7 +53,7 @@
     });
   }
 
-  function upgradeRlkUrl(url) {
+  function upgradeRljUrl(url) {
     if (!url) return '';
 
     const abs = toAbsoluteUrl(url);
@@ -84,7 +84,7 @@
     const items = imgs
       .map((img, index) => ({
         index,
-        url: upgradeRlkUrl(img.getAttribute('src') || ''),
+        url: upgradeRljUrl(img.getAttribute('src') || ''),
         alt: img.getAttribute('alt') || '',
         title: img.getAttribute('title') || ''
       }))
@@ -101,7 +101,7 @@
     // String-Fit-Farbe-Scarlet-Red_181_01 → String-Fit-Farbe-Scarlet-Red_181
     const withoutImageNumber = base.replace(/_\d+$/i, '');
 
-    return safeSlug(withoutImageNumber) || 'rlk-product';
+    return safeSlug(withoutImageNumber) || 'rlj-product';
   }
 
   function getExtensionFromUrl(url) {
@@ -113,7 +113,7 @@
 
   function guessFilename(item, index, productCode) {
     const ext = getExtensionFromUrl(item.url);
-    return `rlk_${productCode}_${String(index + 1).padStart(2, '0')}.${ext}`;
+    return `rlj_${productCode}_${String(index + 1).padStart(2, '0')}.${ext}`;
   }
 
   function triggerDownload(url, filename) {
@@ -135,7 +135,7 @@
     alert('GM_download is niet beschikbaar.');
   }
 
-  async function downloadRlkGallery() {
+  async function downloadRljGallery() {
     setButtonText('⏳ Scannen...');
 
     const items = getGalleryImages();
@@ -155,7 +155,7 @@
     });
 
     setButtonText(`✅ ${items.length} downloads`);
-    setTimeout(() => setButtonText('⬇️ RLK grabber v1.0'), 2500);
+    setTimeout(() => setButtonText('⬇️ RLJ grabber v1.0'), 2500);
   }
 
   function ensureButton() {
@@ -164,7 +164,7 @@
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.type = 'button';
-    btn.textContent = '⬇️ RLK grabber v1.0';
+    btn.textContent = '⬇️ RLJ grabber v1.0';
 
     Object.assign(btn.style, {
       position: 'fixed',
@@ -188,11 +188,11 @@
       e.stopPropagation();
 
       try {
-        await downloadRlkGallery();
+        await downloadRljGallery();
       } catch (err) {
         console.error(LOG_PREFIX, err);
         setButtonText('❌ Error');
-        alert('RLK grabber error: ' + (err?.message || err));
+        alert('RLJ grabber error: ' + (err?.message || err));
       }
     }, true);
 
