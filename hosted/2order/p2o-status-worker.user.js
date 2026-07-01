@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         DDO | Paste2Order CMS Status Worker
+// @name         DDO | Paste2Order Status Worker
 // @namespace    https://dutchdesignersoutlet.com/
 // @version      0.1
 // @description  Zet geselecteerde Paste2Order orders in het DDO CMS op een nieuwe status met optionele notificatie.
