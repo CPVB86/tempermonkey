@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Wacoal Bargain
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.3
+// @version      4.5
 // @description  Vergelijk de lokale Wacoal Bargain-voorraad op EAN met de Wacoal XLSX-export.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -49,7 +49,7 @@
     const detail = {
       id: 'stock-check-wacoal-bargain',
       name: 'Stock Check | Wacoal Bargain',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.5'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -83,9 +83,7 @@
   function normalizeEan(value) {
     const canonicalize = digits => {
       const normalized = digitsOnly(digits);
-      return normalized.length === 13 && normalized.startsWith('0')
-        ? normalized.slice(1)
-        : normalized;
+      return normalized.replace(/^0+(?=\d)/, '');
     };
 
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -118,7 +116,7 @@
       for (let column = range.s.c; column <= range.e.c; column++) {
         const header = normalizeHeader(cellValue(sheet, row, column));
         if (header === 'ediean' || header === 'edi ean') eanColumn = column;
-        if (header === 'sum of to sell' || header === 'sum of sell') stockColumn = column;
+        if (header === 'stock' || header === 'sum of to sell' || header === 'sum of sell') stockColumn = column;
       }
 
       if (eanColumn >= 0 && stockColumn >= 0) {
@@ -260,7 +258,7 @@
 
   async function run(button) {
     if (!hasStockData()) {
-      alert('Importeer eerst de Wacoal-voorraadlijst met EDIEAN en Sum of to sell.');
+      alert('Importeer eerst de Wacoal-voorraadlijst met EDIEAN en STOCK.');
       return;
     }
 
@@ -305,7 +303,7 @@
     importButton.className = 'supplier-stock-import-btn';
     importButton.innerHTML = '<i class="fa-solid fa-file-arrow-up"></i>';
     importButton.setAttribute('aria-label', 'Importeer Wacoal Bargain-voorraadbestand');
-    importButton.title = 'Importeer Wacoal XLSX: EDIEAN en Sum of to sell';
+    importButton.title = 'Importeer Wacoal XLSX: EDIEAN en STOCK';
     importButton.addEventListener('click', () => fileInput.click());
 
     const header = document.getElementById('header-select-wrapper');
