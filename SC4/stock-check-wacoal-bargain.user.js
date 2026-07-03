@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Wacoal Bargain
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.5
+// @version      4.9
 // @description  Vergelijk de lokale Wacoal Bargain-voorraad op EAN met de Wacoal XLSX-export.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -23,7 +23,7 @@
     'wacoal', 'freya', 'freya-swim', 'fantasie', 'fantasie-swim',
     'elomi', 'elomi-swim', 'wacoal-bargain'
   ]);
-  const SESSION_KEY = 'stock-check-wacoal-bargain-xlsx-v1';
+  const SESSION_KEY = 'stock-check-wacoal-bargain-xlsx-v3';
   const MAX_LOCAL_STOCK = 5;
 
   if (!Core) {
@@ -49,7 +49,7 @@
     const detail = {
       id: 'stock-check-wacoal-bargain',
       name: 'Stock Check | Wacoal Bargain',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.5'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.9'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -77,7 +77,9 @@
   }
 
   function cellValue(sheet, row, column) {
-    return getCell(sheet, row, column)?.v ?? '';
+    const cell = getCell(sheet, row, column);
+    if (cell && typeof cell === 'object' && 'v' in cell) return cell.v;
+    return cell ?? '';
   }
 
   function normalizeEan(value) {
@@ -102,29 +104,15 @@
 
   function parseStock(value) {
     if (typeof value === 'number') return Number.isFinite(value) ? Math.max(0, value) : NaN;
-    const normalized = String(value ?? '').trim().replace(/\s/g, '').replace(',', '.');
+    const match = String(value ?? '').trim().match(/-?\d+(?:[.,]\d+)?/);
+    if (!match) return NaN;
+    const normalized = match[0].replace(/\s/g, '').replace(',', '.');
     const numeric = Number(normalized);
     return Number.isFinite(numeric) ? Math.max(0, numeric) : NaN;
   }
 
   function findColumns(sheet, range) {
-    const lastHeaderRow = Math.min(range.e.r, range.s.r + 24);
-    for (let row = range.s.r; row <= lastHeaderRow; row++) {
-      let eanColumn = -1;
-      let stockColumn = -1;
-
-      for (let column = range.s.c; column <= range.e.c; column++) {
-        const header = normalizeHeader(cellValue(sheet, row, column));
-        if (header === 'ediean' || header === 'edi ean') eanColumn = column;
-        if (header === 'stock' || header === 'sum of to sell' || header === 'sum of sell') stockColumn = column;
-      }
-
-      if (eanColumn >= 0 && stockColumn >= 0) {
-        return { headerRow: row, eanColumn, stockColumn };
-      }
-    }
-
-    return { headerRow: range.s.r, eanColumn: 8, stockColumn: 14 };
+    return { headerRow: range.s.r, eanColumn: 8, stockColumn: 13 };
   }
 
   function buildStockMap(workbook) {
@@ -136,6 +124,7 @@
     const map = new Map();
     let validRows = 0;
     let duplicateRows = 0;
+    let nonZeroRows = 0;
     let skippedRows = 0;
 
     for (let row = headerRow + 1; row <= range.e.r; row++) {
@@ -147,6 +136,7 @@
       }
 
       validRows++;
+      if (stock > 0) nonZeroRows++;
       if (map.has(ean)) {
         duplicateRows++;
         map.set(ean, Math.max(map.get(ean), stock));
@@ -155,7 +145,7 @@
       }
     }
 
-    return { map, validRows, duplicateRows, skippedRows, eanColumn, stockColumn };
+    return { map, validRows, duplicateRows, nonZeroRows, skippedRows, eanColumn, stockColumn };
   }
 
   function isSelected() {
@@ -354,6 +344,7 @@
           logStatus(
             'WACOAL-BARGAIN',
             `${importedFileName} geladen: ${stockByEan.size} unieke EAN-codes` +
+              `, EAN uit kolom I, stock uit kolom N, ${parsed.nonZeroRows} regels met voorraad` +
               (parsed.duplicateRows ? `, ${parsed.duplicateRows} dubbele regels` : '')
           );
         } catch (error) {
