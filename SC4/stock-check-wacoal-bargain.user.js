@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Wacoal Bargain
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.9
+// @version      5.0
 // @description  Vergelijk de lokale Wacoal Bargain-voorraad op EAN met de Wacoal XLSX-export.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -23,7 +23,7 @@
     'wacoal', 'freya', 'freya-swim', 'fantasie', 'fantasie-swim',
     'elomi', 'elomi-swim', 'wacoal-bargain'
   ]);
-  const SESSION_KEY = 'stock-check-wacoal-bargain-xlsx-v3';
+  const SESSION_KEY = 'stock-check-wacoal-bargain-xlsx-v4';
   const MAX_LOCAL_STOCK = 5;
 
   if (!Core) {
@@ -49,7 +49,7 @@
     const detail = {
       id: 'stock-check-wacoal-bargain',
       name: 'Stock Check | Wacoal Bargain',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.9'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '5.0'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -68,6 +68,17 @@
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
+  }
+
+  function columnLabel(index) {
+    let value = index + 1;
+    let label = '';
+    while (value > 0) {
+      const remainder = (value - 1) % 26;
+      label = String.fromCharCode(65 + remainder) + label;
+      value = Math.floor((value - 1) / 26);
+    }
+    return label;
   }
 
   function getCell(sheet, row, column) {
@@ -112,7 +123,21 @@
   }
 
   function findColumns(sheet, range) {
-    return { headerRow: range.s.r, eanColumn: 8, stockColumn: 13 };
+    const headerRow = range.s.r;
+    let eanColumn = -1;
+    let stockColumn = -1;
+
+    for (let column = range.s.c; column <= range.e.c; column++) {
+      const header = normalizeHeader(cellValue(sheet, headerRow, column));
+      if (header === 'ediean' || header === 'edi ean') eanColumn = column;
+      if (header === 'stock' || header === 'sum of to sell' || header === 'sum of sell') stockColumn = column;
+    }
+
+    if (eanColumn < 0 || stockColumn < 0) {
+      throw new Error('Kolommen EDIEAN en/of Sum of to sell niet gevonden in rij 1.');
+    }
+
+    return { headerRow, eanColumn, stockColumn };
   }
 
   function buildStockMap(workbook) {
@@ -344,7 +369,7 @@
           logStatus(
             'WACOAL-BARGAIN',
             `${importedFileName} geladen: ${stockByEan.size} unieke EAN-codes` +
-              `, EAN uit kolom I, stock uit kolom N, ${parsed.nonZeroRows} regels met voorraad` +
+              `, EAN uit kolom ${columnLabel(parsed.eanColumn)}, stock uit kolom ${columnLabel(parsed.stockColumn)}, ${parsed.nonZeroRows} regels met voorraad` +
               (parsed.duplicateRows ? `, ${parsed.duplicateRows} dubbele regels` : '')
           );
         } catch (error) {
