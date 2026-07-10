@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG | Copy2Order Bulk
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.4
-// @description  Zoek alle orders met tag 'extern' maar niet 'geprint_extern', haal [ext] + 00. Extern regels op en zet TSV in het klembord.
+// @version      1.5
+// @description  Verwerkt orders met tag extern, kopieert geldige externe productregels en verwijdert een onterechte tag extern.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
 // @run-at       document-end
 // @grant        none
@@ -17,239 +17,504 @@
     const ORDER_TABLE_SELECTOR = '#order_index_datatable';
     const BUTTON_ID = 'gg-copy2order-crawl-btn';
 
+    const TAG_EXTERN = 'extern';
+    const TAG_GEPRINT = 'geprint_extern';
+
     function log(...args) {
         console.log('[Copy2Order Crawler]', ...args);
     }
 
     function sleep(ms) {
-        return new Promise(res => setTimeout(res, ms));
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // --- 1. Knop direct plaatsen in de zoekbalk-header ---
+    // ---------------------------------------------------------
+    // 1. Knop
+    // ---------------------------------------------------------
 
     function addButton() {
         const header = document.querySelector('.orders-index-table-header');
+
         if (!header) {
             log('Geen .orders-index-table-header gevonden.');
             return;
         }
 
-        const container = header.querySelector('.orders-index-search-container') || header;
+        const container =
+            header.querySelector('.orders-index-search-container') ||
+            header;
 
-        // voorkom dubbele knop
-        if (document.getElementById(BUTTON_ID)) return;
+        if (document.getElementById(BUTTON_ID)) {
+            return;
+        }
 
-        const btn = document.createElement('button');
-        btn.id = BUTTON_ID;
-        btn.type = 'button';
-        btn.className = 'btn btn-primary ml-2';
-        btn.textContent = '🚀 Copy2Order Bulk';
-        btn.style.whiteSpace = 'nowrap';
-        // iets smaller maken
-        btn.style.padding = '2px 6px';
-        btn.style.fontSize = '13px';
+        const button = document.createElement('button');
 
-        btn.addEventListener('click', () => {
-            startCrawl().catch(err => {
-                console.error(err);
-                alert('Er ging iets mis tijdens het crawlen. Zie console voor details.');
+        button.id = BUTTON_ID;
+        button.type = 'button';
+        button.className = 'btn btn-primary ml-2';
+        button.textContent = '🚀 Copy2Order Bulk';
+        button.style.whiteSpace = 'nowrap';
+        button.style.padding = '2px 6px';
+        button.style.fontSize = '13px';
+
+        button.addEventListener('click', () => {
+            startCrawl().catch(error => {
+                console.error('[Copy2Order Crawler]', error);
+
+                setButtonDisabled(false);
+
+                alert(
+                    'Er ging iets mis tijdens het crawlen. ' +
+                    'Zie de console voor details.'
+                );
             });
         });
 
-        container.appendChild(btn);
-        log('Knop toegevoegd in orders-index-search-container.');
+        container.appendChild(button);
+
+        log('Knop toegevoegd.');
     }
 
-    function setButtonDisabled(disabled, labelExtra) {
-        const btn = document.getElementById(BUTTON_ID);
-        if (!btn) return;
-        if (!btn.dataset._origText) {
-            btn.dataset._origText = btn.textContent;
+    function setButtonDisabled(disabled, labelExtra = '') {
+        const button = document.getElementById(BUTTON_ID);
+
+        if (!button) {
+            return;
         }
 
-        btn.disabled = disabled;
+        if (!button.dataset.originalText) {
+            button.dataset.originalText = button.textContent;
+        }
+
+        button.disabled = disabled;
+
         if (disabled) {
-            btn.textContent = btn.dataset._origText + (labelExtra ? ' – ' + labelExtra : '…');
+            button.textContent =
+                button.dataset.originalText +
+                (labelExtra ? ` – ${labelExtra}` : '…');
         } else {
-            btn.textContent = btn.dataset._origText;
+            button.textContent = button.dataset.originalText;
         }
     }
 
-    function showButtonMessage(msg, timeoutMs = 5000) {
-        const btn = document.getElementById(BUTTON_ID);
-        if (!btn) return;
-        if (!btn.dataset._origText) {
-            btn.dataset._origText = btn.textContent;
+    function showButtonMessage(message, timeoutMs = 5000) {
+        const button = document.getElementById(BUTTON_ID);
+
+        if (!button) {
+            return;
         }
-        btn.disabled = false;
-        btn.textContent = msg;
+
+        if (!button.dataset.originalText) {
+            button.dataset.originalText = button.textContent;
+        }
+
+        button.disabled = false;
+        button.textContent = message;
+
         setTimeout(() => {
-            if (btn.dataset._origText) {
-                btn.textContent = btn.dataset._origText;
+            if (button.dataset.originalText) {
+                button.textContent = button.dataset.originalText;
             }
         }, timeoutMs);
     }
 
-    // --- 2. Helpers voor DataTable en tags ---
+    // ---------------------------------------------------------
+    // 2. DataTable en tags
+    // ---------------------------------------------------------
 
     function getDatatable() {
-        if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.dataTable) {
+        if (
+            !window.jQuery ||
+            !window.jQuery.fn ||
+            !window.jQuery.fn.dataTable
+        ) {
             return null;
         }
+
         try {
             return window.jQuery(ORDER_TABLE_SELECTOR).DataTable();
-        } catch (e) {
+        } catch {
             return null;
         }
     }
 
-    function hasTag(full, slug) {
-        if (!full || !Array.isArray(full.tags)) return false;
-        return full.tags.some(t => t.slug === slug);
+    function hasTag(order, slug) {
+        if (!order || !Array.isArray(order.tags)) {
+            return false;
+        }
+
+        return order.tags.some(tag => tag.slug === slug);
     }
 
-    // Tag 'extern' MOET aanwezig zijn
-    // Tag 'geprint_extern' MAG NIET aanwezig zijn
-    function isQualifyingOrder(full) {
-        return hasTag(full, 'extern') && !hasTag(full, 'geprint_extern');
+    function isQualifyingOrder(order) {
+        return (
+            hasTag(order, TAG_EXTERN) &&
+            !hasTag(order, TAG_GEPRINT)
+        );
     }
 
-    /**
-     * Selecteer (checkbox) alle matchende orders in de huidige filter,
-     * en haal selectie weg bij niet-matchende orders.
-     */
-    function selectMatchingOrders(dt) {
-        const rowsApi = dt.rows({ filter: 'applied' });
+    function selectMatchingOrders(datatable) {
+        const rows = datatable.rows({ filter: 'applied' });
         let selectedCount = 0;
 
-        rowsApi.every(function () {
-            const full = this.data();
+        rows.every(function () {
+            const order = this.data();
             const node = this.node();
-            if (!node) return;
 
-            const checkbox = node.querySelector('input[type="checkbox"]');
-            if (!checkbox) return;
+            if (!node) {
+                return;
+            }
 
-            if (isQualifyingOrder(full)) {
+            const checkbox = node.querySelector(
+                'input[type="checkbox"]'
+            );
+
+            if (!checkbox) {
+                return;
+            }
+
+            if (isQualifyingOrder(order)) {
                 checkbox.checked = true;
-                selectedCount++;
+                selectedCount += 1;
             } else {
                 checkbox.checked = false;
             }
         });
 
-        log('Aantal automatisch geselecteerde orders:', selectedCount);
+        log(
+            'Aantal automatisch geselecteerde orders:',
+            selectedCount
+        );
+
         return selectedCount;
     }
 
-    // --- 3. Orderdetail ophalen en producten parsen ---
+    // ---------------------------------------------------------
+    // 3. CSRF en tag wijzigen
+    // ---------------------------------------------------------
+
+    function getCsrfToken(doc = document) {
+        const meta = doc.querySelector('meta[name="csrf-token"]');
+
+        if (meta?.content) {
+            return meta.content;
+        }
+
+        const input = doc.querySelector('input[name="_token"]');
+
+        if (input?.value) {
+            return input.value;
+        }
+
+        const html = doc.documentElement?.innerHTML || '';
+
+        const match =
+            html.match(
+                /csrf-token["'][^>]+content=["']([^"']+)/i
+            ) ||
+            html.match(
+                /name=["']_token["'][^>]+value=["']([^"']+)/i
+            );
+
+        return match ? match[1] : '';
+    }
+
+    async function toggleTag(uuid, slug, csrfToken) {
+        const body = new URLSearchParams();
+
+        body.set('_token', csrfToken);
+        body.append('tags[]', slug);
+
+        const response = await fetch(
+            `/settings/tags/0/${encodeURIComponent(uuid)}/toggle`,
+            {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: '*/*',
+                    'Content-Type':
+                        'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-CSRF-TOKEN': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: body.toString()
+            }
+        );
+
+        let payload = null;
+
+        try {
+            payload = await response.clone().json();
+        } catch {
+            payload = await response.text();
+        }
+
+        if (!response.ok || payload?.success === false) {
+            throw new Error(
+                `Tag "${slug}" wijzigen mislukt ` +
+                `(HTTP ${response.status})`
+            );
+        }
+
+        return payload;
+    }
+
+    async function removeExternTag(uuid, csrfToken) {
+        await toggleTag(uuid, TAG_EXTERN, csrfToken);
+
+        log(
+            `Tag "${TAG_EXTERN}" verwijderd van order`,
+            uuid
+        );
+    }
+
+    // ---------------------------------------------------------
+    // 4. Orderdetails ophalen
+    // ---------------------------------------------------------
 
     async function fetchOrderHtml(uuid) {
-        const url = `/orders/view/${uuid}`;
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status} bij ophalen order ${uuid}`);
-        return res.text();
+        const response = await fetch(
+            `/orders/view/${encodeURIComponent(uuid)}`,
+            {
+                credentials: 'include',
+                cache: 'no-store'
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `HTTP ${response.status} bij ophalen order ${uuid}`
+            );
+        }
+
+        return response.text();
     }
 
     function parseOrderHtml(html) {
-        const parser = new DOMParser();
-        return parser.parseFromString(html, 'text/html');
+        return new DOMParser().parseFromString(
+            html,
+            'text/html'
+        );
     }
 
     function todayNlDate() {
-    const d = new Date();
-    const pad = n => String(n).padStart(2, '0');
-    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
-}
+        const date = new Date();
+        const pad = value =>
+            String(value).padStart(2, '0');
 
-function extractOrderDateFromRowNode(node) {
-    if (!node) return todayNlDate();
+        return (
+            `${pad(date.getDate())}-` +
+            `${pad(date.getMonth() + 1)}-` +
+            `${date.getFullYear()}`
+        );
+    }
 
-    const lastCell = node.querySelector('td:last-child');
-    const raw = lastCell ? lastCell.textContent.replace(/\s+/g, ' ').trim() : '';
-
-    const dateMatch = raw.match(/\b\d{2}-\d{2}-\d{4}\b/);
-    if (dateMatch) return dateMatch[0];
-
-    return todayNlDate();
-}
-
-    function extractProductsFromDoc(doc, uuid, orderId, orderDate) {
-        const results = [];
-
-        // OrderID uit header fallback
-        let finalOrderId = orderId || '';
-        const headerSpan = doc.querySelector('.page_title span');
-        if (headerSpan) {
-            const txt = headerSpan.textContent || '';
-            const m = txt.match(/Bestelling\s+(\d+)/);
-            if (m) finalOrderId = m[1];
+    function extractOrderDateFromRowNode(node) {
+        if (!node) {
+            return todayNlDate();
         }
 
-        const portletHeads = Array.from(doc.querySelectorAll('.m-portlet__head-text'));
-        const pickHeader = portletHeads.find(h =>
-            h.textContent.trim().toLowerCase().includes('te picken producten')
+        const lastCell = node.querySelector('td:last-child');
+
+        const raw = lastCell
+            ? lastCell.textContent.replace(/\s+/g, ' ').trim()
+            : '';
+
+        const dateMatch = raw.match(
+            /\b\d{2}-\d{2}-\d{4}\b/
         );
+
+        return dateMatch
+            ? dateMatch[0]
+            : todayNlDate();
+    }
+
+    function findRowNodeByUuid(datatable, uuid) {
+        let foundNode = null;
+
+        datatable.rows({ filter: 'applied' }).every(function () {
+            const order = this.data();
+
+            if (order?.uuid === uuid) {
+                foundNode = this.node();
+            }
+        });
+
+        return foundNode;
+    }
+
+    // ---------------------------------------------------------
+    // 5. Productregels uitlezen
+    // ---------------------------------------------------------
+
+    function extractProductsFromDoc(
+        doc,
+        uuid,
+        orderId,
+        orderDate
+    ) {
+        const results = [];
+
+        let finalOrderId = orderId || '';
+
+        const headerSpan = doc.querySelector(
+            '.page_title span'
+        );
+
+        if (headerSpan) {
+            const headerText =
+                headerSpan.textContent || '';
+
+            const match = headerText.match(
+                /Bestelling\s+(\d+)/
+            );
+
+            if (match) {
+                finalOrderId = match[1];
+            }
+        }
+
+        const portletHeads = Array.from(
+            doc.querySelectorAll('.m-portlet__head-text')
+        );
+
+        const pickHeader = portletHeads.find(header =>
+            header.textContent
+                .trim()
+                .toLowerCase()
+                .includes('te picken producten')
+        );
+
         if (!pickHeader) {
-            log('Geen "Te picken producten" gevonden voor order', finalOrderId, uuid);
-            return results;
+            throw new Error(
+                `Sectie "Te picken producten" niet gevonden ` +
+                `voor order ${finalOrderId || uuid}`
+            );
         }
 
         const portlet = pickHeader.closest('.m-portlet');
-        if (!portlet) return results;
 
-        const tableWrapper = portlet.querySelector('.order_items_table');
-        if (!tableWrapper) return results;
+        if (!portlet) {
+            throw new Error(
+                `Productportlet niet gevonden voor order ` +
+                `${finalOrderId || uuid}`
+            );
+        }
 
-        const rows = tableWrapper.querySelectorAll('tbody tr.normal');
-        rows.forEach(tr => {
+        const tableWrapper = portlet.querySelector(
+            '.order_items_table'
+        );
+
+        if (!tableWrapper) {
+            throw new Error(
+                `Producttabel niet gevonden voor order ` +
+                `${finalOrderId || uuid}`
+            );
+        }
+
+        const rows = tableWrapper.querySelectorAll(
+            'tbody tr.normal'
+        );
+
+        rows.forEach(row => {
             try {
-                const titleLink = tr.querySelector('td.productDataTd a[data-product-uuid]');
-                if (!titleLink) return;
-                const rawTitle = titleLink.textContent.replace(/\s+/g, ' ').trim();
+                const titleLink = row.querySelector(
+                    'td.productDataTd a[data-product-uuid]'
+                );
+
+                if (!titleLink) {
+                    return;
+                }
+
+                const rawTitle = titleLink.textContent
+                    .replace(/\s+/g, ' ')
+                    .trim();
 
                 const titleLower = rawTitle.toLowerCase();
 
-const isExt = titleLower.includes('[ext');
-const isBar = titleLower.includes('[bar');
+                const isExternalProduct =
+                    titleLower.includes('[ext') ||
+                    titleLower.includes('[bar');
 
-if (!isExt && !isBar) {
-    return;
-}
-
-                const locSpan = tr.querySelector('td.productPicklocation .stockLocationName');
-if (!locSpan) return;
-
-const locText = locSpan.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
-console.log('Locatie gevonden:', JSON.stringify(locText));
-
-const isAllowedLocation =
-    locText.startsWith('00. extern') ||
-    locText.startsWith('00. tussenstop');
-
-if (!isAllowedLocation) {
-    return;
-}
-
-                const plusBtn = tr.querySelector('button.plus[data-product-sku]');
-                const productId = plusBtn ? plusBtn.getAttribute('data-product-sku').trim() : '';
-
-                const infoCell = tr.querySelector('td.productDataTd .d-table-cell.align-middle');
-                let ean = '';
-                let size = '';
-                if (infoCell) {
-                    const infoText = infoCell.textContent.replace(/\s+/g, ' ').trim();
-                    const eMatch = infoText.match(/EAN:\s*([0-9]+)/i);
-                    if (eMatch) ean = eMatch[1];
-
-                    const sMatch = infoText.match(/Size:\s*([^|]+)/i);
-                    if (sMatch) size = sMatch[1].trim();
+                if (!isExternalProduct) {
+                    return;
                 }
 
-                const qtyInput = tr.querySelector('input.pickNumber');
+                const locationSpan = row.querySelector(
+                    'td.productPicklocation .stockLocationName'
+                );
+
+                if (!locationSpan) {
+                    return;
+                }
+
+                const locationText =
+                    locationSpan.textContent
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .toLowerCase();
+
+                const isAllowedLocation =
+                    locationText.startsWith('00. extern') ||
+                    locationText.startsWith('00. tussenstop');
+
+                if (!isAllowedLocation) {
+                    return;
+                }
+
+                const plusButton = row.querySelector(
+                    'button.plus[data-product-sku]'
+                );
+
+                const productId = plusButton
+                    ? (
+                        plusButton.getAttribute(
+                            'data-product-sku'
+                        ) || ''
+                    ).trim()
+                    : '';
+
+                const infoCell = row.querySelector(
+                    'td.productDataTd ' +
+                    '.d-table-cell.align-middle'
+                );
+
+                let ean = '';
+                let size = '';
+
+                if (infoCell) {
+                    const infoText = infoCell.textContent
+                        .replace(/\s+/g, ' ')
+                        .trim();
+
+                    const eanMatch = infoText.match(
+                        /EAN:\s*([0-9]+)/i
+                    );
+
+                    if (eanMatch) {
+                        ean = eanMatch[1];
+                    }
+
+                    const sizeMatch = infoText.match(
+                        /Size:\s*([^|]+)/i
+                    );
+
+                    if (sizeMatch) {
+                        size = sizeMatch[1].trim();
+                    }
+                }
+
+                const quantityInput = row.querySelector(
+                    'input.pickNumber'
+                );
+
                 let amount = '1';
-                if (qtyInput && qtyInput.value) {
-                    const parts = qtyInput.value.split('/');
+
+                if (quantityInput?.value) {
+                    const parts =
+                        quantityInput.value.split('/');
+
                     if (parts.length === 2) {
                         amount = parts[1].trim();
                     }
@@ -263,84 +528,189 @@ if (!isAllowedLocation) {
                     amount,
                     uuid,
                     orderId: finalOrderId,
-                    orderDate: orderDate || todayNlDate()
+                    orderDate:
+                        orderDate || todayNlDate()
                 });
-            } catch (err) {
-                console.error('Fout bij parsen productregel in order', finalOrderId, uuid, err);
+            } catch (error) {
+                console.error(
+                    'Fout bij parsen productregel in order',
+                    finalOrderId,
+                    uuid,
+                    error
+                );
             }
         });
 
         return results;
     }
 
-    // → headers verwijderd in output
+    // ---------------------------------------------------------
+    // 6. TSV
+    // ---------------------------------------------------------
+
     function buildTsv(products) {
-        const escape = v => (v || '').toString().replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
-        const lines = products.map(p => [
-    escape(p.orderId),
-    escape(p.title),
-    escape(p.productId),
-    escape(p.ean),
-    escape(p.size),
-    escape(p.amount),
-    escape(p.uuid),
-    '', // Checked leeg
-    escape(p.orderDate)
-].join('\t'));
-        return lines.join('\n');
+        const escape = value =>
+            (value || '')
+                .toString()
+                .replace(/\t/g, ' ')
+                .replace(/\r?\n/g, ' ');
+
+        return products
+            .map(product => [
+                escape(product.orderId),
+                escape(product.title),
+                escape(product.productId),
+                escape(product.ean),
+                escape(product.size),
+                escape(product.amount),
+                escape(product.uuid),
+                '',
+                escape(product.orderDate)
+            ].join('\t'))
+            .join('\n');
     }
 
-    // --- 4. Crawl-flow bij klik op de knop ---
+    // ---------------------------------------------------------
+    // 7. Crawl
+    // ---------------------------------------------------------
 
     async function startCrawl() {
-        const dt = getDatatable();
-        if (!dt) {
-            alert('De orders-tabel (DataTable) lijkt nog niet klaar. Probeer na een paar seconden opnieuw.');
+        const datatable = getDatatable();
+
+        if (!datatable) {
+            alert(
+                'De orders-tabel lijkt nog niet klaar. ' +
+                'Probeer het over een paar seconden opnieuw.'
+            );
+
+            return;
+        }
+
+        const csrfToken = getCsrfToken();
+
+        if (!csrfToken) {
+            alert(
+                'CSRF-token niet gevonden. ' +
+                'De tags kunnen daarom niet veilig worden aangepast.'
+            );
+
             return;
         }
 
         setButtonDisabled(true, 'zoeken…');
 
-        const data = dt.rows({ filter: 'applied' }).data().toArray();
-        const targets = data.filter(full => {
+        const data = datatable
+            .rows({ filter: 'applied' })
+            .data()
+            .toArray();
+
+        const targets = data.filter(order => {
             try {
-                return isQualifyingOrder(full);
-            } catch (e) {
+                return isQualifyingOrder(order);
+            } catch {
                 return false;
             }
         });
 
         if (!targets.length) {
             setButtonDisabled(false);
-            alert('Geen orders gevonden met tag "extern" zonder "geprint_extern" in de huidige selectie.');
+
+            alert(
+                'Geen orders gevonden met tag "extern" ' +
+                'zonder "geprint_extern" in de huidige selectie.'
+            );
+
             return;
         }
 
-        console.log('[Copy2Order Crawler] Gevonden orders:', targets.length);
+        log('Gevonden orders:', targets.length);
 
-        // 👉 Matchende orders meteen selecteren in de tabel
-        selectMatchingOrders(dt);
-
-        setButtonDisabled(true, `${targets.length} orders verwerken`);
+        selectMatchingOrders(datatable);
 
         const allProducts = [];
 
-        for (let i = 0; i < targets.length; i++) {
-            const full = targets[i];
-            const uuid = full.uuid;
-const orderLabel = full.external_display_id || full.id || '?';
-const orderDate = extractOrderDateFromRowNode(dt.row(i).node());
+        let cleanedOrders = 0;
+        let failedOrders = 0;
 
-            setButtonDisabled(true, `order ${i + 1}/${targets.length} (${orderLabel})`);
+        for (
+            let index = 0;
+            index < targets.length;
+            index += 1
+        ) {
+            const order = targets[index];
+            const uuid = order.uuid;
+
+            const orderLabel =
+                order.external_display_id ||
+                order.id ||
+                '?';
+
+            const rowNode = findRowNodeByUuid(
+                datatable,
+                uuid
+            );
+
+            const orderDate =
+                extractOrderDateFromRowNode(rowNode);
+
+            setButtonDisabled(
+                true,
+                `order ${index + 1}/${targets.length} ` +
+                `(${orderLabel})`
+            );
 
             try {
                 const html = await fetchOrderHtml(uuid);
                 const doc = parseOrderHtml(html);
-                const products = extractProductsFromDoc(doc, uuid, orderLabel, orderDate);
-                console.log(`Order ${orderLabel}: ${products.length} externe regels gevonden.`);
-                allProducts.push(...products);
-            } catch (err) {
-                console.error('Fout bij ophalen/parsen order', orderLabel, uuid, err);
+
+                const products = extractProductsFromDoc(
+                    doc,
+                    uuid,
+                    orderLabel,
+                    orderDate
+                );
+
+                log(
+                    `Order ${orderLabel}: ` +
+                    `${products.length} externe regels gevonden.`
+                );
+
+                if (products.length === 0) {
+                    /*
+                     * De order kon correct worden opgehaald en
+                     * de producttabel kon correct worden gelezen,
+                     * maar bevat geen enkele geldige externe regel.
+                     *
+                     * Alleen dan verwijderen we de tag "extern".
+                     */
+                    await removeExternTag(
+                        uuid,
+                        csrfToken
+                    );
+
+                    cleanedOrders += 1;
+
+                    log(
+                        `Order ${orderLabel}: geen geldige externe ` +
+                        `regels; tag "extern" verwijderd.`
+                    );
+                } else {
+                    allProducts.push(...products);
+                }
+            } catch (error) {
+                /*
+                 * Belangrijk: bij iedere fout blijft "extern"
+                 * gewoon staan. We weten dan immers niet zeker
+                 * dat de order werkelijk intern is.
+                 */
+                failedOrders += 1;
+
+                console.error(
+                    `Order ${orderLabel} niet volledig verwerkt. ` +
+                    `Tag "extern" blijft behouden.`,
+                    uuid,
+                    error
+                );
             }
 
             await sleep(400);
@@ -349,7 +719,22 @@ const orderDate = extractOrderDateFromRowNode(dt.row(i).node());
         setButtonDisabled(false);
 
         if (!allProducts.length) {
-            alert('Geen passende productregels gevonden (met [ext] en 00. Extern) in de geselecteerde orders.');
+            showButtonMessage(
+                `✅ Klaar: ${cleanedOrders} onterechte ` +
+                `extern-tag${cleanedOrders === 1 ? '' : 's'} verwijderd.`,
+                8000
+            );
+
+            if (failedOrders) {
+                alert(
+                    `${cleanedOrders} onterechte extern-tag(s) ` +
+                    `verwijderd.\n\n` +
+                    `${failedOrders} order(s) konden niet volledig ` +
+                    `worden gecontroleerd. Bij die orders is de tag ` +
+                    `"extern" voor de veiligheid blijven staan.`
+                );
+            }
+
             return;
         }
 
@@ -357,25 +742,53 @@ const orderDate = extractOrderDateFromRowNode(dt.row(i).node());
 
         try {
             await navigator.clipboard.writeText(tsv);
-            // ✅ Geen alert meer, maar melding op de button
-            showButtonMessage(
-                `✅ ${allProducts.length} regels gekopieerd.`
+
+            let message =
+                `✅ ${allProducts.length} regels gekopieerd`;
+
+            if (cleanedOrders) {
+                message +=
+                    ` · ${cleanedOrders} extern-tag` +
+                    `${cleanedOrders === 1 ? '' : 's'} verwijderd`;
+            }
+
+            if (failedOrders) {
+                message +=
+                    ` · ${failedOrders} fout` +
+                    `${failedOrders === 1 ? '' : 'en'}`;
+            }
+
+            showButtonMessage(`${message}.`, 8000);
+        } catch (error) {
+            console.error(
+                'Clipboard-fout:',
+                error
             );
-        } catch (err) {
-            console.error('Clipboard-fout:', err);
-            alert('Regels verzameld, maar naar klembord schrijven mislukte. Zie console; TSV is daar gelogd.');
-            console.log('---- BEGIN TSV ----\n' + tsv + '\n---- END TSV ----');
+
+            alert(
+                'Regels verzameld, maar naar het klembord ' +
+                'schrijven mislukte. De TSV staat in de console.'
+            );
+
+            console.log(
+                '---- BEGIN TSV ----\n' +
+                tsv +
+                '\n---- END TSV ----'
+            );
         }
     }
 
-    // --- Init: knop neerzetten ---
+    // ---------------------------------------------------------
+    // 8. Init
+    // ---------------------------------------------------------
 
     function init() {
-        log('Userscript geladen, probeer knop toe te voegen…');
+        log(
+            'Userscript geladen, probeer knop toe te voegen…'
+        );
+
         addButton();
     }
 
-    // direct na document-end
     init();
-
 })();
