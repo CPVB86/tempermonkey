@@ -1,128 +1,288 @@
 // ==UserScript==
 // @name         DDO | CAP
-// @version      2.0
-// @description  Copy (Advice) Price van tab#1 naar relevante velden op tab#3
-// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products*
+// @version      2.1
+// @description  Kopieer Price, Advice price en VIP-price van tab #1 naar alle relevante velden op tab #3
+// @match        https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=*
 // @grant        none
 // @author       C. P. v. Beek
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/cap.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/cap.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/cap.user.js
 // ==/UserScript==
 
 (function () {
     'use strict';
 
+    const LOG_PREFIX = '[DDO CAP]';
+
     function loadFontAwesome() {
-        if (!document.querySelector('link[href*="font-awesome"], link[href*="fontawesome"]')) {
-            const link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css';
-            document.head.appendChild(link);
+        if (
+            document.querySelector(
+                'link[href*="font-awesome"], link[href*="fontawesome"]'
+            )
+        ) {
+            return;
         }
+
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href =
+            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css';
+
+        document.head.appendChild(link);
     }
 
-    function createButton() {
+    function waitForElement(selector, callback, timeout = 10000) {
+        const start = Date.now();
+
+        const check = () => {
+            const element = document.querySelector(selector);
+
+            if (element) {
+                callback(element);
+                return;
+            }
+
+            if (Date.now() - start < timeout) {
+                setTimeout(check, 200);
+            } else {
+                console.warn(
+                    `${LOG_PREFIX} Element niet gevonden binnen timeout:`,
+                    selector
+                );
+            }
+        };
+
+        check();
+    }
+
+    function triggerInputEvents(input) {
+        input.dispatchEvent(new Event('input', {
+            bubbles: true
+        }));
+
+        input.dispatchEvent(new Event('change', {
+            bubbles: true
+        }));
+    }
+
+    function fillFields(selector, value) {
+        const fields = document.querySelectorAll(selector);
+
+        if (!fields.length) {
+            alert('Geen doelvelden gevonden op tab #3.');
+            return;
+        }
+
+        fields.forEach(input => {
+            input.value = value;
+            triggerInputEvents(input);
+        });
+
+        console.log(
+            `${LOG_PREFIX} ${fields.length} velden gevuld met:`,
+            value
+        );
+    }
+
+    /**
+     * Zoekt een input naast een td.control met een bepaalde tekst.
+     *
+     * Voorbeeld:
+     * <td class="control">Price (VIP):</td>
+     * <td><input ...></td>
+     */
+    function findInputByLabel(labelText) {
+        const cells = document.querySelectorAll('#tabs-1 td.control');
+
+        for (const cell of cells) {
+            const text = cell.textContent
+                .replace(/\s+/g, ' ')
+                .trim()
+                .replace(/:$/, '')
+                .trim();
+
+            if (text.toLowerCase() !== labelText.toLowerCase()) {
+                continue;
+            }
+
+            const nextCell = cell.nextElementSibling;
+            const input = nextCell?.querySelector('input, select, textarea');
+
+            if (input) {
+                return input;
+            }
+
+            // Reserveoptie wanneer de input niet direct in de volgende td staat.
+            const rowInput = cell
+                .closest('tr')
+                ?.querySelector('input, select, textarea');
+
+            if (rowInput) {
+                return rowInput;
+            }
+        }
+
+        return null;
+    }
+
+    function createButton({
+        id,
+        title,
+        sourceGetter,
+        targetSelector,
+        missingMessage
+    }) {
         const button = document.createElement('button');
+
+        button.type = 'button';
+        button.id = id;
         button.innerHTML = '<i class="fa fa-euro-sign"></i>';
-        button.title = 'Kopieer adviesprijs naar alle velden';
+        button.title = title;
 
         Object.assign(button.style, {
             backgroundColor: '#007bff',
             color: 'white',
+            border: 'none',
             borderRadius: '5px',
-            padding: '3px 3px',
+            padding: '3px',
+            marginLeft: '4px',
             cursor: 'pointer',
-            fontSize: '10px',
+            fontSize: '10px'
         });
 
         button.addEventListener('mouseenter', () => {
             button.style.backgroundColor = 'green';
         });
+
         button.addEventListener('mouseleave', () => {
             button.style.backgroundColor = '#007bff';
         });
 
-        button.addEventListener('click', () => {
-            const prijsInput = document.querySelector('#tabs-1 input[name="price_advice"]');
-            if (!prijsInput) {
-                alert('Geen adviesprijs gevonden op tab #1!');
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const sourceInput = sourceGetter();
+
+            if (!sourceInput) {
+                alert(missingMessage);
                 return;
             }
 
-            const prijs = prijsInput.value;
-            const doelvelden = document.querySelectorAll('#tabs-3 input[name^="options"][name$="[price_advice]"]');
-            doelvelden.forEach(input => {
-                input.value = prijs;
-            });
+            fillFields(targetSelector, sourceInput.value);
         });
 
         return button;
     }
 
-    function waitForElement(selector, callback, timeout = 10000) {
-        const start = Date.now();
-        const check = () => {
-            const el = document.querySelector(selector);
-            if (el) {
-                callback(el);
-            } else if (Date.now() - start < timeout) {
-                setTimeout(check, 200);
-            }
-        };
-        check();
-    }
+    function addButtons() {
+        const headers = document.querySelectorAll(
+            '#tabs-3 th.product_option_small'
+        );
 
-    loadFontAwesome();
-    waitForElement('#tabs-3 th.product_option_small', () => {
-        const allThs = document.querySelectorAll('#tabs-3 th.product_option_small');
-        if (allThs.length >= 4) {
-            const targetTh = allThs[3]; // vierde kolom (0-based index)
-            const button = createButton();
-            targetTh.appendChild(button);
-        } else {
-            console.warn('Minder dan 4 kolommen gevonden in #tabs-3');
+        if (headers.length < 5) {
+            console.warn(
+                `${LOG_PREFIX} Onvoldoende kolommen gevonden. Aantal:`,
+                headers.length
+            );
+            return;
         }
 
-waitForElement('#tabs-3 th.product_option_small', () => {
-    const allThs = document.querySelectorAll('#tabs-3 th.product_option_small');
-    if (allThs.length >= 3) {
-        const targetTh = allThs[2]; // derde kolom: 'Price'
-        const button = document.createElement('button');
-        button.innerHTML = '<i class="fa fa-euro-sign"></i>';
-        button.title = 'Kopieer inkoopprijs naar alle velden';
+        // Price — derde kolom
+        if (!document.querySelector('#ddo-cap-price')) {
+            headers[2].appendChild(
+                createButton({
+                    id: 'ddo-cap-price',
+                    title: 'Kopieer inkoopprijs naar alle velden',
 
-        Object.assign(button.style, {
-            backgroundColor: '#007bff',
-            color: 'white',
-            borderRadius: '5px',
-            padding: '3px 3px',
-            cursor: 'pointer',
-            fontSize: '10px',
-        });
+                    sourceGetter: () =>
+                        document.querySelector(
+                            '#tabs-1 input.control.price[name="price"]'
+                        ) ||
+                        document.querySelector(
+                            '#tabs-1 input[name="price"]'
+                        ) ||
+                        findInputByLabel('Price'),
 
-        button.addEventListener('mouseenter', () => {
-            button.style.backgroundColor = 'green';
-        });
-        button.addEventListener('mouseleave', () => {
-            button.style.backgroundColor = '#007bff';
-        });
+                    targetSelector:
+                        '#tabs-3 input[name^="options"][name$="[price]"]',
 
-        button.addEventListener('click', () => {
-            const prijsInput = document.querySelector('input.control.price[name="price"]');
-            if (!prijsInput) {
-                alert('Geen inkoopprijs gevonden op tab #1!');
-                return;
-            }
+                    missingMessage:
+                        'Geen inkoopprijs gevonden op tab #1!'
+                })
+            );
+        }
 
-            const prijs = prijsInput.value;
-            const doelvelden = document.querySelectorAll('#tabs-3 input[name^="options"][name$="[price]"]');
-            doelvelden.forEach(input => {
-                input.value = prijs;
-            });
-        });
+        // Advice price — vierde kolom
+        if (!document.querySelector('#ddo-cap-advice-price')) {
+            headers[3].appendChild(
+                createButton({
+                    id: 'ddo-cap-advice-price',
+                    title: 'Kopieer adviesprijs naar alle velden',
 
-        targetTh.appendChild(button);
+                    sourceGetter: () =>
+                        document.querySelector(
+                            '#tabs-1 input[name="price_advice"]'
+                        ) ||
+                        findInputByLabel('Advice price'),
+
+                    targetSelector:
+                        '#tabs-3 input[name^="options"][name$="[price_advice]"]',
+
+                    missingMessage:
+                        'Geen adviesprijs gevonden op tab #1!'
+                })
+            );
+        }
+
+        // Price (VIP) — vijfde kolom
+        if (!document.querySelector('#ddo-cap-vip-price')) {
+            headers[4].appendChild(
+                createButton({
+                    id: 'ddo-cap-vip-price',
+                    title: 'Kopieer VIP-prijs naar alle velden',
+
+                    sourceGetter: () =>
+                        document.querySelector(
+                            '#tabs-1 input[name="price_vip"]'
+                        ) ||
+                        findInputByLabel('Price (VIP)'),
+
+                    targetSelector:
+                        '#tabs-3 input[name^="options"][name$="[price_vip]"]',
+
+                    missingMessage:
+                        'Geen VIP-prijs gevonden op tab #1!'
+                })
+            );
+        }
+
+        console.log(`${LOG_PREFIX} Knoppen toegevoegd.`);
     }
-});
+
+
+    function stretchColumns() {
+    const headers = document.querySelectorAll('#tabs-3 th.product_option_small');
+
+    if (headers.length >= 5) {
+        headers[2].style.minWidth = '90px';   // Price
+        headers[3].style.minWidth = '110px';  // Advice price
+        headers[4].style.minWidth = '105px';  // Price (VIP)
+    }
+
+    document.querySelectorAll('#tabs-3 input.product_option_small').forEach(input => {
+        input.style.minWidth = '90px';
     });
+}
+    loadFontAwesome();
+
+waitForElement('#tabs-3 th.product_option_small', () => {
+    addButtons();
+    stretchColumns();
+});
+
+    waitForElement(
+        '#tabs-3 th.product_option_small',
+        addButtons
+    );
 })();
