@@ -5,7 +5,7 @@
 // @match        https://www.vandeveldeservice.com/nl/checkout*
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/van-de-velde-card-loader.user.js
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/helper/van-de-velde-card-loader.user.js
-// @author       C. P. v. Beek + GPT
+// @author       C. P. v. Beek
 // @grant        GM_xmlhttpRequest
 // @connect      b2b-api.vandeveldeservice.com
 // @run-at       document-idle
