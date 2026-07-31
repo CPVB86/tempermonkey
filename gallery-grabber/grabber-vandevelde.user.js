@@ -37,32 +37,14 @@
    * Haalt bijvoorbeeld 0163380CRP uit:
    * /nl/p/0163380CRP
    */
-  function getProductCode() {
-    const productElement = document.querySelector('[data-qa-product-id]');
-    const dataProductId = productElement?.getAttribute('data-qa-product-id');
-
-    if (dataProductId) {
-      return safeSlug(dataProductId);
-    }
-
-    const pathMatch = window.location.pathname.match(
-      /\/p\/([^/?#]+)/i
-    );
-
-    if (pathMatch?.[1]) {
-      return safeSlug(decodeURIComponent(pathMatch[1]));
-    }
-
-    const apiMatch = window.location.pathname.match(
-      /\/products\/([^/?#]+)/i
-    );
-
-    if (apiMatch?.[1]) {
-      return safeSlug(decodeURIComponent(apiMatch[1]));
+ function getProductCode() {
+    const match = window.location.pathname.match(/\/p\/([^\/?#]+)/i);
+    if (match) {
+        return match[1].trim().toUpperCase();
     }
 
     return '';
-  }
+}
 
   function normalizeUrl(url) {
     if (!url) return '';
