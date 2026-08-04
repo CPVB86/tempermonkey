@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG | Order Scanner Dashboard
 // @namespace    local.goedgepickt.scanner
-// @version      2.3.0
+// @version      2.3.1
 // @author       C. P. v. Beek
 // @description  Scan O-codes, vind het numerieke GoedGepickt Order ID en rangschik de scanlijst.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
@@ -92,7 +92,7 @@
     #ggs-root{position:fixed;z-index:2147483646;right:18px;bottom:18px;width:min(560px,calc(100vw - 24px));color:#f7fbff;font:14px/1.45 Inter,system-ui,sans-serif;filter:drop-shadow(0 20px 40px #00152a66)}
     #ggs-root *{box-sizing:border-box}#ggs-panel{overflow:hidden;border:1px solid #284866;border-radius:16px;background:#0b1b2cee}
     #ggs-head{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;background:#10263d;cursor:move;touch-action:none;user-select:none}
-    #ggs-head-actions{display:flex;align-items:center;gap:6px}#ggs-close{border-color:#75404b;color:#ff9ba6}#ggs-close:hover{background:#6f2936;color:#fff}
+    #ggs-head-actions{display:flex;align-items:center;gap:6px}
     #ggs-head strong{font-size:15px}#ggs-status{color:#8fa9c2;font-size:12px}#ggs-dot{display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:#55e7a8}
     #ggs-body{padding:14px}#ggs-stats{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px}
     .ggs-stat{padding:12px;border:1px solid #29445f;border-radius:11px;background:#0a1725}.ggs-label{display:block;color:#8fa9c2;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em}
@@ -106,7 +106,7 @@
     #ggs-export{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}#ggs-copytext{display:none}
     .ggs-action{min-height:40px;border:1px solid transparent;border-radius:9px;padding:0 10px;color:#fff;font-weight:normal;cursor:pointer;white-space:nowrap}.ggs-action:hover{filter:brightness(1.1)}
     #ggs-paste-select{background:#6658dd;border-color:#786bea}#ggs-copy{background:#168963;border-color:#20a679}#ggs-csv{background:#c56b19;border-color:#df7d22}
-    #ggs-toggle{border:1px solid #38536c;border-radius:7px;background:transparent;color:#b5c6d7;cursor:pointer}#ggs-root.ggs-collapsed .ggs-expanded-only{display:none}#ggs-root.ggs-collapsed #ggs-head{cursor:default}
+    #ggs-toggle,#ggs-close{display:inline-flex;align-items:center;justify-content:center;width:28px;height:26px;padding:0;border:1px solid #38536c;border-radius:7px;background:transparent;color:#b5c6d7;font:normal 16px/1 system-ui,sans-serif;cursor:pointer}#ggs-toggle:hover,#ggs-close:hover{border-color:#5b7893;background:#19324a;color:#fff}#ggs-root.ggs-collapsed .ggs-expanded-only{display:none}#ggs-root.ggs-collapsed #ggs-head{cursor:default}
     @media(max-width:600px){#ggs-root{right:12px;bottom:12px}.ggs-time{display:none}#ggs-list li{grid-template-columns:25px 1fr}.ggs-action{min-height:38px;padding:0 6px;font-size:12px}}
   `;
   document.head.append(style);
