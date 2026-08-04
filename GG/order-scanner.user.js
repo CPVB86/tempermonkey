@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG | Order Scanner Dashboard
 // @namespace    local.goedgepickt.scanner
-// @version      2.2.2
+// @version      2.3.0
 // @author       C. P. v. Beek
 // @description  Scan O-codes, vind het numerieke GoedGepickt Order ID en rangschik de scanlijst.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
@@ -92,6 +92,7 @@
     #ggs-root{position:fixed;z-index:2147483646;right:18px;bottom:18px;width:min(560px,calc(100vw - 24px));color:#f7fbff;font:14px/1.45 Inter,system-ui,sans-serif;filter:drop-shadow(0 20px 40px #00152a66)}
     #ggs-root *{box-sizing:border-box}#ggs-panel{overflow:hidden;border:1px solid #284866;border-radius:16px;background:#0b1b2cee}
     #ggs-head{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;background:#10263d;cursor:move;touch-action:none;user-select:none}
+    #ggs-head-actions{display:flex;align-items:center;gap:6px}#ggs-close{border-color:#75404b;color:#ff9ba6}#ggs-close:hover{background:#6f2936;color:#fff}
     #ggs-head strong{font-size:15px}#ggs-status{color:#8fa9c2;font-size:12px}#ggs-dot{display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:#55e7a8}
     #ggs-body{padding:14px}#ggs-stats{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px}
     .ggs-stat{padding:12px;border:1px solid #29445f;border-radius:11px;background:#0a1725}.ggs-label{display:block;color:#8fa9c2;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em}
@@ -115,7 +116,7 @@
   root.className = 'ggs-collapsed';
   root.innerHTML = `
     <section id="ggs-panel">
-      <header id="ggs-head"><strong>Order Scanner</strong><span id="ggs-status" class="ggs-expanded-only"><i id="ggs-dot"></i>Scanner gereed</span><button id="ggs-toggle" title="In-/uitklappen">+</button></header>
+      <header id="ggs-head"><strong>Order Scanner</strong><span id="ggs-status" class="ggs-expanded-only"><i id="ggs-dot"></i>Scanner gereed</span><span id="ggs-head-actions"><button id="ggs-toggle" title="In-/uitklappen">+</button><button id="ggs-close" title="Sluiten en logging wissen" aria-label="Sluiten en logging wissen">×</button></span></header>
       <div id="ggs-body">
         <div id="ggs-stats"><div class="ggs-stat"><span class="ggs-label">Aantal orders</span><b class="ggs-value" id="ggs-count">0</b></div><div class="ggs-stat"><span class="ggs-label">Laatste Order ID</span><b class="ggs-value ggs-accent" id="ggs-last">—</b></div></div>
         <div id="ggs-export"><textarea id="ggs-copytext" readonly aria-hidden="true"></textarea><button class="ggs-action" id="ggs-paste-select" type="button">☑ Selecteer Orders</button><button class="ggs-action" id="ggs-copy" type="button">⧉ Kopiëren</button><button class="ggs-action" id="ggs-csv" type="button">⇩ CSV</button></div>
@@ -427,6 +428,13 @@
   }
 
   $('#ggs-toggle').addEventListener('click', () => { root.classList.toggle('ggs-collapsed'); $('#ggs-toggle').textContent=root.classList.contains('ggs-collapsed')?'+':'−'; });
+  $('#ggs-close').addEventListener('click', () => {
+    if (!confirm('Dashboard sluiten en alle scanlogging wissen?')) return;
+    state.orders = [];
+    state.learned = {};
+    localStorage.removeItem(STORE);
+    root.remove();
+  });
   $('#ggs-paste-select').addEventListener('click', event => pasteAndSelect(event.currentTarget));
   $('#ggs-copy').addEventListener('click', async () => {
     const value = $('#ggs-copytext').value;
