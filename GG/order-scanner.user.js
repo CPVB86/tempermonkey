@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG | Order Scanner Dashboard
 // @namespace    local.goedgepickt.scanner
-// @version      2.3.1
+// @version      2.6.0
 // @author       C. P. v. Beek
 // @description  Scan O-codes, vind het numerieke GoedGepickt Order ID en rangschik de scanlijst.
 // @match        https://fm-e-warehousing.goedgepickt.nl/orders*
@@ -15,11 +15,12 @@
   'use strict';
 
   const STORE = 'gg-order-scanner-v1';
+  const PENDING_SCAN_KEY = 'gg-order-scanner-pending-scan';
   const RESOLVER_VERSION = 2;
   const CODE_RE = /^O-\d+$/i;
   const state = JSON.parse(localStorage.getItem(STORE) || '{"orders":[]}');
   state.orders = Array.isArray(state.orders)
-    ? state.orders.filter(order => !/^(wordt|zoeken|geladen|uitgelezen)$/i.test(String(order?.orderId || '')))
+    ? state.orders.filter(order => !/^(wordt|zoeken|geladen|uitgelezen|en)$/i.test(String(order?.orderId || '')))
     : [];
   if (state.resolverVersion !== RESOLVER_VERSION) {
     state.learned = {};
@@ -32,60 +33,6 @@
   let lastKeyAt = 0;
   let busy = false;
 
-  function extractMappings(data) {
-    const seen = new Set();
-    function walk(node) {
-      if (!node || typeof node !== 'object' || seen.has(node)) return;
-      seen.add(node);
-      let text = '';
-      try { text = JSON.stringify(node); } catch (_) {}
-      const codes = text.match(/O-\d+/gi) || [];
-      let id = null;
-      for (const key of ['orderId','order_id','id']) {
-        if (/^\d+$/.test(String(node[key] || ''))) { id = String(node[key]); break; }
-      }
-      const route = String(node.url || node.href || node.path || '').match(/\/orders?\/(\d+)(?:\D|$)/i);
-      if (!id && route) id = route[1];
-      if (id) codes.forEach(code => learned.set(code.toUpperCase(), id));
-      Object.values(node).forEach(walk);
-    }
-    walk(data);
-    state.learned = Object.fromEntries(learned); persist();
-  }
-
-  const nativeFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const response = await nativeFetch.apply(this, args);
-    response.clone().json().then(extractMappings).catch(() => {});
-    return response;
-  };
-
-  const nativeOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function (...args) {
-    this.addEventListener('load', () => {
-      try { if (typeof this.responseText === 'string' && this.responseText.trim().startsWith('{')) extractMappings(JSON.parse(this.responseText)); } catch (_) {}
-    });
-    return nativeOpen.apply(this, args);
-  };
-
-  function idFromRoute(url) {
-    const match = String(url || '').match(/\/orders?\/(\d+)(?:\D|$)/i) || String(url || '').match(/[?&](?:order_?id|id)=(\d+)/i);
-    return match?.[1] || null;
-  }
-
-  for (const method of ['pushState','replaceState']) {
-    const native = history[method];
-    history[method] = function (data, title, url) {
-      const id = idFromRoute(url) || (data && /^\d+$/.test(String(data.orderId || data.id || '')) ? String(data.orderId || data.id) : null);
-      if (pendingNativeScan && id) {
-        learned.set(pendingNativeScan, id); state.learned = Object.fromEntries(learned); persist();
-        if (typeof window.ggsAcceptResolvedScan === 'function') window.ggsAcceptResolvedScan(pendingNativeScan, id);
-        pendingNativeScan = null;
-        return; // Bewust niet navigeren: het dashboard neemt de scan over.
-      }
-      return native.apply(this, arguments);
-    };
-  }
 
   const style = document.createElement('style');
   style.textContent = `
@@ -141,6 +88,15 @@
   } catch (_) {}
 
   function persist() { localStorage.setItem(STORE, JSON.stringify(state)); }
+  function rememberPendingScan(code) { sessionStorage.setItem(PENDING_SCAN_KEY, JSON.stringify({code, at:Date.now()})); }
+  function getPendingScan() {
+    try {
+      const pending = JSON.parse(sessionStorage.getItem(PENDING_SCAN_KEY) || 'null');
+      if (pending && CODE_RE.test(pending.code) && Date.now()-pending.at < 60000) return pending.code.toUpperCase();
+    } catch (_) {}
+    sessionStorage.removeItem(PENDING_SCAN_KEY);
+    return null;
+  }
   function esc(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function render(fresh = '') {
     $('#ggs-count').textContent = state.orders.length;
@@ -337,72 +293,48 @@
       input.select();
       return;
     }
+    rememberPendingScan(code);
     window.location.href = '/orders/view/' + code.substring(2);
   });
 
-  function cleanCandidate(value, internalId) {
-    const candidate = String(value || '').trim().replace(/^#/, '');
-    if (!candidate || candidate === internalId || candidate.toUpperCase() === `O-${internalId}`) return null;
-    if (/^(wordt|zoeken|geladen|uitgelezen|niet|automatisch|herkend)$/i.test(candidate)) return null;
-    return /^[A-Z0-9][A-Z0-9._\/-]{1,49}$/i.test(candidate) ? candidate : null;
-  }
-
-  function findDisplayOrderId(internalId) {
-    const pageTitle = document.querySelector('.page_title');
-    if (pageTitle) {
-      const match = pageTitle.textContent.replace(/\s+/g, ' ').trim().match(/^Bestelling\s+(.+)$/i);
-      const candidate = cleanCandidate(match?.[1], internalId);
-      if (candidate) return candidate;
+  // Onthoudt een fysieke scan passief. GoedGepickt blijft dezelfde toetsen ontvangen
+  // en voert de normale navigatie uit; de code overleeft die paginawissel via sessionStorage.
+  let passiveBuffer = '';
+  let passiveKeyAt = 0;
+  window.addEventListener('keydown', event => {
+    if (event.target === input || event.ctrlKey || event.altKey || event.metaKey) return;
+    const now = performance.now();
+    if (now - passiveKeyAt > 150) passiveBuffer = '';
+    passiveKeyAt = now;
+    if (event.key.length === 1) {
+      if (!passiveBuffer && event.key.toUpperCase() !== 'O') return;
+      passiveBuffer += event.key;
+      return;
     }
-
-    const selectors = [
-      '[data-external-display-id]', '[data-external-id]',
-      'input[name="external_display_id"]', 'input[name="external_id"]',
-      '#external_display_id', '#external_id', '.external-display-id', '.external_id',
-      '[data-order-number]', 'input[name="order_number"]'
-    ];
-    for (const selector of selectors) {
-      for (const element of document.querySelectorAll(selector)) {
-        const value = element.dataset.externalDisplayId || element.dataset.externalId || element.dataset.orderNumber || element.value || element.textContent;
-        const candidate = cleanCandidate(value, internalId);
-        if (candidate) return candidate;
-      }
+    if (event.key === 'Enter') {
+      const code = passiveBuffer.trim().toUpperCase();
+      passiveBuffer = '';
+      if (CODE_RE.test(code)) rememberPendingScan(code);
     }
+  }, true);
 
-    for (const label of document.querySelectorAll('label,dt,th,strong,b,span,div')) {
-      const labelText = label.textContent.trim().replace(/\s+/g, ' ');
-      if (!/^(bestelnummer|order\s*id|ordernummer)\s*:??$/i.test(labelText)) continue;
-      const container = label.closest('.form-group,.row,tr,dl,.m-portlet__body') || label.parentElement;
-      if (!container) continue;
-      const values = [...container.querySelectorAll('input,a,dd,td,p,span,strong,b')];
-      for (const element of values) {
-        if (element === label || /^(bestelnummer|order\s*id|ordernummer)\s*:??$/i.test(element.textContent.trim())) continue;
-        const candidate = cleanCandidate(element.value || element.textContent, internalId);
-        if (candidate) return candidate;
-      }
-    }
-
-    const pageCopy = document.body.cloneNode(true);
-    pageCopy.querySelector('#ggs-root')?.remove();
-    const text = pageCopy.innerText.replace(/\u00a0/g, ' ');
-    const patterns = [
-      /(?:Bestelnummer|Order\s*ID|Ordernummer)\s*:?\s*#?([A-Z0-9][A-Z0-9._\/-]{1,49})/i,
-      /(?:Extern bestelnummer|Extern ordernummer)\s*:?\s*#?([A-Z0-9][A-Z0-9._\/-]{1,49})/i
-    ];
-    for (const pattern of patterns) {
-      const candidate = cleanCandidate(text.match(pattern)?.[1], internalId);
-      if (candidate) return candidate;
-    }
-    return null;
+  function findDisplayOrderId() {
+    const title = document.querySelector('.page_title')?.textContent
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return title?.match(/^Bestelling (\d+)$/)?.[1] || null;
   }
 
   function captureOpenedOrder() {
-    const match = window.location.pathname.match(/^\/orders\/view\/(\d+)/i);
+    const match = window.location.pathname.match(/^\/orders\/view\/([^/?#]+)/i);
     if (!match) return true;
-    const internalId = match[1];
-    const code = `O-${internalId}`;
-    const orderId = findDisplayOrderId(internalId);
+    const pendingCode = getPendingScan();
+    const routePart = decodeURIComponent(match[1]);
+    const code = pendingCode || (/^\d+$/.test(routePart) ? `O-${routePart}` : `UUID-${routePart}`);
+    const orderId = findDisplayOrderId();
     if (!orderId) return false;
+    sessionStorage.removeItem(PENDING_SCAN_KEY);
     const existing = state.orders.find(order => order.code === code && order.orderId === orderId);
     if (!existing) acceptResolvedScan(code, orderId);
     else {
@@ -422,9 +354,12 @@
       observer.disconnect();
       if (!captureOpenedOrder()) {
         $('#ggs-message').className='ggs-error';
-        $('#ggs-message').textContent='Order ID niet automatisch herkend op deze detailpagina.';
+        const visibleTitle = document.querySelector('.page_title')?.textContent.replace(/\s+/g,' ').trim();
+        $('#ggs-message').textContent=visibleTitle
+          ? `Order ID niet herkend in titel: ${visibleTitle}`
+          : 'Order ID niet automatisch herkend: geen paginatitel gevonden.';
       }
-    }, 10000);
+    }, 30000);
   }
 
   $('#ggs-toggle').addEventListener('click', () => { root.classList.toggle('ggs-collapsed'); $('#ggs-toggle').textContent=root.classList.contains('ggs-collapsed')?'+':'−'; });
