@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Wacoal Bargain
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      5.0
+// @version      5.2
 // @description  Vergelijk de lokale Wacoal Bargain-voorraad op EAN met de Wacoal XLSX-export.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -23,7 +23,7 @@
     'wacoal', 'freya', 'freya-swim', 'fantasie', 'fantasie-swim',
     'elomi', 'elomi-swim', 'wacoal-bargain'
   ]);
-  const SESSION_KEY = 'stock-check-wacoal-bargain-xlsx-v4';
+  const SESSION_KEY = 'stock-check-wacoal-bargain-xlsx-v3';
   const MAX_LOCAL_STOCK = 5;
 
   if (!Core) {
@@ -49,7 +49,7 @@
     const detail = {
       id: 'stock-check-wacoal-bargain',
       name: 'Stock Check | Wacoal Bargain',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '5.0'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '5.2'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -70,17 +70,6 @@
       .trim();
   }
 
-  function columnLabel(index) {
-    let value = index + 1;
-    let label = '';
-    while (value > 0) {
-      const remainder = (value - 1) % 26;
-      label = String.fromCharCode(65 + remainder) + label;
-      value = Math.floor((value - 1) / 26);
-    }
-    return label;
-  }
-
   function getCell(sheet, row, column) {
     if (Array.isArray(sheet)) return sheet[row]?.[column];
     if (Array.isArray(sheet?.['!data'])) return sheet['!data'][row]?.[column];
@@ -96,7 +85,8 @@
   function normalizeEan(value) {
     const canonicalize = digits => {
       const normalized = digitsOnly(digits);
-      return normalized.replace(/^0+(?=\d)/, '');
+      const canonical = normalized.replace(/^0+(?=\d)/, '');
+      return /^(?:\d{8}|\d{12,14})$/.test(canonical) ? canonical : '';
     };
 
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -123,36 +113,120 @@
   }
 
   function findColumns(sheet, range) {
-    const headerRow = range.s.r;
-    let eanColumn = -1;
-    let stockColumn = -1;
-
-    for (let column = range.s.c; column <= range.e.c; column++) {
-      const header = normalizeHeader(cellValue(sheet, headerRow, column));
-      if (header === 'ediean' || header === 'edi ean') eanColumn = column;
-      if (header === 'stock' || header === 'sum of to sell' || header === 'sum of sell') stockColumn = column;
-    }
-
-    if (eanColumn < 0 || stockColumn < 0) {
-      throw new Error('Kolommen EDIEAN en/of Sum of to sell niet gevonden in rij 1.');
-    }
-
-    return { headerRow, eanColumn, stockColumn };
+    return { headerRow: range.s.r, eanColumn: 8, stockColumn: 13 };
   }
 
-  function buildStockMap(workbook) {
+  function excelColumnToIndex(value) {
+    const letters = String(value ?? '').trim().toUpperCase();
+    if (!/^[A-Z]+$/.test(letters)) return -1;
+    let index = 0;
+    for (const letter of letters) index = index * 26 + letter.charCodeAt(0) - 64;
+    return index - 1;
+  }
+
+  function indexToExcelColumn(index) {
+    let value = Number(index) + 1;
+    let result = '';
+    while (value > 0) {
+      value--;
+      result = String.fromCharCode(65 + (value % 26)) + result;
+      value = Math.floor(value / 26);
+    }
+    return result;
+  }
+
+  function askForColumns(defaultHeaderRow = 1) {
+    return new Promise(resolve => {
+      document.getElementById('wacoal-column-modal')?.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'wacoal-column-modal';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-labelledby', 'wacoal-column-modal-title');
+      Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', zIndex: '100000', display: 'grid', placeItems: 'center',
+        padding: '24px', background: 'rgba(15, 23, 42, .62)', backdropFilter: 'blur(2px)'
+      });
+
+      const panel = document.createElement('form');
+      Object.assign(panel.style, {
+        width: 'min(480px, 100%)', padding: '24px', borderRadius: '14px', background: '#fff',
+        color: '#172033', boxShadow: '0 24px 70px rgba(0, 0, 0, .32)', font: '14px/1.45 Arial, sans-serif'
+      });
+      panel.innerHTML = `
+        <h2 id="wacoal-column-modal-title" style="margin:0 0 8px;font-size:20px">Kolommen kiezen</h2>
+        <p style="margin:0 0 20px;color:#5b6577">De standaardkolommen I en N bevatten geen bruikbare regels. Bekijk het leveranciersbestand en vul hieronder de juiste posities in. Het bestand blijft geopend in Stock Check.</p>
+        <label style="display:grid;gap:6px;margin-bottom:14px;font-weight:700">EAN-kolom
+          <input name="ean" value="G" autocomplete="off" maxlength="3" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit;text-transform:uppercase">
+        </label>
+        <label style="display:grid;gap:6px;margin-bottom:14px;font-weight:700">Voorraadkolom
+          <input name="stock" value="N" autocomplete="off" maxlength="3" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit;text-transform:uppercase">
+        </label>
+        <label style="display:grid;gap:6px;margin-bottom:8px;font-weight:700">Regel met kolomtitels
+          <input name="header" value="${defaultHeaderRow}" type="number" min="1" step="1" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit">
+        </label>
+        <p data-error role="alert" style="min-height:20px;margin:4px 0 12px;color:#c53030"></p>
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+          <button type="button" data-cancel style="padding:9px 14px;border:1px solid #cbd3df;border-radius:8px;background:#fff;cursor:pointer">Annuleren</button>
+          <button type="submit" style="padding:9px 14px;border:0;border-radius:8px;background:#1769aa;color:#fff;font-weight:700;cursor:pointer">Bestand verwerken</button>
+        </div>`;
+
+      const finish = result => {
+        document.removeEventListener('keydown', onKeydown);
+        overlay.remove();
+        resolve(result);
+      };
+      const onKeydown = event => {
+        if (event.key === 'Escape') finish(null);
+      };
+
+      panel.addEventListener('submit', event => {
+        event.preventDefault();
+        const data = new FormData(panel);
+        const eanColumn = excelColumnToIndex(data.get('ean'));
+        const stockColumn = excelColumnToIndex(data.get('stock'));
+        const headerRowNumber = Number.parseInt(String(data.get('header') || '').trim(), 10);
+        const error = panel.querySelector('[data-error]');
+        if (eanColumn < 0 || stockColumn < 0 || !Number.isInteger(headerRowNumber) || headerRowNumber < 1) {
+          error.textContent = 'Gebruik kolomletters zoals G en N en een geldig regelnummer.';
+          return;
+        }
+        if (eanColumn === stockColumn) {
+          error.textContent = 'EAN en voorraad kunnen niet uit dezelfde kolom worden gelezen.';
+          return;
+        }
+        finish({ headerRow: headerRowNumber - 1, eanColumn, stockColumn, manual: true });
+      });
+      panel.querySelector('[data-cancel]').addEventListener('click', () => finish(null));
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+      document.addEventListener('keydown', onKeydown);
+      panel.elements.ean.focus();
+      panel.elements.ean.select();
+    });
+  }
+
+  function buildStockMap(workbook, columnSelection = null) {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     if (!sheet?.['!ref']) throw new Error('Het eerste werkblad bevat geen gegevens.');
 
     const range = XLSX.utils.decode_range(sheet['!ref']);
-    const { headerRow, eanColumn, stockColumn } = findColumns(sheet, range);
+    const { headerRow, eanColumn, stockColumn, manual = false } = columnSelection || findColumns(sheet, range);
+    if (headerRow < range.s.r || headerRow > range.e.r) {
+      throw new Error('De gekozen kopregel valt buiten het gebruikte bereik van het werkblad.');
+    }
     const map = new Map();
     let validRows = 0;
     let duplicateRows = 0;
     let nonZeroRows = 0;
     let skippedRows = 0;
+    const denseRows = Array.isArray(sheet['!data']) ? sheet['!data'] : null;
+    // Een XLS(X) kan door alleen opmaak een !ref tot regel 1.048.576 krijgen.
+    // In dense mode bevat !data uitsluitend de daadwerkelijk ingelezen rijen.
+    const lastDataRow = denseRows ? Math.min(range.e.r, denseRows.length - 1) : range.e.r;
 
-    for (let row = headerRow + 1; row <= range.e.r; row++) {
+    for (let row = headerRow + 1; row <= lastDataRow; row++) {
       const ean = normalizeEan(cellValue(sheet, row, eanColumn));
       const stock = parseStock(cellValue(sheet, row, stockColumn));
       if (!ean || !Number.isFinite(stock)) {
@@ -170,7 +244,7 @@
       }
     }
 
-    return { map, validRows, duplicateRows, nonZeroRows, skippedRows, eanColumn, stockColumn };
+    return { map, validRows, duplicateRows, nonZeroRows, skippedRows, eanColumn, stockColumn, headerRow, manual };
   }
 
   function isSelected() {
@@ -359,7 +433,12 @@
           const workbook = XLSX.read(new Uint8Array(loadEvent.target.result), {
             type: 'array', dense: true, cellStyles: false, cellHTML: false, cellNF: false
           });
-          const parsed = buildStockMap(workbook);
+          let parsed = buildStockMap(workbook);
+          if (!parsed.map.size) {
+            const manualColumns = await askForColumns(parsed.headerRow + 1);
+            if (!manualColumns) throw new Error('Import geannuleerd: geen handmatige kolommen gekozen.');
+            parsed = buildStockMap(workbook, manualColumns);
+          }
           stockByEan = parsed.map;
           importedFileName = file.name;
 
@@ -369,7 +448,11 @@
           logStatus(
             'WACOAL-BARGAIN',
             `${importedFileName} geladen: ${stockByEan.size} unieke EAN-codes` +
-              `, EAN uit kolom ${columnLabel(parsed.eanColumn)}, stock uit kolom ${columnLabel(parsed.stockColumn)}, ${parsed.nonZeroRows} regels met voorraad` +
+              `, EAN uit kolom ${indexToExcelColumn(parsed.eanColumn)}` +
+              `, stock uit kolom ${indexToExcelColumn(parsed.stockColumn)}` +
+              `, gegevens vanaf regel ${parsed.headerRow + 2}` +
+              (parsed.manual ? ' (handmatig gekozen)' : '') +
+              `, ${parsed.nonZeroRows} regels met voorraad` +
               (parsed.duplicateRows ? `, ${parsed.duplicateRows} dubbele regels` : '')
           );
         } catch (error) {
