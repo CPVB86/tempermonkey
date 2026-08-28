@@ -13,7 +13,7 @@
   "use strict";
 
   const wagroRe = /wagro\s*\/\s*/i;
-  const extRe = /\[ext\]/i;
+  const targetRe = /\[(?:ext|bar)\]/i;
 
   const COLORS = {
     gray: "#f1f3f5",
@@ -405,14 +405,15 @@
     catch { return null; }
   }
 
-  function rowIsExt(dt, rowNode) {
-    try {
-      const data = dt.row(rowNode).data();
-      const name = data?.productName || "";
-      if (extRe.test(name)) return true;
-    } catch {}
-    return extRe.test(rowNode.innerText || "");
-  }
+  function rowIsTarget(dt, rowNode) {
+  try {
+    const data = dt.row(rowNode).data();
+    const name = data?.productName || "";
+    if (targetRe.test(name)) return true;
+  } catch {}
+
+  return targetRe.test(rowNode.innerText || "");
+}
 
   async function processVisibleRows(dt) {
     injectCssOnce();
@@ -420,7 +421,7 @@
     const rows = dt.rows({ page: "current" }).nodes().toArray();
 
     for (const tr of rows) {
-      if (!rowIsExt(dt, tr)) {
+      if (!rowIsTarget(dt, tr)) {
         clearOurDecorations(tr);
         continue;
       }
