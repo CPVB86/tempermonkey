@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO | Brands Watcher - Lisca
-// @version      0.1.4
-// @description  Controleert Lisca op bestelbare maten, leverancierprijs met marge en kortingspercentage.
+// @version      0.2.0
+// @description  Controleert Lisca via Magento-variantdata op bestelbare maten, leverancierprijs met marge en kortingspercentage.
 // @match        https://lingerieoutlet.nl/tools/watcher/brands.html*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -9,8 +9,8 @@
 // @connect      b2b-eu.lisca.com
 // @connect      b2b-int.lisca.com
 // @require      https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-lisca.user.js?v=0.1.4
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-lisca.user.js?v=0.1.4
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-lisca.user.js?v=0.2.0
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-lisca.user.js?v=0.2.0
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -18,7 +18,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.4";
+  const VERSION = "0.2.0";
   const BRAND = "Lisca";
   const BASE = "https://b2b-eu.lisca.com";
   const RETAIL_MARGIN = 2.5;
@@ -292,12 +292,156 @@
     return { tableCount: 1, sizes };
   }
 
+  function parseBoolean(value) {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0 || value === null) return false;
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (["true", "1", "yes", "ja"].includes(normalized)) return true;
+    if (["false", "0", "no", "nee"].includes(normalized)) return false;
+    return null;
+  }
+
+  function findJsonConfig(value, seen = new Set()) {
+    if (!value || typeof value !== "object" || seen.has(value)) return null;
+    seen.add(value);
+    for (const [key, rawCandidate] of Object.entries(value)) {
+      let candidate = rawCandidate;
+      if (key === "jsonConfig" && typeof candidate === "string") {
+        try { candidate = JSON.parse(candidate); } catch { candidate = null; }
+      }
+      if (key === "jsonConfig" && candidate && typeof candidate === "object" && candidate.index && candidate.optionPrices) {
+        return candidate;
+      }
+      const nested = findJsonConfig(candidate, seen);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  function parseMagentoConfig(doc) {
+    for (const script of doc.querySelectorAll('script[type="text/x-magento-init"]')) {
+      const source = String(script.textContent || "").trim();
+      if (!source || (!source.includes("jsonConfig") && !source.includes("optionPrices"))) continue;
+      try {
+        const config = findJsonConfig(JSON.parse(source));
+        if (config) return config;
+      } catch (error) {
+        log("Magento-init overslaan: geen geldige JSON", error);
+      }
+    }
+    return null;
+  }
+
+  function optionAmount(price, keys) {
+    for (const key of keys) {
+      const amount = parseMoney(price?.[key]?.amount ?? price?.[key]);
+      if (amount !== null && amount > 0) return amount;
+    }
+    return null;
+  }
+
+  function variantIsOrderable(price) {
+    const salable = parseBoolean(price?.isSalable);
+    const qty = parseMoney(price?.qty ?? price?.qtyDisplay);
+    if (salable !== null) return salable && (qty === null || qty > 0);
+    if (qty !== null) return qty > 0;
+    return true;
+  }
+
+  function parseMagentoVariants(config) {
+    const attributes = config?.attributes || {};
+    const optionLabels = {};
+    for (const [attributeId, attribute] of Object.entries(attributes)) {
+      optionLabels[attributeId] = {};
+      for (const option of attribute?.options || []) {
+        optionLabels[attributeId][String(option.id)] = String(option.label ?? option.id);
+      }
+    }
+
+    const variants = [];
+    for (const [variantId, selectedOptions] of Object.entries(config?.index || {})) {
+      const values = {};
+      for (const [attributeId, optionId] of Object.entries(selectedOptions || {})) {
+        const attribute = attributes[attributeId];
+        if (!attribute?.code) continue;
+        values[attribute.code] = optionLabels[attributeId]?.[String(optionId)] ?? String(optionId);
+      }
+      const band = String(values.velikost2 || "").trim();
+      const cup = String(values.velikost1 || "").trim();
+      const size = normalizeSizeKey(`${band}${cup}` || band || cup);
+      const price = config.optionPrices?.[variantId] || {};
+      const current = optionAmount(price, ["finalPrice", "basePrice"]);
+      const old = optionAmount(price, ["oldPrice", "baseOldPrice"]) ?? current;
+      const qty = parseMoney(price.qty ?? price.qtyDisplay);
+      variants.push({
+        variantId: String(variantId),
+        sku: String(config.sku?.[variantId] || ""),
+        size,
+        stock: qty,
+        orderable: variantIsOrderable(price),
+        current,
+        old: old !== null && current !== null && old >= current ? old : current
+      });
+    }
+    return variants;
+  }
+
+  function representativeVariantPrice(variants) {
+    const counts = new Map();
+    for (const variant of variants.filter((item) => item.orderable && item.current !== null)) {
+      const key = `${variant.current}|${variant.old ?? variant.current}`;
+      const current = counts.get(key) || { count: 0, current: variant.current, old: variant.old ?? variant.current };
+      current.count++;
+      counts.set(key, current);
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count)[0] || null;
+  }
+
+  function parseMagentoProductData(doc) {
+    const config = parseMagentoConfig(doc);
+    if (!config) return null;
+    const variants = parseMagentoVariants(config);
+    if (!variants.length) return null;
+    const sizes = [];
+    for (const variant of variants.filter((item) => item.orderable && isSizeLabel(item.size))) {
+      const existing = sizes.find((entry) => entry.size === variant.size);
+      if (!existing) sizes.push({ size: variant.size, stock: variant.stock });
+      else if (variant.stock !== null && (existing.stock === null || variant.stock > existing.stock)) existing.stock = variant.stock;
+    }
+    const representative = representativeVariantPrice(variants);
+    const purchasePrice = representative?.current ?? null;
+    const purchaseBase = representative?.old ?? purchasePrice;
+    const distinctPrices = new Set(variants
+      .filter((item) => item.orderable && item.current !== null)
+      .map((item) => `${item.current}|${item.old}`));
+    return {
+      config,
+      variants,
+      sizes,
+      price: {
+        supplierPrice: marginPrice(purchasePrice),
+        supplierRrp: marginPrice(purchaseBase),
+        supplierPurchasePrice: purchasePrice,
+        supplierPurchaseBase: purchaseBase,
+        supplierDiscountPercentage: purchasePrice !== null && purchaseBase !== null && purchaseBase > purchasePrice
+          ? Math.round((1 - purchasePrice / purchaseBase) * 100)
+          : 0,
+        retailMargin: RETAIL_MARGIN
+      },
+      hasVariablePrices: distinctPrices.size > 1
+    };
+  }
+
   async function checkProduct(product) {
     const productUrl = await resolveProductUrl(product);
     const html = await fetchText(productUrl);
     const doc = new DOMParser().parseFromString(html, "text/html");
-    const price = parsePriceInfo(doc);
-    const remote = parseMatrixSizes(doc);
+    const magento = parseMagentoProductData(doc);
+    const price = magento?.price || parsePriceInfo(doc);
+    const matrix = magento ? null : parseMatrixSizes(doc);
+    const remote = magento
+      ? { tableCount: 1, sizes: magento.sizes }
+      : matrix;
     const localSizes = new Set((product.sizes || []).map(normalizeSizeKey).filter(isSizeLabel));
     const missingSizes = remote.sizes
       .filter((entry) => !localSizes.has(entry.size))
@@ -306,7 +450,9 @@
     log("[LISCA-CHECK]", {
       productId: product.productId,
       productUrl,
+      source: magento ? "Magento jsonConfig" : "zichtbare productmatrix (fallback)",
       price,
+      remoteVariants: magento?.variants.length || null,
       remoteSizes: remote.sizes.length,
       missingSizes: missingSizes.map((entry) => entry.size)
     });
@@ -325,7 +471,9 @@
         ? [remote.tableCount
             ? `Niet bestelbaar: geen bestelbare Lisca-maten gevonden voor ${product.productId}.`
             : `Niet bestelbaar: geen Lisca-maattabel gevonden voor ${product.productId}.`]
-        : []
+        : magento?.hasVariablePrices
+          ? [`Lisca heeft meerdere variantprijzen; de meest voorkomende prijs is gebruikt voor ${product.productId}.`]
+          : []
     };
   }
 
