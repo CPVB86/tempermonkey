@@ -12,7 +12,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const VERSION='2.3.0', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/ddo-toolbox.user.js';
+  const VERSION='2.3.0', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
