@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Triumph + Sloggi
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.1
+// @version 1.0.2
 // @description Triumph/Sloggi-locaties, sessie, stock en EAN-parsing voor de DDO Toolbox.
 // @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @match https://b2b.triumph.com/*
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='triumph-sloggi', VERSION='1.0.1', SESSION_KEY='ddoTriumphSession';
+  const ID='triumph-sloggi', VERSION='1.0.2', SESSION_KEY='ddoTriumphSession';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container';
   const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'');
   const decode=e=>{try{return JSON.parse(e.detail||'{}')}catch{return {}}};
@@ -36,7 +36,7 @@
   if(location.hostname==='b2b.triumph.com'){installSniffer();return}
 
   function brand(){const node=$(BRAND),fallback=$('#tabs-1 select[name="brand"] option:checked'),value=(node?.getAttribute('title')||node?.textContent||fallback?.textContent||'').toLowerCase();return value.includes('triumph')||value.includes('sloggi')}
-  function announce(){send('adapter-state',{id:ID,label:'Triumph/Sloggi',version:VERSION,updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/adapters/ddo-adapter-triumph.user.js',priority:90,available:brand(),reason:brand()?'':'Geen Triumph- of Sloggi-merk'})}
+  function announce(){send('adapter-state',{id:ID,label:'Triumph/Sloggi',version:VERSION,updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-triumph.user.js',priority:90,available:brand(),reason:brand()?'':'Geen Triumph- of Sloggi-merk'})}
   function status(requestId,text,kind='busy',done=false,changed=0,autoSave=false){send('adapter-status',{requestId,text,kind,done,changed,autoSave})}
   function splitPid(value){const pid=String(value||'').trim(),at=pid.lastIndexOf('-');return at>0&&at<pid.length-1?{base:pid.slice(0,at),color:pid.slice(at+1)}:null}
   function getGrid(url,auth){return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url,headers:{Accept:'application/json, text/plain, */*',Authorization:auth},onload:r=>{if(r.status<200||r.status>=300)return reject(Error(`Triumph HTTP ${r.status}`));try{resolve(JSON.parse(r.responseText))}catch{reject(Error('Ongeldige Triumph-griddata'))}},onerror:()=>reject(Error('Netwerkfout bij Triumph')),ontimeout:()=>reject(Error('Timeout bij Triumph'))}))}
