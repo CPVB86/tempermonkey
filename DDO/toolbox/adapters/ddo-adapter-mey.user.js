@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Mey
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.2.2
+// @version 1.2.3
 // @description Mey-locaties, API-data, kleur- en maatparsing voor de DDO Toolbox.
 // @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant GM_xmlhttpRequest
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='mey', VERSION='1.2.2';
+  const ID='mey', VERSION='1.2.3';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container';
   const CONTEXT={dataareaid:'ME:NO',custid:'385468',assortid:'ddd8763b-b678-4004-ba8b-c64d45b5333c',ordertypeid:'NO'};
   const $=(selector,root=document)=>root.querySelector(selector), norm=value=>String(value||'').toUpperCase().replace(/\s+/g,'').replace(/\(.*?\)/g,'').trim();
@@ -20,7 +20,7 @@
   const send=(name,data)=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
 
   function isMey(){const node=$(BRAND),selected=$('#tabs-1 select[name="brand"] option:checked'),value=(node?.getAttribute('title')||node?.textContent||selected?.textContent||'').trim().toLowerCase();if(value.includes('mey'))return true;return[...document.querySelectorAll('#tabs-1 select,#tabs-1 [role="combobox"]')].some(element=>{const option=element.tagName==='SELECT'?element.options[element.selectedIndex]:null;return String(option?.textContent||element.textContent||element.value||'').trim().toLowerCase().includes('mey')})}
-  function announce(){send('adapter-state',{id:ID,label:'Mey',version:VERSION,updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/adapters/ddo-adapter-mey.user.js',priority:80,available:isMey(),reason:isMey()?'':'Geen Mey-merk'})}
+  function announce(){send('adapter-state',{id:ID,label:'Mey',version:VERSION,updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-mey.user.js',priority:80,available:isMey(),reason:isMey()?'':'Geen Mey-merk'})}
   function status(requestId,text,kind='busy',done=false,changed=0,autoSave=false){send('adapter-status',{requestId,text,kind,done,changed,autoSave})}
   function parsePid(value){const source=String(value||'').trim(),dash=source.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);if(dash)return{style:dash[1],color:dash[2]};const numbers=source.match(/\d+/g)||[];if(!numbers.length)return{style:'',color:''};const style=[...numbers].sort((a,b)=>b.length-a.length)[0]||'',colors=numbers.filter(number=>number!==style&&number.length<=6),semi=source.match(/(?:^|;)(\d{4,})(?:;|$)/)?.[1]||'';return{style:semi&&semi.length>=style.length?semi:style,color:colors.at(-1)||''}}
   function post(endpoint,style,color){const unique=`${Date.now()}r${Math.floor(Math.random()*1000)}`,socket=crypto?.randomUUID?.()||`ws-${Date.now()}-${Math.floor(Math.random()*1e6)}`,url=`https://meyb2b.com/b2bapi?-/${unique}/${endpoint}`,styleQuery={custareaid:'ME',styleareaid:'NO',styleid:String(style),variantid:'*'};if(endpoint==='AssortmentDetail/collection')styleQuery.yattrib=String(color);else styleQuery.zkey='*';const payload=[{_getparams:{'':'undefined'},_webSocketUniqueId:socket,_url:endpoint,_dataareaid:CONTEXT.dataareaid,_agentid:null,_custid:CONTEXT.custid,_method:'read',styles:[styleQuery],assortid:CONTEXT.assortid,ordertypeid:CONTEXT.ordertypeid}];return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'POST',url,data:JSON.stringify(payload),headers:{'content-type':'application/json;charset=UTF-8',accept:'application/json, text/plain, */*'},withCredentials:true,timeout:15000,onload:response=>{if(response.status<200||response.status>=400)return reject(Error(`Mey HTTP ${response.status}`));try{resolve(JSON.parse(response.responseText||''))}catch{reject(Error('Ongeldige Mey-data'))}},onerror:()=>reject(Error('Netwerkfout bij Mey')),ontimeout:()=>reject(Error('Timeout bij Mey'))}))}
