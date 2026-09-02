@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Wacoal Group
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.1.1
+// @version 1.1.2
 // @description Wacoal-locaties, brondata en parsing voor de DDO Toolbox.
 // @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant GM_xmlhttpRequest
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='wacoal-group', VERSION='1.1.1', SHEET='1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68', GID='869563904';
+  const ID='wacoal-group', VERSION='1.1.2', SHEET='1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68', GID='869563904';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container', TTL=3600000;
   const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[–—]/g,'-');
   let memorySheetCache=null;
@@ -26,7 +26,7 @@
   const decode=e=>{try{return JSON.parse(e.detail||'{}')}catch{return {}}}, send=(name,data)=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
   function basePid(v){const first=String(v||'').trim().toUpperCase().split(/[\s,;]+/)[0]||'';return first.split('-')[0].replace(/[^A-Z0-9]/g,'')}
   function brandKey(){const n=$(BRAND),v=(n?.getAttribute('title')||n?.textContent||'').toLowerCase();if(/freya[ -]swim/.test(v))return'freya-swim';if(/elomi[ -]swim/.test(v))return'elomi-swim';if(/fantasie[ -]swim/.test(v))return'fantasie-swim';return['wacoal','freya','elomi','fantasie'].find(x=>v.includes(x))||''}
-  function announce(){send('adapter-state',{id:ID,label:'Wacoal',version:VERSION,updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/adapters/ddo-adapter-wacoal.user.js',priority:100,available:!!brandKey(),reason:brandKey()?'':'Geen Wacoal Group-merk'})}
+  function announce(){send('adapter-state',{id:ID,label:'Wacoal',version:VERSION,updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-wacoal.user.js',priority:100,available:!!brandKey(),reason:brandKey()?'':'Geen Wacoal Group-merk'})}
   function status(req,text,kind='busy',done=false,changed=0,autoSave=false){send('adapter-status',{requestId:req,text,kind,done,changed,autoSave})}
   function get(url,headers={}){return new Promise((ok,no)=>GM_xmlhttpRequest({method:'GET',url,headers,anonymous:false,onload:ok,onerror:()=>no(Error('Netwerkfout')),ontimeout:()=>no(Error('Timeout'))}))}
   const html=t=>/^\s*<!doctype html/i.test(t)||/<html\b/i.test(t);
