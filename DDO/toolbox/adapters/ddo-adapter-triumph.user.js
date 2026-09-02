@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Triumph + Sloggi
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.2
+// @version 1.0.1
 // @description Triumph/Sloggi-locaties, sessie, stock en EAN-parsing voor de DDO Toolbox.
 // @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @match https://b2b.triumph.com/*
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='triumph-sloggi', VERSION='1.0.2', SESSION_KEY='ddoTriumphSession';
+  const ID='triumph-sloggi', VERSION='1.0.1', SESSION_KEY='ddoTriumphSession';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container';
   const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'');
   const decode=e=>{try{return JSON.parse(e.detail||'{}')}catch{return {}}};
