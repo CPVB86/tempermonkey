@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Wacoal Group
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.1.1
+// @version 1.1.3
 // @description Wacoal-locaties, brondata en parsing voor de DDO Toolbox.
 // @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant GM_xmlhttpRequest
@@ -15,9 +15,9 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='wacoal-group', VERSION='1.1.1', SHEET='1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68', GID='869563904';
+  const ID='wacoal-group', VERSION='1.1.3', SHEET='1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68', GID='869563904';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container', TTL=3600000;
-  const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[–—]/g,'-');
+  const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[–—]/g,'-').replace(/^XL\/2L$/,'XL/XXL');
   let memorySheetCache=null;
   try{
     localStorage.removeItem(`ddoWacoalSheet:${SHEET}:${GID}`);
