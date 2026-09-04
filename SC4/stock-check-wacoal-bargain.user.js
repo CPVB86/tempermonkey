@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Wacoal Bargain
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      5.2
+// @version      5.3
 // @description  Vergelijk de lokale Wacoal Bargain-voorraad op EAN met de Wacoal XLSX-export.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -49,7 +49,7 @@
     const detail = {
       id: 'stock-check-wacoal-bargain',
       name: 'Stock Check | Wacoal Bargain',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '5.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '5.3'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -113,7 +113,7 @@
   }
 
   function findColumns(sheet, range) {
-    return { headerRow: range.s.r, eanColumn: 8, stockColumn: 13 };
+    return { headerRow: range.s.r, eanColumn: 8, stockColumn: 14 };
   }
 
   function excelColumnToIndex(value) {
@@ -156,12 +156,12 @@
       });
       panel.innerHTML = `
         <h2 id="wacoal-column-modal-title" style="margin:0 0 8px;font-size:20px">Kolommen kiezen</h2>
-        <p style="margin:0 0 20px;color:#5b6577">De standaardkolommen I en N bevatten geen bruikbare regels. Bekijk het leveranciersbestand en vul hieronder de juiste posities in. Het bestand blijft geopend in Stock Check.</p>
+        <p style="margin:0 0 20px;color:#5b6577">De standaardkolommen I en O bevatten geen bruikbare regels. Bekijk het leveranciersbestand en vul hieronder de juiste posities in. Het bestand blijft geopend in Stock Check.</p>
         <label style="display:grid;gap:6px;margin-bottom:14px;font-weight:700">EAN-kolom
           <input name="ean" value="G" autocomplete="off" maxlength="3" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit;text-transform:uppercase">
         </label>
         <label style="display:grid;gap:6px;margin-bottom:14px;font-weight:700">Voorraadkolom
-          <input name="stock" value="N" autocomplete="off" maxlength="3" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit;text-transform:uppercase">
+          <input name="stock" value="O" autocomplete="off" maxlength="3" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit;text-transform:uppercase">
         </label>
         <label style="display:grid;gap:6px;margin-bottom:8px;font-weight:700">Regel met kolomtitels
           <input name="header" value="${defaultHeaderRow}" type="number" min="1" step="1" style="padding:10px 12px;border:1px solid #cbd3df;border-radius:8px;font:inherit">
@@ -189,7 +189,7 @@
         const headerRowNumber = Number.parseInt(String(data.get('header') || '').trim(), 10);
         const error = panel.querySelector('[data-error]');
         if (eanColumn < 0 || stockColumn < 0 || !Number.isInteger(headerRowNumber) || headerRowNumber < 1) {
-          error.textContent = 'Gebruik kolomletters zoals G en N en een geldig regelnummer.';
+          error.textContent = 'Gebruik kolomletters zoals I en O en een geldig regelnummer.';
           return;
         }
         if (eanColumn === stockColumn) {
