@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Triumph & Sloggi
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.3
 // @description  Vergelijk DDO-voorraad met Triumph en Sloggi via de ingelogde B2B-bridge.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -417,55 +417,178 @@
     return undefined;
   }
 
-  // Triumph GRID JSON naar statusMap voor een kleur.
-  function buildStatusMapFromTriumphGrid(productsJson, wantedColorCode) {
-    const list = Array.isArray(productsJson)
-      ? productsJson
-      : (productsJson && Array.isArray(productsJson.products))
-        ? productsJson.products
+// Triumph GRID JSON naar statusMap voor een kleur.
+//
+// BELANGRIJK:
+// Alleen de ACTUELE/eerste stockLevel bepaalt de voorraad.
+//
+// Voorbeelden:
+//   vandaag: 0 OUT_OF_STOCK
+//   november: 22 HIGH_STOCK
+//   december: 50 HIGH_STOCK
+//
+// => stock = 0 / OUT_OF_STOCK
+//
+// Toekomstige leveringen worden dus NIET meegenomen.
+//
+function buildStatusMapFromTriumphGrid(productsJson, wantedColorCode) {
+  const list = Array.isArray(productsJson)
+    ? productsJson
+    : (productsJson && Array.isArray(productsJson.products))
+      ? productsJson.products
+      : [];
+
+  const wanted = String(wantedColorCode || '').padStart(4, '0');
+  const map = {};
+
+  const products = list.filter(p =>
+    String(p.colorCode || '').padStart(4, '0') === wanted
+  );
+
+  products.forEach(prod => {
+    (prod.skus || []).forEach(sku => {
+
+      // ---------------------------------------------------
+      // MAATLABEL
+      // ---------------------------------------------------
+
+      let label = (sku.simpleSizeName || '').trim().toUpperCase();
+
+      if (!label) {
+        const base = String(sku.sizeName || '').trim().toUpperCase();
+        const cup  = String(sku.subSizeName || '').trim().toUpperCase();
+
+        label = (base + (cup || '')).trim();
+      }
+
+      if (!label) return;
+
+
+      // ---------------------------------------------------
+      // STOCKLEVELS
+      // ---------------------------------------------------
+
+      const levels = Array.isArray(sku.stockLevels)
+        ? [...sku.stockLevels]
         : [];
 
-    const wanted = String(wantedColorCode || '').padStart(4, '0');
-    const map = {};
 
-    const products = list.filter(p =>
-      String(p.colorCode || '').padStart(4, '0') === wanted
-    );
-
-    products.forEach(prod => {
-      (prod.skus || []).forEach(sku => {
-        let label = (sku.simpleSizeName || '').trim().toUpperCase();
-        if (!label) {
-          const base = String(sku.sizeName || '').trim().toUpperCase();
-          const cup  = String(sku.subSizeName || '').trim().toUpperCase();
-          label = (base + (cup || '')).trim();
-        }
-        if (!label) return;
-
-        let totalQty = 0;
-        if (Array.isArray(sku.stockLevels)) {
-          for (const sl of sku.stockLevels) {
-            const q = Number(sl && sl.quantity);
-            if (Number.isFinite(q) && q > 0) totalQty += q;
-          }
-        }
-
-        const status = totalQty > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK';
-
+      // Geen stockdata = uitverkocht
+      if (!levels.length) {
         for (const key of aliasCandidates(label)) {
-          const existing = map[key];
-          if (!existing) {
-            map[key] = { status, stock: totalQty };
-          } else {
-            existing.stock = Math.max(existing.stock || 0, totalQty);
-            if (existing.status !== 'IN_STOCK' && status === 'IN_STOCK') existing.status = 'IN_STOCK';
+          map[key] = {
+            status: 'OUT_OF_STOCK',
+            stock: 0
+          };
+        }
+
+        return;
+      }
+
+
+      // ---------------------------------------------------
+      // CHRONOLOGISCH SORTEREN
+      // ---------------------------------------------------
+
+      levels.sort((a, b) => {
+        const da = Date.parse(a?.startDate || '9999-12-31');
+        const db = Date.parse(b?.startDate || '9999-12-31');
+
+        return da - db;
+      });
+
+
+      // ---------------------------------------------------
+      // EERSTE LEVEL = ACTUELE VOORRAAD
+      // ---------------------------------------------------
+
+      const current = levels[0] || {};
+
+
+      const indicator = String(
+        current.remainingQuantityIndicator
+        ??
+        current.quantityIndicator
+        ??
+        ''
+      ).trim().toUpperCase();
+
+
+      // remainingQuantity heeft voorkeur indien aanwezig.
+      const rawQty = Number(
+        current.remainingQuantity
+        ??
+        current.quantity
+        ??
+        0
+      );
+
+
+      // ---------------------------------------------------
+      // OUT_OF_STOCK IS ALTIJD 0
+      //
+      // Dus bijvoorbeeld:
+      //
+      // 2026-09-03  0  OUT_OF_STOCK
+      // 2026-11-26 22  HIGH_STOCK
+      // 2026-12-28 50  HIGH_STOCK
+      //
+      // wordt NIET 72 maar 0.
+      // ---------------------------------------------------
+
+      let totalQty = 0;
+      let status = 'OUT_OF_STOCK';
+
+      if (
+        indicator !== 'OUT_OF_STOCK' &&
+        Number.isFinite(rawQty) &&
+        rawQty > 0
+      ) {
+        totalQty = rawQty;
+        status = 'IN_STOCK';
+      }
+
+
+      // ---------------------------------------------------
+      // ALIASES OPSLAAN
+      // ---------------------------------------------------
+
+      for (const key of aliasCandidates(label)) {
+        const existing = map[key];
+
+        if (!existing) {
+          map[key] = {
+            status,
+            stock: totalQty
+          };
+
+        } else {
+
+          // Bij meerdere overeenkomende SKU's:
+          // actuele positieve voorraad heeft voorrang.
+          if (
+            status === 'IN_STOCK' &&
+            existing.status !== 'IN_STOCK'
+          ) {
+            existing.status = 'IN_STOCK';
+            existing.stock = totalQty;
+
+          } else if (
+            status === 'IN_STOCK' &&
+            existing.status === 'IN_STOCK'
+          ) {
+            existing.stock = Math.max(
+              Number(existing.stock) || 0,
+              totalQty
+            );
           }
         }
-      });
+      }
     });
+  });
 
-    return map;
-  }
+  return map;
+}
 
   function applyRulesAndMark(localTable, statusMap) {
     const rows = localTable.querySelectorAll('tbody tr');
