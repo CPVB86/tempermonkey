@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Wacoal Group
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.2
+// @version      4.3
 // @description  Vergelijk de lokale voorraad van Wacoal, Freya, Fantasie en Elomi met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -26,7 +26,7 @@
     const detail = {
       id: 'stock-check-wacoal',
       name: 'Stock Check | Wacoal Group',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.2'
+      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
     };
     g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
     g.__stockCheckUserscripts[detail.id] = detail;
@@ -52,7 +52,7 @@
 
   const SUPPORTED_BRANDS = new Set([
     'wacoal', 'freya', 'freya swim', 'fantasie', 'fantasie swim',
-    'elomi', 'elomi swim', 'wacoal group', 'wagro group'
+    'elomi', 'elomi swim'
   ]);
 
   const $ = (s, r = document) => r.querySelector(s);
@@ -622,7 +622,7 @@
     await Core.runTables({
       btn,
       tables,
-      concurrency: 1,
+      concurrency: 5,
       perTable
     });
 
@@ -863,7 +863,7 @@ function exportCheckenXlsx() {
     match: () => isSupportedSelected(),
     onClick: btn => run(btn)
   });
-  mounted.btn.innerHTML = '<i class="fa-solid fa-magnifying-glass-chart"></i>';
+  mounted.btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i>';
   mounted.btn.setAttribute('aria-label', 'Controleer voorraad bij Wacoal, Freya, Fantasie of Elomi');
   mounted.btn.title = 'Controleer voorraad bij Wacoal, Freya, Fantasie of Elomi';
 
