@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Wacoal Group
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.1.3
+// @version 1.1.5
 // @description Wacoal-locaties, brondata en parsing voor de DDO Toolbox.
 // @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
 // @grant GM_xmlhttpRequest
@@ -15,9 +15,9 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='wacoal-group', VERSION='1.1.3', SHEET='1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68', GID='869563904';
+  const ID='wacoal-group', VERSION='1.1.5', CACHE_SCHEMA=2, SHEET='1JChA4mI3mliqrwJv1s2DLj-GbkW06FWRehwCL44dF68', GID='869563904';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container', TTL=3600000;
-  const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[–—]/g,'-').replace(/^XL\/2L$/,'XL/XXL');
+  const $=(s,r=document)=>r.querySelector(s), norm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[–—]/g,'-').replace(/^XL\/2L$/,'XL/XXL').replace(/^3L\/4L$/,'3XL/4XL');
   let memorySheetCache=null;
   try{
     localStorage.removeItem(`ddoWacoalSheet:${SHEET}:${GID}`);
@@ -55,8 +55,8 @@
   }
   function eans(tsv,pid){const map=new Map(),p1=basePid(pid),p2=p1.replace(/^WA/,'');tsv.split(/\r?\n/).slice(1).forEach(line=>{const c=line.split('\t'),sku=String(c[2]||'').toUpperCase().replace(/[^A-Z0-9]/g,''),ean=String(c[1]||'').replace(/\D/g,''),size=norm(c[0]);if(size&&ean&&(sku.startsWith(p1)||(p2&&sku.startsWith(p2))))map.set(size,ean)});return map}
   const eanCacheKey=pid=>`ddoWacoalEans:${basePid(pid)}`;
-  function readEanCache(pid){try{const cache=JSON.parse(localStorage.getItem(eanCacheKey(pid))||'null');if(!cache||Date.now()-cache.ts>TTL||!Array.isArray(cache.entries))return null;return new Map(cache.entries)}catch{return null}}
-  function writeEanCache(pid,map){if(!map.size)return;try{localStorage.setItem(eanCacheKey(pid),JSON.stringify({ts:Date.now(),entries:[...map.entries()]}))}catch(error){console.warn('[DDO Adapter / Wacoal] Compacte EAN-cache kon niet worden opgeslagen.',error)}}
+  function readEanCache(pid){try{const cache=JSON.parse(localStorage.getItem(eanCacheKey(pid))||'null');if(!cache||cache.schema!==CACHE_SCHEMA||Date.now()-cache.ts>TTL||!Array.isArray(cache.entries))return null;return new Map(cache.entries.map(([size,ean])=>[norm(size),ean]))}catch{return null}}
+  function writeEanCache(pid,map){if(!map.size)return;try{localStorage.setItem(eanCacheKey(pid),JSON.stringify({schema:CACHE_SCHEMA,ts:Date.now(),entries:[...map.entries()].map(([size,ean])=>[norm(size),ean])}))}catch(error){console.warn('[DDO Adapter / Wacoal] Compacte EAN-cache kon niet worden opgeslagen.',error)}}
   async function getEans(pid,force){if(!force){const cached=readEanCache(pid);if(cached)return{map:cached,fromCache:true}}const map=eans(await sheet(!!force),pid);writeEanCache(pid,map);return{map,fromCache:false}}
   function input(el,v){el.value=String(v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
   function apply(s,e){let changed=0;document.querySelectorAll(`${TABLE} tbody tr`).forEach(row=>{const size=norm($('input.product_option_small',row)?.value),sv=s.exact.get(size)||s.band.get(size),ev=e.get(size),si=$('input[name$="[stock]"]',row),ei=$('input[name$="[barcode]"]',row);let yes=false;if(si&&sv&&si.value!==String(sv.mapped)){input(si,sv.mapped);yes=true}if(ei&&ev&&ei.value!==ev){input(ei,ev);yes=true}if(yes)changed++});return changed}
