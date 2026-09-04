@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Naturana
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      4.3
+// @version      5.0.3
 // @description  Vergelijk de lokale voorraad van Naturana en Naturana Swim met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -20,697 +20,2148 @@
 (() => {
   'use strict';
 
-  const ON_TOOL     = location.hostname.includes('lingerieoutlet.nl');
+  const ON_TOOL = location.hostname.includes('lingerieoutlet.nl');
   const ON_NATURANA = location.hostname.includes('naturana-online.de');
 
-  const g    = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  const g =
+    typeof unsafeWindow !== 'undefined'
+      ? unsafeWindow
+      : window;
+
   const Core = g.VCPCore;
-  const SR   = g.StockRules;
+  const SR = g.StockRules;
+
+  const BRAND_KEY = 'naturana';
+
+  const MODELVIEW_URL =
+    'https://naturana-online.de/naturana/ModellView';
+
+  const ARTICLEVIEW_URL =
+    'https://naturana-online.de/naturana/ArticleView';
+
+  const TIMEOUT_MS = 35000;
+
+  const STOCK_CACHE_KEY =
+    'naturana_stock_cache_v5_0_1';
+
+  const STOCK_CACHE_TTL_MS =
+    2 * 60 * 1000;
+
+  const STOCK_CACHE_MAX = 300;
+
+  const BRIDGE_KEY =
+    'naturana_vcp2_bridge';
+
+  const HEARTBEAT_KEY =
+    `${BRIDGE_KEY}_hb`;
+
+  const LEADER_KEY =
+    `${BRIDGE_KEY}_leader_v5`;
+
+  const HB_INTERVAL_MS = 2500;
+  const LEADER_TTL_MS = 7000;
+
+  const CHANNELS = [
+    {
+      req: `${BRIDGE_KEY}_req_adv`,
+      resp: `${BRIDGE_KEY}_resp_adv`,
+      ping: `${BRIDGE_KEY}_ping_adv`,
+      pong: `${BRIDGE_KEY}_pong_adv`,
+    },
+    {
+      req: `${BRIDGE_KEY}_req_v2`,
+      resp: `${BRIDGE_KEY}_resp_v2`,
+      ping: `${BRIDGE_KEY}_ping_v2`,
+      pong: `${BRIDGE_KEY}_pong_v2`,
+    },
+    {
+      req: `${BRIDGE_KEY}_req_v1`,
+      resp: `${BRIDGE_KEY}_resp_v1`,
+      ping: `${BRIDGE_KEY}_ping_v1`,
+      pong: `${BRIDGE_KEY}_pong_v1`,
+    },
+  ];
+
+  const PRIMARY_CHANNEL = CHANNELS[0];
+
+  const uid = () =>
+    Math.random().toString(36).slice(2) +
+    Date.now().toString(36);
+
+  const delay = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  const $ = (selector, root = document) =>
+    root.querySelector(selector);
+
+  const parseHTML = (html) =>
+    new DOMParser().parseFromString(
+      String(html || ''),
+      'text/html'
+    );
 
   function registerUserscript() {
     const detail = {
       id: 'stock-check-naturana',
       name: 'Stock Check | Naturana',
-      version: typeof GM_info !== 'undefined' ? GM_info.script.version : '4.3'
+      version:
+        typeof GM_info !== 'undefined'
+          ? GM_info.script.version
+          : '5.0.3',
     };
-    g.__stockCheckUserscripts = g.__stockCheckUserscripts || Object.create(null);
+
+    g.__stockCheckUserscripts =
+      g.__stockCheckUserscripts ||
+      Object.create(null);
+
     g.__stockCheckUserscripts[detail.id] = detail;
+
     try {
-      g.dispatchEvent(new g.CustomEvent('stockcheck:userscript-register', { detail }));
+      g.dispatchEvent(
+        new g.CustomEvent(
+          'stockcheck:userscript-register',
+          { detail }
+        )
+      );
     } catch {}
   }
 
-  const BRAND_KEY = 'naturana';
+  function looksLikeLogin(html) {
+    const text =
+      String(html || '').toLowerCase();
 
-  const MODELVIEW_URL   = 'https://naturana-online.de/naturana/ModellView';
-  const ARTICLEVIEW_URL = 'https://naturana-online.de/naturana/ArticleView';
+    return (
+      /login|passwort|password|anmelden/i.test(text) &&
+      /<form|input|button/i.test(text)
+    );
+  }
 
-  const TIMEOUT_MS = 20000;
-
-  // Bridge heartbeat
-  const BRIDGE_KEY     = 'naturana_vcp2_bridge';
-  const HEARTBEAT_KEY  = `${BRIDGE_KEY}_hb`;
-  const HB_INTERVAL_MS = 2500;
-
-  // Multi-channel bridge (best effort)
-  const CHANNELS = [
-    { req:`${BRIDGE_KEY}_req_adv`, resp:`${BRIDGE_KEY}_resp_adv`, ping:`${BRIDGE_KEY}_ping_adv`, pong:`${BRIDGE_KEY}_pong_adv` },
-    { req:`${BRIDGE_KEY}_req_v2`,  resp:`${BRIDGE_KEY}_resp_v2`,  ping:`${BRIDGE_KEY}_ping_v2`,  pong:`${BRIDGE_KEY}_pong_v2`  },
-    { req:`${BRIDGE_KEY}_req_v1`,  resp:`${BRIDGE_KEY}_resp_v1`,  ping:`${BRIDGE_KEY}_ping_v1`,  pong:`${BRIDGE_KEY}_pong_v1`  },
-  ];
-  const PRIMARY_CHANNEL = CHANNELS[0];
-
-  const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const delay = (ms) => new Promise(r => setTimeout(r, ms));
-  const $ = (s, r=document) => r.querySelector(s);
-
-  const parseHTML = (html) => new DOMParser().parseFromString(String(html || ''), 'text/html');
-
-  const looksLikeLogin = (html) => {
-    const t = String(html || '').toLowerCase();
-    return /login|passwort|password|anmelden/i.test(t) && /<form|input|button/i.test(t);
-  };
-
-  // =========================================================
-  // Tool-side prerequisites (zoals Chantelle)
-  // =========================================================
   if (ON_TOOL) {
     if (!Core) {
-      console.error('[VCP2|Naturana] VCPCore ontbreekt. Check @require vcp-core.js');
+      console.error(
+        '[VCP2|Naturana] VCPCore ontbreekt. Controleer @require vcp-core.js.'
+      );
+
       return;
     }
-    if (!SR || typeof SR.mapRemoteToTarget !== 'function' || typeof SR.reconcile !== 'function') {
-      console.error('[VCP2|Naturana] StockRules ontbreekt/incompleet. Vereist: mapRemoteToTarget + reconcile');
+
+    if (
+      !SR ||
+      typeof SR.mapRemoteToTarget !== 'function' ||
+      typeof SR.reconcile !== 'function'
+    ) {
+      console.error(
+        '[VCP2|Naturana] StockRules ontbreekt of is incompleet.'
+      );
+
       return;
     }
   }
 
-  // =========================================================
-  // Logger (status -> logboek, mapping -> console.table)
-  // =========================================================
   const Logger = {
     lb() {
-      return (typeof unsafeWindow !== 'undefined' && unsafeWindow.logboek) ? unsafeWindow.logboek : window.logboek;
+      return (
+        typeof unsafeWindow !== 'undefined' &&
+        unsafeWindow.logboek
+      )
+        ? unsafeWindow.logboek
+        : window.logboek;
     },
-    status(anchorId, txt) {
+
+    status(anchorId, text) {
       const lb = this.lb();
-      if (lb?.resultaat) lb.resultaat(String(anchorId), String(txt));
-      else console.info(`[Naturana][${anchorId}] status: ${txt}`);
+
+      if (lb?.resultaat) {
+        lb.resultaat(
+          String(anchorId),
+          String(text)
+        );
+      } else {
+        console.info(
+          `[Naturana][${anchorId}] status: ${text}`
+        );
+      }
     },
+
     perMaat(anchorId, report) {
-      if (g.StockCheckConfig?.detailLogging !== true) return;
-      console.groupCollapsed(`[Naturana][${anchorId}] maatvergelijking`);
+      if (
+        g.StockCheckConfig?.detailLogging !== true
+      ) {
+        return;
+      }
+
+      console.groupCollapsed(
+        `[Naturana][${anchorId}] maatvergelijking`
+      );
+
       try {
-        console.table(report.map(r => ({
-          maat: r.maat,
-          local: r.local,
-          remote: (r.remote ?? '-'),
-          target: Number.isFinite(r.target) ? r.target : '-',
-          delta: Number.isFinite(r.delta) ? r.delta : '-',
-          status: r.status
-        })));
-      } finally { console.groupEnd(); }
-    }
+        console.table(
+          report.map((row) => ({
+            maat: row.maat,
+            local: row.local,
+            remote: row.remote ?? '-',
+            target: Number.isFinite(row.target)
+              ? row.target
+              : '-',
+            delta: Number.isFinite(row.delta)
+              ? row.delta
+              : '-',
+            status: row.status,
+          }))
+        );
+      } finally {
+        console.groupEnd();
+      }
+    },
   };
 
   // =========================================================
-  // Bridge (Naturana tab): fetch with cookies
+  // Bridge op het Naturana-tabblad
   // =========================================================
+
   function workerInitBridge() {
-    // heartbeat
-    setInterval(() => {
-      try { GM_setValue(HEARTBEAT_KEY, Date.now()); } catch {}
-    }, HB_INTERVAL_MS);
+    const workerId = uid();
 
-    // ping/pong (optional)
-    CHANNELS.forEach(ch => {
-      try {
-        GM_addValueChangeListener(ch.ping, (_n, _o, msg) => {
-          if (msg === 'ping') GM_setValue(ch.pong, 'pong:' + Date.now());
-        });
-      } catch {}
-    });
-
-    // concurrency queue
-    const q = [];
+    let isLeader = false;
     let active = 0;
-    const BRIDGE_CONCURRENCY = 4;
 
-    async function handleOne(req) {
-      const respKey = req._resp;
+    const queue = [];
+    const seenRequestIds = new Set();
+
+    const BRIDGE_CONCURRENCY = 1;
+
+    function acceptRequest(
+      channel,
+      request,
+      recovered = false
+    ) {
+      if (
+        !isLeader ||
+        !request?.id ||
+        !request?.url
+      ) {
+        return;
+      }
+
+      if (seenRequestIds.has(request.id)) {
+        return;
+      }
+
+      if (recovered) {
+        const createdAt =
+          Number(request.createdAt || 0);
+
+        const maxAge =
+          Math.max(
+            5000,
+            Number(request.timeout || TIMEOUT_MS)
+          ) + 5000;
+
+        if (
+          !createdAt ||
+          Date.now() - createdAt > maxAge
+        ) {
+          return;
+        }
+
+        const existingResponse =
+          GM_getValue(channel.resp, null);
+
+        if (
+          existingResponse?.id === request.id
+        ) {
+          return;
+        }
+      }
+
+      seenRequestIds.add(request.id);
+
+      queue.push({
+        ...request,
+        _responseKey: channel.resp,
+      });
+
+      pump();
+    }
+
+    function recoverPendingRequests() {
+      if (!isLeader) {
+        return;
+      }
+
+      for (const channel of CHANNELS) {
+        try {
+          acceptRequest(
+            channel,
+            GM_getValue(channel.req, null),
+            true
+          );
+        } catch {}
+      }
+    }
+
+    function maintainLeadership() {
       try {
-        const ctrl = new AbortController();
-        const to = setTimeout(() => ctrl.abort(), Math.max(5000, req.timeout || TIMEOUT_MS));
+        const wasLeader = isLeader;
+        const timestamp = Date.now();
 
-        const res = await fetch(req.url, {
-          method: req.method || 'GET',
-          headers: req.headers || {},
-          credentials: 'include',
-          body: req.body || null,
-          signal: ctrl.signal,
-        });
+        const current =
+          GM_getValue(LEADER_KEY, null);
 
-        const text = await res.text();
-        clearTimeout(to);
+        const stale =
+          !current?.id ||
+          !Number.isFinite(current.time) ||
+          timestamp - current.time >
+            LEADER_TTL_MS;
 
-        GM_setValue(respKey, { id: req.id, ok: true, status: res.status, text });
-      } catch (e) {
-        GM_setValue(respKey, { id: req.id, ok: false, error: String(e) });
+        if (
+          current?.id === workerId ||
+          stale
+        ) {
+          GM_setValue(
+            LEADER_KEY,
+            {
+              id: workerId,
+              time: timestamp,
+            }
+          );
+
+          const check =
+            GM_getValue(LEADER_KEY, null);
+
+          isLeader =
+            check?.id === workerId;
+        } else {
+          isLeader = false;
+        }
+
+        if (isLeader) {
+          GM_setValue(
+            HEARTBEAT_KEY,
+            timestamp
+          );
+
+          if (!wasLeader) {
+            recoverPendingRequests();
+          }
+        }
+      } catch {
+        isLeader = false;
+      }
+    }
+
+    async function handleOne(request) {
+      const responseKey =
+        request._responseKey;
+
+      let timeoutHandle = null;
+
+      try {
+        const controller =
+          new AbortController();
+
+        timeoutHandle = setTimeout(
+          () => controller.abort(),
+          Math.max(
+            5000,
+            request.timeout || TIMEOUT_MS
+          )
+        );
+
+        const response =
+          await fetch(request.url, {
+            method: request.method || 'GET',
+            headers: request.headers || {},
+            credentials: 'include',
+            body: request.body || null,
+            signal: controller.signal,
+          });
+
+        const text =
+          await response.text();
+
+        clearTimeout(timeoutHandle);
+
+        GM_setValue(
+          responseKey,
+          {
+            id: request.id,
+            ok: true,
+            status: response.status,
+            text,
+          }
+        );
+      } catch (error) {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+
+        GM_setValue(
+          responseKey,
+          {
+            id: request.id,
+            ok: false,
+            error: String(error),
+          }
+        );
       }
     }
 
     function pump() {
-      while (active < BRIDGE_CONCURRENCY && q.length) {
-        const req = q.shift();
-        active++;
-        handleOne(req).finally(() => { active--; pump(); });
+      while (
+        active < BRIDGE_CONCURRENCY &&
+        queue.length
+      ) {
+        const request = queue.shift();
+
+        active += 1;
+
+        handleOne(request)
+          .finally(() => {
+            active -= 1;
+            pump();
+          });
       }
     }
 
-    CHANNELS.forEach(ch => {
+    maintainLeadership();
+
+    setInterval(
+      maintainLeadership,
+      HB_INTERVAL_MS
+    );
+
+    CHANNELS.forEach((channel) => {
       try {
-        GM_addValueChangeListener(ch.req, (_n, _o, req) => {
-          if (!req || !req.id || !req.url) return;
-          q.push({ ...req, _resp: ch.resp });
-          pump();
-        });
+        GM_addValueChangeListener(
+          channel.ping,
+          (_name, _oldValue, message) => {
+            if (
+              isLeader &&
+              message === 'ping'
+            ) {
+              GM_setValue(
+                channel.pong,
+                `pong:${Date.now()}`
+              );
+            }
+          }
+        );
       } catch {}
     });
 
-    try { GM_setValue(HEARTBEAT_KEY, Date.now()); } catch {}
+    CHANNELS.forEach((channel) => {
+      try {
+        GM_addValueChangeListener(
+          channel.req,
+          (
+            _name,
+            _oldValue,
+            request
+          ) => {
+            if (!isLeader) {
+              return;
+            }
+
+            acceptRequest(
+              channel,
+              request,
+              false
+            );
+          }
+        );
+      } catch {}
+    });
+
+    maintainLeadership();
   }
 
   // =========================================================
-  // Tool-side: bridge helpers
+  // Bridge op de stocktool
   // =========================================================
+
   function bridgeOnline(maxAgeMs = 6000) {
     try {
-      const t = GM_getValue(HEARTBEAT_KEY, 0);
-      return t && (Date.now() - t) < maxAgeMs;
+      const timestamp =
+        GM_getValue(HEARTBEAT_KEY, 0);
+
+      return Boolean(
+        timestamp &&
+        Date.now() - timestamp < maxAgeMs
+      );
     } catch {
       return false;
     }
   }
 
-  function installHeartbeatBadge(btn) {
-    if (!btn || btn.querySelector('.supplier-bridge-badge')) return;
+  function installHeartbeatBadge(button) {
+    if (
+      !button ||
+      button.querySelector(
+        '.supplier-bridge-badge'
+      )
+    ) {
+      return;
+    }
 
-    btn.style.position = 'relative';
-    const badge = document.createElement('span');
-    badge.className = 'supplier-bridge-badge';
-    badge.setAttribute('aria-hidden', 'true');
-    btn.appendChild(badge);
+    button.style.position = 'relative';
+
+    const badge =
+      document.createElement('span');
+
+    badge.className =
+      'supplier-bridge-badge';
+
+    badge.setAttribute(
+      'aria-hidden',
+      'true'
+    );
+
+    button.appendChild(badge);
 
     const update = () => {
       const online = bridgeOnline();
-      badge.classList.toggle('is-online', online);
-      btn.dataset.bridgeOnline = online ? '1' : '0';
-      if (!btn.classList.contains('is-busy')) {
-        btn.title = online
+
+      badge.classList.toggle(
+        'is-online',
+        online
+      );
+
+      button.dataset.bridgeOnline =
+        online ? '1' : '0';
+
+      if (
+        !button.classList.contains('is-busy')
+      ) {
+        button.title = online
           ? 'Controleer voorraad bij Naturana'
-          : 'Open en login eerst op naturana-online.de';
+          : 'Open naturana-online.de, log in en laat het tabblad open';
       }
     };
 
     update();
+
     window.setInterval(update, 2500);
+
     try {
-      GM_addValueChangeListener(HEARTBEAT_KEY, update);
+      GM_addValueChangeListener(
+        HEARTBEAT_KEY,
+        update
+      );
     } catch {}
   }
 
-  function bridgeSend({ url, method='GET', headers={}, body=null, timeout=TIMEOUT_MS }) {
+  function bridgeSend({
+    url,
+    method = 'GET',
+    headers = {},
+    body = null,
+    timeout = TIMEOUT_MS,
+  }) {
     const id = uid();
 
-    return new Promise((resolve, reject) => {
-      const handles = [];
-      let settled = false;
+    return new Promise(
+      (resolve, reject) => {
+        const handles = [];
+        let settled = false;
 
-      const off = () => {
-        handles.forEach(h => { try { GM_removeValueChangeListener(h); } catch {} });
-      };
+        const removeListeners = () => {
+          handles.forEach((handle) => {
+            try {
+              GM_removeValueChangeListener(
+                handle
+              );
+            } catch {}
+          });
+        };
 
-      const h = GM_addValueChangeListener(PRIMARY_CHANNEL.resp, (_n, _o, msg) => {
-        if (settled || !msg || msg.id !== id) return;
-        settled = true;
-        off();
-        msg.ok ? resolve(msg) : reject(new Error(msg.error || 'bridge error'));
-      });
-      handles.push(h);
+        const handle =
+          GM_addValueChangeListener(
+            PRIMARY_CHANNEL.resp,
+            (
+              _name,
+              _oldValue,
+              message
+            ) => {
+              if (
+                settled ||
+                !message ||
+                message.id !== id
+              ) {
+                return;
+              }
 
-      GM_setValue(PRIMARY_CHANNEL.req, { id, url, method, headers, body, timeout });
+              settled = true;
+              removeListeners();
 
-      setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        off();
-        reject(new Error('bridge timeout'));
-      }, timeout + 1500);
-    });
+              if (message.ok) {
+                resolve(message);
+              } else {
+                reject(
+                  new Error(
+                    message.error ||
+                    'bridge error'
+                  )
+                );
+              }
+            }
+          );
+
+        handles.push(handle);
+
+        GM_setValue(
+          PRIMARY_CHANNEL.req,
+          {
+            id,
+            createdAt: Date.now(),
+            url,
+            method,
+            headers,
+            body,
+            timeout,
+          }
+        );
+
+        setTimeout(() => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          removeListeners();
+
+          reject(
+            new Error('bridge timeout')
+          );
+        }, timeout + 1500);
+      }
+    );
   }
 
-  const httpGET = (url) => bridgeSend({ url, method: 'GET' });
+  const httpGET = (url) =>
+    bridgeSend({
+      url,
+      method: 'GET',
+    });
 
-  const httpPOST = (url, dataObj) => {
-    const body = new URLSearchParams(dataObj || {}).toString();
+  function httpPOST(url, dataObject) {
+    const body =
+      new URLSearchParams(
+        dataObject || {}
+      ).toString();
+
     return bridgeSend({
       url,
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-      body
+      headers: {
+        'Content-Type':
+          'application/x-www-form-urlencoded; charset=UTF-8',
+      },
+      body,
     });
-  };
+  }
 
   // =========================================================
-  // Naturana: ASP.NET helpers (pure navigation)
+  // ASP.NET helpers
   // =========================================================
-  function pickViewState(doc) {
-    const form = doc.querySelector('form');
-    if (!form) return null;
-    const get = (n) => form.querySelector(`input[name="${n}"]`)?.value ?? '';
+
+  function pickViewState(documentRoot) {
+    const form =
+      documentRoot.querySelector('form');
+
+    if (!form) {
+      return null;
+    }
+
+    const get = (name) =>
+      form.querySelector(
+        `input[name="${name}"]`
+      )?.value ?? '';
+
     return {
-      __VIEWSTATE: get('__VIEWSTATE'),
-      __VIEWSTATEGENERATOR: get('__VIEWSTATEGENERATOR'),
-      __EVENTVALIDATION: get('__EVENTVALIDATION')
+      __VIEWSTATE:
+        get('__VIEWSTATE'),
+
+      __VIEWSTATEGENERATOR:
+        get('__VIEWSTATEGENERATOR'),
+
+      __EVENTVALIDATION:
+        get('__EVENTVALIDATION'),
     };
   }
 
-  function getFormAction(doc, fallbackUrl) {
-    const form = doc.querySelector('form');
-    const act = (form?.getAttribute('action') || '').trim();
-    try { return new URL(act || '', fallbackUrl).toString(); }
-    catch { return fallbackUrl; }
+  function getFormAction(
+    documentRoot,
+    fallbackUrl
+  ) {
+    const form =
+      documentRoot.querySelector('form');
+
+    const action =
+      (
+        form?.getAttribute('action') || ''
+      ).trim();
+
+    try {
+      return new URL(
+        action || '',
+        fallbackUrl
+      ).toString();
+    } catch {
+      return fallbackUrl;
+    }
   }
 
   function serializeForm(form) {
     const payload = {};
-    if (!form?.elements) return payload;
 
-    for (const el of Array.from(form.elements)) {
-      if (!el?.name) continue;
-      const tag = (el.tagName || '').toLowerCase();
-      const type = (el.type || '').toLowerCase();
+    if (!form?.elements) {
+      return payload;
+    }
 
-      if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
-
-      if (tag === 'select' && el.multiple) {
-        const sel = Array.from(el.options).filter(o => o.selected).map(o => o.value);
-        if (sel.length) payload[el.name] = sel[0];
+    for (
+      const element
+      of Array.from(form.elements)
+    ) {
+      if (!element?.name) {
         continue;
       }
 
-      payload[el.name] = el.value ?? '';
+      const tag =
+        String(element.tagName || '')
+          .toLowerCase();
+
+      const type =
+        String(element.type || '')
+          .toLowerCase();
+
+      if (
+        (
+          type === 'checkbox' ||
+          type === 'radio'
+        ) &&
+        !element.checked
+      ) {
+        continue;
+      }
+
+      if (
+        tag === 'select' &&
+        element.multiple
+      ) {
+        const selected =
+          Array.from(element.options)
+            .filter(
+              (option) => option.selected
+            )
+            .map(
+              (option) => option.value
+            );
+
+        if (selected.length) {
+          payload[element.name] =
+            selected[0];
+        }
+
+        continue;
+      }
+
+      payload[element.name] =
+        element.value ?? '';
     }
+
     return payload;
   }
 
-  function addImageSubmit(payload, imageName) {
+  function addImageSubmit(
+    payload,
+    imageName
+  ) {
     payload[`${imageName}.x`] = '1';
     payload[`${imageName}.y`] = '1';
   }
 
   // =========================================================
-  // Size normalization (pure parsing convenience)
+  // Maten
   // =========================================================
+
   const SIZE_ALIAS = {
-    '2XL':'XXL','XXL':'2XL',
-    '3XL':'XXXL','XXXL':'3XL',
-    '4XL':'XXXXL','XXXXL':'4XL',
-    '3L':'3XL',
-    'XS/S':'XS','S/M':'M','M/L':'L','L/XL':'XL','XL/2XL':'2XL'
+    '2XL': 'XXL',
+    XXL: '2XL',
+
+    '3XL': 'XXXL',
+    XXXL: '3XL',
+
+    '4XL': 'XXXXL',
+    XXXXL: '4XL',
+
+    '3L': '3XL',
+
+    'XS/S': 'XS',
+    'S/M': 'M',
+    'M/L': 'L',
+    'L/XL': 'XL',
+    'XL/2XL': '2XL',
   };
 
   function normalizeSizeKey(raw) {
-    let v = String(raw ?? '').trim();
-    if (!v) return '';
-    v = v.split(/[|,]/)[0];
-    v = v.trim().toUpperCase().replace(/\s+/g, '');
-    if (!v) return '';
-    if (SIZE_ALIAS[v]) v = SIZE_ALIAS[v];
-    return v;
+    let value =
+      String(raw ?? '').trim();
+
+    if (!value) {
+      return '';
+    }
+
+    value = value.split(/[|,]/)[0];
+
+    value = value
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '');
+
+    if (SIZE_ALIAS[value]) {
+      value = SIZE_ALIAS[value];
+    }
+
+    return value;
   }
 
   function aliasCandidates(label) {
-    const raw = String(label || '').trim().toUpperCase();
-    const ns = raw.replace(/\s+/g, '');
-    const set = new Set([raw, ns]);
+    const raw =
+      String(label || '')
+        .trim()
+        .toUpperCase();
 
-    if (SIZE_ALIAS[raw]) set.add(SIZE_ALIAS[raw]);
-    if (SIZE_ALIAS[ns]) set.add(SIZE_ALIAS[ns]);
+    const noSpaces =
+      raw.replace(/\s+/g, '');
+
+    const candidates =
+      new Set([raw, noSpaces]);
+
+    if (SIZE_ALIAS[raw]) {
+      candidates.add(SIZE_ALIAS[raw]);
+    }
+
+    if (SIZE_ALIAS[noSpaces]) {
+      candidates.add(
+        SIZE_ALIAS[noSpaces]
+      );
+    }
 
     if (raw.includes('/')) {
-      raw.split('/').map(x => x.trim()).filter(Boolean).forEach(x => {
-        set.add(x);
-        set.add(x.replace(/\s+/g, ''));
-        if (SIZE_ALIAS[x]) set.add(SIZE_ALIAS[x]);
-      });
-    }
-    return Array.from(set);
-  }
+      raw
+        .split('/')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => {
+          candidates.add(part);
 
-  // =========================================================
-  // ModellView exact match: "PID-COLOR" -> postback target
-  // =========================================================
-  function findModelItemExact(doc, pidColor) {
-    const raw = String(pidColor || '').trim().toUpperCase();
-    const m = raw.match(/^(.+?)-(.*)$/);
-    const pid = (m ? m[1] : raw).trim();
-    const color = (m ? m[2] : '').trim();
-    const colorDigits = color.replace(/\D/g, '');
+          candidates.add(
+            part.replace(/\s+/g, '')
+          );
 
-    if (!pid || !colorDigits) return null;
-
-    const spans = Array.from(doc.querySelectorAll('span[id*="lblArticleNo"]'));
-    const exactSpans = spans.filter(sp => (sp.textContent || '').trim() === pid);
-    if (!exactSpans.length) return null;
-
-    for (const sp of exactSpans) {
-      const col = sp.closest('.mod-container-col');
-      if (!col) continue;
-
-      const a = col.querySelector('a[id*="linkArticleNo"][href*="__doPostBack"]');
-      const href = a?.getAttribute('href') || '';
-      const mm = href.match(/__doPostBack\('([^']+)'\s*,\s*'([^']*)'\)/i);
-      if (!mm) continue;
-
-      return { pid, colorDigits, eventTarget: mm[1], eventArg: (mm[2] || '') };
-    }
-    return null;
-  }
-
-  // =========================================================
-  // ArticleView: ensure exact color (pure navigation)
-  // =========================================================
-  async function ensureArticleViewColor(html, colorDigits, fallbackUrl) {
-    const doc = parseHTML(html);
-
-    const current =
-      (doc.querySelector('.div-art-color .art-color-text')?.textContent || '').trim() ||
-      (doc.querySelector('[id*="lblColorNr"]')?.textContent || '').trim() ||
-      '';
-
-    if (String(current).replace(/\D/g, '') === String(colorDigits)) return html;
-
-    const blocks = Array.from(doc.querySelectorAll('.art-color'));
-    const wanted = blocks.find(b => {
-      const n = (b.querySelector('.art-color-no')?.textContent || '').trim();
-      return String(n).replace(/\D/g, '') === String(colorDigits);
-    });
-    if (!wanted) throw new Error('TARGET_NOT_FOUND');
-
-    const img = wanted.querySelector('input[type="image"][name*="btnSelectColor"]');
-    const imgName = img?.getAttribute('name') || '';
-    if (!imgName) throw new Error('TARGET_NOT_FOUND');
-
-    const form = doc.querySelector('form');
-    if (!form) throw new Error('TARGET_NOT_FOUND');
-
-    const actionUrl = getFormAction(doc, fallbackUrl);
-    const payload = serializeForm(form);
-
-    if (!('__EVENTTARGET' in payload)) payload.__EVENTTARGET = '';
-    if (!('__EVENTARGUMENT' in payload)) payload.__EVENTARGUMENT = '';
-
-    addImageSubmit(payload, imgName);
-
-    const msg = await httpPOST(actionUrl, payload);
-    if (looksLikeLogin(msg.text)) throw new Error('LOGIN_REQUIRED');
-
-    const checkDoc = parseHTML(msg.text);
-    const after =
-      (checkDoc.querySelector('.div-art-color .art-color-text')?.textContent || '').trim() ||
-      (checkDoc.querySelector('[id*="lblColorNr"]')?.textContent || '').trim() ||
-      '';
-
-    if (String(after).replace(/\D/g, '') !== String(colorDigits)) {
-      throw new Error('TARGET_NOT_FOUND');
+          if (SIZE_ALIAS[part]) {
+            candidates.add(
+              SIZE_ALIAS[part]
+            );
+          }
+        });
     }
 
-    return msg.text;
+    return Array.from(candidates);
   }
 
-  // =========================================================
-  // ArticleView -> remote qty per size (pure parsing)
-  // =========================================================
-  function buildStockMapFromArticleView(html) {
-    const map = new Map();
-    const doc = parseHTML(html);
+  /*
+   * Deze functie ontbrak in 5.0.2.
+   * Zonder deze functie stopt de vergelijking
+   * met een ReferenceError en blijven counters
+   * op nul staan.
+   */
+  function resolveRemoteQty(
+    stockMap,
+    localSize
+  ) {
+    if (!(stockMap instanceof Map)) {
+      return undefined;
+    }
 
-    const tiles = Array.from(doc.querySelectorAll('.color-size-grid .p-2.text-center, .color-size-grid [id*="_divOID_"]'));
-    for (const tile of tiles) {
-      const sizeEl = tile.querySelector('.gridSize');
-      const inp = tile.querySelector('input.gridAmount');
-      if (!sizeEl || !inp) continue;
+    for (
+      const candidate
+      of aliasCandidates(localSize)
+    ) {
+      const key =
+        normalizeSizeKey(candidate);
 
-      const rawSize = (sizeEl.textContent || '').trim().toUpperCase();
-      if (!rawSize) continue;
+      if (!stockMap.has(key)) {
+        continue;
+      }
 
-      const sizeKey = normalizeSizeKey(rawSize);
+      const quantity =
+        Number(stockMap.get(key));
 
-      const rawMax =
-        inp.getAttribute('max') ??
-        inp.getAttribute('data-max') ??
-        inp.dataset?.max ??
-        inp.getAttribute('value') ??
-        inp.value ??
-        '0';
-
-      let qty = parseInt(String(rawMax).trim(), 10);
-      if (!Number.isFinite(qty) || qty < 0) qty = 0;
-
-      for (const key of aliasCandidates(sizeKey)) {
-        map.set(normalizeSizeKey(key), qty);
+      if (Number.isFinite(quantity)) {
+        return quantity;
       }
     }
-    return map;
-  }
 
-  function resolveRemoteQty(stockMap, label) {
-    for (const c of aliasCandidates(label)) {
-      const k = normalizeSizeKey(c);
-      if (stockMap.has(k)) return stockMap.get(k);
-    }
     return undefined;
   }
 
   // =========================================================
-  // ModellView -> ArticleView (pure navigation)
+  // Voorraadcache
   // =========================================================
-  async function openArticleViewExact(pidColor, state) {
-    const ensureFreshModelView = async () => {
-      const msg = await httpGET(MODELVIEW_URL);
-      if (msg.status >= 400) throw new Error(`HTTP_${msg.status}`);
-      if (looksLikeLogin(msg.text)) throw new Error('LOGIN_REQUIRED');
 
-      const doc = parseHTML(msg.text);
-      const vs = pickViewState(doc);
-      if (!vs?.__VIEWSTATE) throw new Error('TARGET_NOT_FOUND');
+  function readStockCache(sku) {
+    try {
+      const all =
+        GM_getValue(
+          STOCK_CACHE_KEY,
+          {}
+        );
 
-      state.doc = doc;
-      state.vs = vs;
-    };
+      const key =
+        String(sku || '')
+          .toUpperCase();
 
-    if (!state.doc || !state.vs) await ensureFreshModelView();
+      const hit = all?.[key];
 
-    let item = findModelItemExact(state.doc, pidColor);
-    if (!item) {
-      await ensureFreshModelView();
-      item = findModelItemExact(state.doc, pidColor);
-      if (!item) throw new Error('TARGET_NOT_FOUND');
+      if (
+        !hit ||
+        !Array.isArray(hit.entries) ||
+        !Number.isFinite(hit.time)
+      ) {
+        return null;
+      }
+
+      if (
+        Date.now() - hit.time >
+        STOCK_CACHE_TTL_MS
+      ) {
+        return null;
+      }
+
+      return new Map(hit.entries);
+    } catch {
+      return null;
     }
+  }
 
-    const payload = {
-      __EVENTTARGET: item.eventTarget || '',
-      __EVENTARGUMENT: item.eventArg || '',
-      __VIEWSTATE: state.vs.__VIEWSTATE,
-      __VIEWSTATEGENERATOR: state.vs.__VIEWSTATEGENERATOR || '',
-      __EVENTVALIDATION: state.vs.__EVENTVALIDATION || ''
-    };
+  function writeStockCache(
+    sku,
+    stockMap
+  ) {
+    try {
+      const key =
+        String(sku || '')
+          .toUpperCase();
 
-    const msg1 = await httpPOST(MODELVIEW_URL, payload);
-    if (msg1.status >= 400) throw new Error(`HTTP_${msg1.status}`);
-    if (looksLikeLogin(msg1.text)) throw new Error('LOGIN_REQUIRED');
+      if (
+        !key ||
+        !(stockMap instanceof Map) ||
+        stockMap.size === 0
+      ) {
+        return;
+      }
 
-    return ensureArticleViewColor(msg1.text, item.colorDigits, ARTICLEVIEW_URL);
+      const all =
+        GM_getValue(
+          STOCK_CACHE_KEY,
+          {}
+        );
+
+      const clean = {};
+      const timestamp = Date.now();
+
+      for (
+        const [cacheKey, value]
+        of Object.entries(all || {})
+      ) {
+        if (
+          value &&
+          Number.isFinite(value.time) &&
+          timestamp - value.time <=
+            STOCK_CACHE_TTL_MS
+        ) {
+          clean[cacheKey] = value;
+        }
+      }
+
+      clean[key] = {
+        time: timestamp,
+        entries: [...stockMap.entries()],
+      };
+
+      const newest =
+        Object.entries(clean)
+          .sort(
+            (a, b) =>
+              (b[1]?.time || 0) -
+              (a[1]?.time || 0)
+          )
+          .slice(0, STOCK_CACHE_MAX);
+
+      GM_setValue(
+        STOCK_CACHE_KEY,
+        Object.fromEntries(newest)
+      );
+    } catch (error) {
+      console.warn(
+        '[VCP2|Naturana] Stockcache opslaan mislukt:',
+        error
+      );
+    }
+  }
+
+  function dropStockCache(sku) {
+    try {
+      const key =
+        String(sku || '')
+          .toUpperCase();
+
+      const all =
+        GM_getValue(
+          STOCK_CACHE_KEY,
+          {}
+        );
+
+      if (
+        all &&
+        Object.prototype.hasOwnProperty.call(
+          all,
+          key
+        )
+      ) {
+        delete all[key];
+
+        GM_setValue(
+          STOCK_CACHE_KEY,
+          all
+        );
+      }
+    } catch {}
   }
 
   // =========================================================
-  // Tool-side: local table read + sku
+  // Exact model zoeken
   // =========================================================
-  function readLocalTable(table) {
-    const rows = Array.from(table.querySelectorAll('tbody tr'));
-    const out = [];
 
-    for (const tr of rows) {
-      const maatRaw = tr.dataset.size || tr.children?.[0]?.textContent || '';
-      const maat = normalizeSizeKey(maatRaw);
-      if (!maat) continue;
+  function splitSku(pidColor) {
+    const raw =
+      String(pidColor || '')
+        .trim()
+        .toUpperCase();
 
-      const local = parseInt(String(tr.children?.[1]?.textContent || '').trim(), 10) || 0;
-      out.push({ tr, maat, local });
+    const match =
+      raw.match(/^(.+?)-(.*)$/);
+
+    const pid =
+      (
+        match ? match[1] : raw
+      ).trim();
+
+    const color =
+      (
+        match ? match[2] : ''
+      ).trim();
+
+    return {
+      pid,
+      colorDigits:
+        color.replace(/\D/g, ''),
+    };
+  }
+
+  function buildModelIndex(documentRoot) {
+    const index = new Map();
+
+    const spans =
+      Array.from(
+        documentRoot.querySelectorAll(
+          'span[id*="lblArticleNo"]'
+        )
+      );
+
+    for (const span of spans) {
+      const pid =
+        String(span.textContent || '')
+          .trim()
+          .toUpperCase();
+
+      if (!pid || index.has(pid)) {
+        continue;
+      }
+
+      const container =
+        span.closest('.mod-container-col');
+
+      if (!container) {
+        continue;
+      }
+
+      const link =
+        container.querySelector(
+          'a[id*="linkArticleNo"][href*="__doPostBack"]'
+        );
+
+      const href =
+        link?.getAttribute('href') || '';
+
+      const postBack =
+        href.match(
+          /__doPostBack\('([^']+)'\s*,\s*'([^']*)'\)/i
+        );
+
+      if (!postBack) {
+        continue;
+      }
+
+      index.set(pid, {
+        pid,
+        eventTarget: postBack[1],
+        eventArgument:
+          postBack[2] || '',
+      });
     }
-    return out;
+
+    return index;
+  }
+
+  function findModelItemExact(
+    pidColor,
+    modelIndex
+  ) {
+    const {
+      pid,
+      colorDigits,
+    } = splitSku(pidColor);
+
+    if (
+      !pid ||
+      !colorDigits ||
+      !(modelIndex instanceof Map)
+    ) {
+      return null;
+    }
+
+    const indexed =
+      modelIndex.get(pid);
+
+    if (!indexed) {
+      return null;
+    }
+
+    return {
+      ...indexed,
+      colorDigits,
+    };
+  }
+
+  // =========================================================
+  // Exacte kleur selecteren
+  // =========================================================
+
+  async function ensureArticleViewColor(
+    html,
+    colorDigits,
+    fallbackUrl
+  ) {
+    const documentRoot =
+      parseHTML(html);
+
+    const current =
+      (
+        documentRoot.querySelector(
+          '.div-art-color .art-color-text'
+        )?.textContent || ''
+      ).trim() ||
+      (
+        documentRoot.querySelector(
+          '[id*="lblColorNr"]'
+        )?.textContent || ''
+      ).trim();
+
+    if (
+      String(current).replace(/\D/g, '') ===
+      String(colorDigits)
+    ) {
+      return html;
+    }
+
+    const colorBlocks =
+      Array.from(
+        documentRoot.querySelectorAll(
+          '.art-color'
+        )
+      );
+
+    const wanted =
+      colorBlocks.find((block) => {
+        const number =
+          (
+            block.querySelector(
+              '.art-color-no'
+            )?.textContent || ''
+          ).trim();
+
+        return (
+          String(number).replace(/\D/g, '') ===
+          String(colorDigits)
+        );
+      });
+
+    if (!wanted) {
+      throw new Error(
+        'TARGET_NOT_FOUND'
+      );
+    }
+
+    const image =
+      wanted.querySelector(
+        'input[type="image"][name*="btnSelectColor"]'
+      );
+
+    const imageName =
+      image?.getAttribute('name') || '';
+
+    if (!imageName) {
+      throw new Error(
+        'TARGET_NOT_FOUND'
+      );
+    }
+
+    const form =
+      documentRoot.querySelector('form');
+
+    if (!form) {
+      throw new Error(
+        'TARGET_NOT_FOUND'
+      );
+    }
+
+    const actionUrl =
+      getFormAction(
+        documentRoot,
+        fallbackUrl
+      );
+
+    const payload =
+      serializeForm(form);
+
+    if (!('__EVENTTARGET' in payload)) {
+      payload.__EVENTTARGET = '';
+    }
+
+    if (!('__EVENTARGUMENT' in payload)) {
+      payload.__EVENTARGUMENT = '';
+    }
+
+    addImageSubmit(
+      payload,
+      imageName
+    );
+
+    const response =
+      await httpPOST(
+        actionUrl,
+        payload
+      );
+
+    if (response.status >= 400) {
+      throw new Error(
+        `HTTP_${response.status}`
+      );
+    }
+
+    if (looksLikeLogin(response.text)) {
+      throw new Error(
+        'LOGIN_REQUIRED'
+      );
+    }
+
+    const checkDocument =
+      parseHTML(response.text);
+
+    const selectedColor =
+      (
+        checkDocument.querySelector(
+          '.div-art-color .art-color-text'
+        )?.textContent || ''
+      ).trim() ||
+      (
+        checkDocument.querySelector(
+          '[id*="lblColorNr"]'
+        )?.textContent || ''
+      ).trim();
+
+    if (
+      String(selectedColor)
+        .replace(/\D/g, '') !==
+      String(colorDigits)
+    ) {
+      throw new Error(
+        'TARGET_NOT_FOUND'
+      );
+    }
+
+    return response.text;
+  }
+
+  // =========================================================
+  // Voorraadstatus uitlezen
+  // =========================================================
+
+  function buildStockMapFromArticleView(
+    html
+  ) {
+    const map = new Map();
+    const doc = parseHTML(html);
+
+    const GREEN_DIRECT = '#2ae849';
+    const BLUE_FUTURE = '#1e6ae8';
+
+    function parseGermanInteger(value) {
+      const digits =
+        String(value ?? '')
+          .replace(/[^\d]/g, '');
+
+      if (!digits) {
+        return null;
+      }
+
+      const number =
+        parseInt(digits, 10);
+
+      return (
+        Number.isFinite(number) &&
+        number >= 0
+      )
+        ? number
+        : null;
+    }
+
+    const tiles =
+      Array.from(
+        doc.querySelectorAll(
+          '.color-size-grid .p-2.text-center, ' +
+          '.color-size-grid [id*="_divOID_"]'
+        )
+      );
+
+    for (const tile of tiles) {
+      const sizeElement =
+        tile.querySelector('.gridSize');
+
+      const input =
+        tile.querySelector(
+          'input.gridAmount'
+        );
+
+      if (!sizeElement || !input) {
+        continue;
+      }
+
+      const rawSize =
+        String(
+          sizeElement.textContent || ''
+        )
+          .trim()
+          .toUpperCase();
+
+      if (!rawSize) {
+        continue;
+      }
+
+      const sizeKey =
+        normalizeSizeKey(rawSize);
+
+      const rawMaximum =
+        input.getAttribute('max') ??
+        input.getAttribute('data-max') ??
+        input.dataset?.max ??
+        input.getAttribute('value') ??
+        input.value ??
+        '0';
+
+      const maximum =
+        parseGermanInteger(
+          rawMaximum
+        ) ?? 0;
+
+      const statusColor =
+        String(
+          tile.querySelector(
+            'input[type="hidden"][name*="hdfColorCode"]'
+          )?.value ||
+          input.style?.getPropertyValue(
+            '--availability-color'
+          ) ||
+          ''
+        )
+          .trim()
+          .toLowerCase();
+
+      const availabilityText =
+        String(
+          tile.querySelector(
+            '.gridAvailTxt, [id*="lblAvailabilityTxt"]'
+          )?.textContent || ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const deliveryText =
+        String(
+          tile.querySelector(
+            '.gridDelivTxt, [id*="lblDeliveryTxt"]'
+          )?.textContent || ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim();
+
+      const stockMatch =
+        availabilityText.match(
+          /\bBestand\s*([\d.]+)/i
+        );
+
+      const directStock =
+        stockMatch
+          ? parseGermanInteger(
+              stockMatch[1]
+            )
+          : null;
+
+      let quantity;
+      let reason;
+
+      if (input.disabled) {
+        quantity = 0;
+        reason = 'disabled';
+      } else if (
+        statusColor === BLUE_FUTURE
+      ) {
+        quantity = 0;
+
+        reason = deliveryText
+          ? `toekomst: ${deliveryText}`
+          : 'toekomstkleur';
+      } else if (
+        statusColor === GREEN_DIRECT &&
+        directStock !== null
+      ) {
+        quantity = directStock;
+
+        reason =
+          `direct Bestand ${directStock}`;
+      } else if (
+        statusColor === GREEN_DIRECT &&
+        deliveryText
+      ) {
+        quantity = 0;
+
+        reason =
+          `leverdatum zonder Bestand: ${deliveryText}`;
+      } else if (
+        statusColor === GREEN_DIRECT
+      ) {
+        quantity = maximum;
+
+        reason =
+          `direct max ${maximum}`;
+      } else {
+        console.warn(
+          `[VCP2|Naturana] ${rawSize}: ` +
+          'onbekende voorraadstatus ' +
+          `(kleur=${statusColor || '-'}, ` +
+          `Bestand=${availabilityText || '-'}, ` +
+          `levering=${deliveryText || '-'}); ` +
+          'maat overgeslagen.'
+        );
+
+        continue;
+      }
+
+      if (
+        g.StockCheckConfig
+          ?.detailLogging === true
+      ) {
+        console.info(
+          `[VCP2|Naturana] ${rawSize}: ` +
+          `remote ${quantity} ` +
+          `(${reason}; max=${maximum})`
+        );
+      }
+
+      for (
+        const candidate
+        of aliasCandidates(sizeKey)
+      ) {
+        map.set(
+          normalizeSizeKey(candidate),
+          quantity
+        );
+      }
+    }
+
+    return map;
+  }
+
+  // =========================================================
+  // ModellView ophalen
+  // =========================================================
+
+  async function refreshModelState(state) {
+    const response =
+      await httpGET(MODELVIEW_URL);
+
+    if (response.status >= 400) {
+      throw new Error(
+        `HTTP_${response.status}`
+      );
+    }
+
+    if (looksLikeLogin(response.text)) {
+      throw new Error(
+        'LOGIN_REQUIRED'
+      );
+    }
+
+    const documentRoot =
+      parseHTML(response.text);
+
+    const viewState =
+      pickViewState(documentRoot);
+
+    const modelIndex =
+      buildModelIndex(documentRoot);
+
+    if (
+      !viewState?.__VIEWSTATE ||
+      modelIndex.size === 0
+    ) {
+      throw new Error(
+        'TARGET_NOT_FOUND'
+      );
+    }
+
+    state.viewState = viewState;
+    state.modelIndex = modelIndex;
+    state.loadedAt = Date.now();
+
+    console.info(
+      '[VCP2|Naturana] ' +
+      `ModellView geïndexeerd: ` +
+      `${modelIndex.size} modellen.`
+    );
+  }
+
+  function invalidateModelState(state) {
+    state.viewState = null;
+    state.modelIndex = null;
+    state.loadedAt = 0;
+  }
+
+  // =========================================================
+  // Artikel openen
+  // =========================================================
+
+  async function openArticleViewExact(
+    pidColor,
+    state
+  ) {
+    let lastError = null;
+
+    for (
+      let attempt = 1;
+      attempt <= 2;
+      attempt += 1
+    ) {
+      try {
+        if (
+          !state.viewState ||
+          !(state.modelIndex instanceof Map)
+        ) {
+          await refreshModelState(state);
+        }
+
+        const item =
+          findModelItemExact(
+            pidColor,
+            state.modelIndex
+          );
+
+        if (!item) {
+          throw new Error(
+            'TARGET_NOT_FOUND'
+          );
+        }
+
+        const payload = {
+          __EVENTTARGET:
+            item.eventTarget || '',
+
+          __EVENTARGUMENT:
+            item.eventArgument || '',
+
+          __VIEWSTATE:
+            state.viewState.__VIEWSTATE,
+
+          __VIEWSTATEGENERATOR:
+            state.viewState
+              .__VIEWSTATEGENERATOR || '',
+
+          __EVENTVALIDATION:
+            state.viewState
+              .__EVENTVALIDATION || '',
+        };
+
+        const response =
+          await httpPOST(
+            MODELVIEW_URL,
+            payload
+          );
+
+        if (response.status >= 400) {
+          throw new Error(
+            `HTTP_${response.status}`
+          );
+        }
+
+        if (looksLikeLogin(response.text)) {
+          throw new Error(
+            'LOGIN_REQUIRED'
+          );
+        }
+
+        const html =
+          await ensureArticleViewColor(
+            response.text,
+            item.colorDigits,
+            ARTICLEVIEW_URL
+          );
+
+        const stockMap =
+          buildStockMapFromArticleView(
+            html
+          );
+
+        if (!stockMap.size) {
+          throw new Error(
+            'TARGET_NOT_FOUND'
+          );
+        }
+
+        return {
+          html,
+          stockMap,
+          attempt,
+        };
+      } catch (error) {
+        lastError = error;
+
+        const message =
+          String(
+            error?.message || error
+          );
+
+        if (
+          message === 'LOGIN_REQUIRED'
+        ) {
+          throw error;
+        }
+
+        invalidateModelState(state);
+
+        if (attempt < 2) {
+          console.warn(
+            `[VCP2|Naturana] ${pidColor}: ` +
+            `poging 1 mislukt (${message}); ` +
+            'verse ViewState ophalen.'
+          );
+
+          await delay(300);
+        }
+      }
+    }
+
+    throw (
+      lastError ||
+      new Error('TARGET_NOT_FOUND')
+    );
+  }
+
+  // =========================================================
+  // Lokale tabel
+  // =========================================================
+
+  function readLocalTable(table) {
+    const rows =
+      Array.from(
+        table.querySelectorAll(
+          'tbody tr'
+        )
+      );
+
+    const output = [];
+
+    for (const row of rows) {
+      const rawSize =
+        row.dataset.size ||
+        row.children?.[0]
+          ?.textContent ||
+        '';
+
+      const size =
+        normalizeSizeKey(rawSize);
+
+      if (!size) {
+        continue;
+      }
+
+      const local =
+        parseInt(
+          String(
+            row.children?.[1]
+              ?.textContent || ''
+          ).trim(),
+          10
+        ) || 0;
+
+      output.push({
+        tr: row,
+        maat: size,
+        local,
+      });
+    }
+
+    return output;
   }
 
   function getSkuFromTable(table) {
-    const id = String(table.id || '').trim();
-    if (id) return id;
+    const id =
+      String(table.id || '').trim();
 
-    const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || '';
-    const m = label.match(/\b[A-Z0-9]{3,}-[A-Z0-9]{2,}\b/);
-    return m ? m[0] : '';
+    if (id) {
+      return id;
+    }
+
+    const label =
+      table.querySelector(
+        'thead th[colspan]'
+      )?.textContent?.trim() || '';
+
+    const match =
+      label.match(
+        /\b[A-Z0-9]{3,}-[A-Z0-9]{2,}\b/
+      );
+
+    return match ? match[0] : '';
   }
 
-  function getMaxCap(_table) {
-    // Core bepaalt meestal caps/kleuren; als Core iets biedt, pak dat, anders 5
+  function getMaxCap(table) {
     try {
-      if (typeof Core.getMaxCap === 'function') return Core.getMaxCap(_table);
+      if (
+        typeof Core.getMaxCap ===
+        'function'
+      ) {
+        return Core.getMaxCap(table);
+      }
     } catch {}
+
     return 5;
   }
 
   // =========================================================
-  // Pas de centrale StockRules-mapping en reconciliatie toe.
+  // Vergelijken
   // =========================================================
-  function applyCompareAndMark(localRows, stockMap, maxCap) {
+
+  function applyCompareAndMark(
+    localRows,
+    stockMap,
+    maxCap
+  ) {
     const report = [];
 
-    for (const { tr } of localRows) Core.clearRowMarks(tr);
+    for (const { tr } of localRows) {
+      Core.clearRowMarks(tr);
+    }
 
-    for (const { tr, maat, local } of localRows) {
-      const remote = resolveRemoteQty(stockMap, maat);
+    for (
+      const {
+        tr,
+        maat,
+        local,
+      }
+      of localRows
+    ) {
+      const remote =
+        resolveRemoteQty(
+          stockMap,
+          maat
+        );
 
-      // remote ontbreekt voor deze maat => skip (geen fallback mapping)
-      if (typeof remote !== 'number') continue;
+      if (
+        typeof remote !== 'number'
+      ) {
+        console.warn(
+          `[VCP2|Naturana] Geen remote voorraad gevonden voor maat ${maat}.`
+        );
 
-      const target = SR.mapRemoteToTarget(BRAND_KEY, remote, maxCap);
-      const res = SR.reconcile(local, target, maxCap);
-
-      const delta = Number(res?.delta || 0);
-      let status = 'ok';
-
-      if (res?.action === 'bijboeken' && delta > 0) {
-        Core.markRow(tr, { action: 'add', delta, title: `Bijboeken ${delta} (target ${target}, remote ${remote})` });
-        status = 'bijboeken';
-
-      } else if (res?.action === 'uitboeken' && delta > 0) {
-        Core.markRow(tr, { action: 'remove', delta, title: `Uitboeken ${delta} (target ${target}, remote ${remote})` });
-        status = 'uitboeken';
-
-      } else {
-        Core.markRow(tr, { action: 'none', delta: 0, title: `OK (target ${target}, remote ${remote})` });
-        status = 'ok';
+        continue;
       }
 
-      report.push({ maat, local, remote, target, delta, status });
+      const target =
+        SR.mapRemoteToTarget(
+          BRAND_KEY,
+          remote,
+          maxCap
+        );
+
+      const result =
+        SR.reconcile(
+          local,
+          target,
+          maxCap
+        );
+
+      const delta =
+        Number(result?.delta || 0);
+
+      let status = 'ok';
+
+      if (
+        result?.action === 'bijboeken' &&
+        delta > 0
+      ) {
+        Core.markRow(tr, {
+          action: 'add',
+          delta,
+          title:
+            `Bijboeken ${delta} ` +
+            `(target ${target}, remote ${remote})`,
+        });
+
+        status = 'bijboeken';
+      } else if (
+        result?.action === 'uitboeken' &&
+        delta > 0
+      ) {
+        Core.markRow(tr, {
+          action: 'remove',
+          delta,
+          title:
+            `Uitboeken ${delta} ` +
+            `(target ${target}, remote ${remote})`,
+        });
+
+        status = 'uitboeken';
+      } else {
+        Core.markRow(tr, {
+          action: 'none',
+          delta: 0,
+          title:
+            `OK (target ${target}, remote ${remote})`,
+        });
+      }
+
+      report.push({
+        maat,
+        local,
+        remote,
+        target,
+        delta,
+        status,
+      });
     }
 
     return report;
   }
 
-  function bepaalStatus(report, stockMap) {
-    if (!stockMap || stockMap.size === 0) return 'niet-gevonden';
-    const diffs = report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
-    return diffs === 0 ? 'ok' : 'afwijking';
-  }
+  function bepaalStatus(
+    report,
+    stockMap
+  ) {
+    if (
+      !stockMap ||
+      stockMap.size === 0
+    ) {
+      return 'niet-gevonden';
+    }
 
-  function isNotFoundHttpError(msg) {
-    return /^HTTP_(401|403|404|410)$/i.test(msg) || /^HTTP_5\d\d$/i.test(msg);
+    const differences =
+      report.filter(
+        (row) =>
+          row.status === 'bijboeken' ||
+          row.status === 'uitboeken'
+      ).length;
+
+    return differences === 0
+      ? 'ok'
+      : 'afwijking';
   }
 
   // =========================================================
-  // Per table
+  // Eén product
   // =========================================================
-  async function perTableFactory(state) {
+
+  function perTableFactory(state) {
     return async function perTable(table) {
-      const sku = getSkuFromTable(table);
-      const label = table.querySelector('thead th[colspan]')?.textContent?.trim() || sku || 'onbekend';
+      const sku =
+        getSkuFromTable(table);
+
+      const label =
+        table.querySelector(
+          'thead th[colspan]'
+        )?.textContent?.trim() ||
+        sku ||
+        'onbekend';
+
       const anchorId = sku || label;
 
       if (!sku) {
-        Logger.status(anchorId, 'niet-gevonden');
-        Logger.perMaat(anchorId, []);
+        Logger.status(
+          anchorId,
+          'niet-gevonden'
+        );
+
+        Logger.perMaat(
+          anchorId,
+          []
+        );
+
         return 0;
       }
 
-      // remote ophalen + parse
-      let html;
-      let stockMap;
+      Logger.status(
+        anchorId,
+        'bezig'
+      );
 
-      try {
-        html = await openArticleViewExact(sku, state);
+      console.info(
+        `[VCP2|Naturana] ${sku}: controle gestart.`
+      );
 
-        if (!html || looksLikeLogin(html)) throw new Error('LOGIN_REQUIRED');
+      let stockMap =
+        readStockCache(sku);
 
-        stockMap = buildStockMapFromArticleView(html);
-        if (!stockMap || stockMap.size === 0) throw new Error('TARGET_NOT_FOUND');
+      if (stockMap) {
+        console.info(
+          `[VCP2|Naturana] ${sku}: voorraad uit korte cache.`
+        );
+      } else {
+        try {
+          const result =
+            await openArticleViewExact(
+              sku,
+              state
+            );
 
-      } catch (e) {
-        const msg = String(e?.message || e);
+          stockMap = result.stockMap;
 
-        // VCP2 foutafhandeling: 401/403/404/410/5xx, parse/login/targetfail -> niet-gevonden
-        if (msg === 'LOGIN_REQUIRED' || msg === 'TARGET_NOT_FOUND' || msg === 'bridge timeout' || isNotFoundHttpError(msg)) {
-          Logger.status(anchorId, 'niet-gevonden');
-          Logger.perMaat(anchorId, []);
+          if (
+            !stockMap ||
+            stockMap.size === 0
+          ) {
+            throw new Error(
+              'TARGET_NOT_FOUND'
+            );
+          }
+
+          writeStockCache(
+            sku,
+            stockMap
+          );
+        } catch (error) {
+          dropStockCache(sku);
+
+          const message =
+            String(
+              error?.message || error
+            );
+
+          console.warn(
+            `[VCP2|Naturana] ${sku}: ` +
+            'definitief mislukt na retry: ' +
+            message
+          );
+
+          Logger.status(
+            anchorId,
+            'niet-gevonden'
+          );
+
+          Logger.perMaat(
+            anchorId,
+            []
+          );
+
           return 0;
         }
-
-        // overige fouten ook niet-gevonden (geen alerts, geen debug dumps)
-        Logger.status(anchorId, 'niet-gevonden');
-        Logger.perMaat(anchorId, []);
-        return 0;
       }
 
-      const maxCap = getMaxCap(table);
-      const localRows = readLocalTable(table);
+      const maxCap =
+        getMaxCap(table);
 
-      const report = applyCompareAndMark(localRows, stockMap, maxCap);
-      Logger.status(anchorId, bepaalStatus(report, stockMap));
-      Logger.perMaat(anchorId, report);
+      const localRows =
+        readLocalTable(table);
 
-      return report.filter(r => r.status === 'bijboeken' || r.status === 'uitboeken').length;
+      const report =
+        applyCompareAndMark(
+          localRows,
+          stockMap,
+          maxCap
+        );
+
+      Logger.status(
+        anchorId,
+        bepaalStatus(
+          report,
+          stockMap
+        )
+      );
+
+      Logger.perMaat(
+        anchorId,
+        report
+      );
+
+      return report.filter(
+        (row) =>
+          row.status === 'bijboeken' ||
+          row.status === 'uitboeken'
+      ).length;
     };
   }
 
   // =========================================================
-  // Run (Core.runTables)
+  // Volledige controle
   // =========================================================
-  async function run(btn) {
-    const tables = Array.from(document.querySelectorAll('#output table'));
-    if (!tables.length) return;
 
-    if (!bridgeOnline()) {
-      btn.dataset.skState = 'fail';
-      btn.title = 'Naturana-bridge is niet actief';
-      alert('Open naturana-online.de in een tabblad, log in en laat dat tabblad open tijdens de controle.');
+  async function run(button) {
+    const tables =
+      Array.from(
+        document.querySelectorAll(
+          '#output table'
+        )
+      );
+
+    if (!tables.length) {
+      console.warn(
+        '[VCP2|Naturana] Geen producttabellen gevonden.'
+      );
+
       return;
     }
 
-    const state = { doc: null, vs: null };
-    const perTable = await perTableFactory(state);
+    if (!bridgeOnline()) {
+      button.dataset.skState = 'fail';
+
+      button.title =
+        'Naturana-bridge is niet actief';
+
+      alert(
+        'Open naturana-online.de in een tabblad, ' +
+        'log in en laat dat tabblad open tijdens ' +
+        'de controle.'
+      );
+
+      return;
+    }
+
+    console.info(
+      `[VCP2|Naturana] Start controle van ${tables.length} product(en).`
+    );
+
+    const state = {
+      viewState: null,
+      modelIndex: null,
+      loadedAt: 0,
+    };
+
+    const perTable =
+      perTableFactory(state);
 
     await Core.runTables({
-      btn,
+      btn: button,
       tables,
-      concurrency: 4,
-      perTable
+      concurrency: 1,
+      perTable,
     });
   }
 
   // =========================================================
-  // Supplier select (zelfde aanpak als Chantelle)
+  // Leverancier en knop
   // =========================================================
-  function normBlob(s='') { return String(s).toLowerCase().trim().replace(/[-_]+/g,' ').replace(/\s+/g,' '); }
-  function isNaturanaSelected() {
-    const sel = $('#leverancier-keuze');
-    if (!sel) return true;
-    const byValue = normBlob(sel.value || '');
-    const byText  = normBlob(sel.options?.[sel.selectedIndex]?.text || '');
-    return byValue.includes('naturana') || byText.includes('naturana');
+
+  function normBlob(value = '') {
+    return String(value)
+      .toLowerCase()
+      .trim()
+      .replace(/[-_]+/g, ' ')
+      .replace(/\s+/g, ' ');
   }
 
-  // =========================================================
-  // Tool UI
-  // =========================================================
+  function isNaturanaSelected() {
+    const select =
+      $('#leverancier-keuze');
+
+    if (!select) {
+      return true;
+    }
+
+    const byValue =
+      normBlob(select.value || '');
+
+    const byText =
+      normBlob(
+        select.options?.[
+          select.selectedIndex
+        ]?.text || ''
+      );
+
+    return (
+      byValue.includes('naturana') ||
+      byText.includes('naturana')
+    );
+  }
+
   if (ON_TOOL) {
     registerUserscript();
-    const mounted = Core.mountSupplierButton({
-      id: 'stock-check-naturana-btn',
-      text: 'Controleer Naturana',
-      right: 250,
-      top: 8,
-      match: () => isNaturanaSelected(),
-      onClick: (btn) => run(btn)
-    });
-    mounted.btn.innerHTML = '<i class="fa-solid fa-magnifying-glass-chart"></i>';
-    mounted.btn.setAttribute('aria-label', 'Controleer voorraad bij Naturana');
-    mounted.btn.title = 'Controleer voorraad bij Naturana';
-    installHeartbeatBadge(mounted.btn);
+
+    const mounted =
+      Core.mountSupplierButton({
+        id:
+          'stock-check-naturana-btn',
+
+        text:
+          'Controleer Naturana',
+
+        right: 250,
+        top: 8,
+
+        match: () =>
+          isNaturanaSelected(),
+
+        onClick: (button) =>
+          run(button),
+      });
+
+    mounted.btn.innerHTML =
+      '<i class="fa-solid fa-magnifying-glass-chart"></i>';
+
+    mounted.btn.setAttribute(
+      'aria-label',
+      'Controleer voorraad bij Naturana'
+    );
+
+    mounted.btn.title =
+      'Controleer voorraad bij Naturana';
+
+    installHeartbeatBadge(
+      mounted.btn
+    );
   }
 
-  // =========================================================
-  // Naturana bridge worker
-  // =========================================================
-  if (ON_NATURANA) workerInitBridge();
-
+  if (ON_NATURANA) {
+    workerInitBridge();
+  }
 })();
