@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO | Brands Watcher - Triumph & Sloggi
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Vergelijkt Triumph- en Sloggi-producten exact op stijl, kleur, maten, RSP en expliciete korting via de ingelogde B2B-bridge.
 // @match        https://lingerieoutlet.nl/tools/watcher/brands.html*
 // @match        https://b2b.triumph.com/*
@@ -13,8 +13,8 @@
 // @grant        unsafeWindow
 // @connect      www.dutchdesignersoutlet.com
 // @require      https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-triumph.user.js?v=0.2.0
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-triumph.user.js?v=0.2.0
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-triumph.user.js?v=0.2.1
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/watcher/adapters/brands-watcher-triumph.user.js?v=0.2.1
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -22,7 +22,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.2.0";
+  const VERSION = "0.2.1";
   const SUPPORTED_BRANDS = new Set(["Triumph", "Sloggi"]);
   const DEFAULT_EXPORT_TAG_ID = "221";
   const TIMEOUT_MS = 30000;
@@ -188,6 +188,17 @@
     return `https://www.dutchdesignersoutlet.com/admin.php?section=products&action=list&filter=tag_id&id=${encodeURIComponent(tagId)}`;
   }
 
+  function supplierProductUrl(brand, productId) {
+    const identity = exactProductIdentity(productId);
+    const catalog = brand === "Triumph"
+      ? "NL_TriumphPROD"
+      : brand === "Sloggi"
+        ? "NL_sloggiPROD"
+        : "";
+    if (!catalog) throw new Error(`Onbekend Triumph-catalogusmerk: ${brand}`);
+    return `https://b2b.triumph.com/products/${catalog}/${encodeURIComponent(identity.styleId)}/${encodeURIComponent(identity.colorCode)}`;
+  }
+
   function fetchDdoExport(tagId) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -234,6 +245,7 @@
         groups.set(exactSupplierId, {
           brand,
           productId: exactSupplierId,
+          supplierUrl: supplierProductUrl(brand, exactSupplierId),
           warehouseId: String(row.productid1 || firstValue(row, aliases.id) || "").match(/\d{5}/)?.[0] || "",
           productName: String(firstValue(row, aliases.name)).trim(),
           sku: exactSupplierId,
@@ -408,7 +420,15 @@
 
     page.addEventListener("brands-watcher:inventory-loaded", (event) => {
       if (!Array.isArray(event.detail?.products)) return;
-      products = event.detail.products.filter((product) => SUPPORTED_BRANDS.has(product.brand));
+      products = event.detail.products
+        .filter((product) => SUPPORTED_BRANDS.has(product.brand))
+        .map((product) => {
+          try {
+            return { ...product, supplierUrl: supplierProductUrl(product.brand, product.productId) };
+          } catch {
+            return { ...product, supplierUrl: "" };
+          }
+        });
     });
 
     page.addEventListener("brands-watcher:pause", (event) => {
@@ -441,6 +461,7 @@
       });
       return {
         ...product,
+        supplierUrl: supplierProductUrl(product.brand, product.productId),
         checkStatus: "checked",
         missingSizes,
         supplierRrp: remote.rsp,
