@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Core
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 2.4.0
+// @version 2.4.1
 // @description Statische toolbox met los installeerbare leverancieradapters.
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const VERSION='2.4.0', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
+  const VERSION='2.4.1', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
@@ -21,7 +21,7 @@
   const pruneState={known:false,count:0};
   const $=(s,r=document)=>r.querySelector(s), decode=e=>{try{return JSON.parse(e.detail||'{}')}catch{return {}}};
   const send=(name,data={})=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
-  const norm=v=>({'XL/2XL':'XL/XXL','2XL':'XXL','3XL':'XXXL','4XL':'XXXXL'}[String(v||'').trim().toUpperCase().replace(/\s+/g,'')]||String(v||'').trim().toUpperCase().replace(/\s+/g,''));
+  const norm=v=>({'XL/2L':'XL/XXL','XL/2XL':'XL/XXL','3L/4L':'3XL/4XL','2XL':'XXL','3XL':'XXXL','4XL':'XXXXL'}[String(v||'').trim().toUpperCase().replace(/\s+/g,'')]||String(v||'').trim().toUpperCase().replace(/\s+/g,''));
   const brand=()=>$(BRAND)?.getAttribute('title')||$(BRAND)?.textContent?.trim()||'';
   function tab3(){if($('#tabs .ui-tabs-active a[href="#tabs-3"],#tabs .active a[href="#tabs-3"]'))return true;const p=$('#tabs-3');return !!p&&getComputedStyle(p).display!=='none'&&p.getClientRects().length>0}
   function productEditPage(){const p=new URLSearchParams(location.search);return p.get('section')==='products'&&p.get('action')==='edit'&&!!p.get('id')}
