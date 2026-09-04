@@ -1674,9 +1674,9 @@
         );
 
       Logger.progress(
-        `Klaar — ` +
-        `${tables.length} producten gecontroleerd ` +
-        `in ${totalSec}s`
+        `Voorraad verwerken: ` +
+        `${tables.length}/${tables.length} ` +
+        `(100%)`
       );
 
       console.info(
@@ -1801,4 +1801,3 @@
     `article batching concurrency=${CONCURRENCY}`
   );
 })();
-
