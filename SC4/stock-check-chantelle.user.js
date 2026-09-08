@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stock Check | Chantelle & Femilet
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      5.2
+// @version      5.3
 // @description  Vergelijk de lokale voorraad van Chantelle en Femilet met de leverancier.
 // @author       C. P. van Beek
 // @match        https://lingerieoutlet.nl/tools/stockv4/*
@@ -33,7 +33,7 @@
       name: 'Stock Check | Chantelle & Femilet',
       version: typeof GM_info !== 'undefined'
         ? GM_info.script.version
-        : '5.2'
+        : '5.3'
     };
 
     g.__stockCheckUserscripts =
@@ -1389,81 +1389,109 @@ async function perTableWithBatchResult(
 // ================================================================
 
 (function hookApexRemoteTemplate() {
+  const xhrConstructors =
+    new Set();
+
+
   try {
-    const w = (
-      typeof unsafeWindow !== 'undefined'
-        ? unsafeWindow
-        : window
-    );
-
-    const XHR = w.XMLHttpRequest;
-
-    if (!XHR || XHR.prototype.__chantelleTemplateHooked) {
-      return;
+    if (window.XMLHttpRequest) {
+      xhrConstructors.add(
+        window.XMLHttpRequest
+      );
     }
+  } catch {}
 
-    XHR.prototype.__chantelleTemplateHooked = true;
 
-    const originalOpen = XHR.prototype.open;
-    const originalSend = XHR.prototype.send;
-
-    XHR.prototype.open = function(method, url) {
-      this.__chantelleUrl = String(url || '');
-
-      return originalOpen.apply(
-        this,
-        arguments
+  try {
+    if (
+      typeof unsafeWindow !== 'undefined' &&
+      unsafeWindow.XMLHttpRequest
+    ) {
+      xhrConstructors.add(
+        unsafeWindow.XMLHttpRequest
       );
-    };
+    }
+  } catch {}
 
 
-    XHR.prototype.send = function(body) {
-      try {
-        if (
-          /\/apexremote(?:\?|$)/i.test(
-            this.__chantelleUrl || ''
-          ) &&
-          typeof body === 'string'
-        ) {
-          const parsed = JSON.parse(body);
+  let hookedCount =
+    0;
 
-          const call = Array.isArray(parsed)
-            ? parsed.find(
-                x =>
-                  x?.action === 'ccCLProductMatrixRCBTCtrl' &&
-                  x?.method === 'getStock'
-              )
-            : null;
 
-          if (call) {
-            rpcTemplate = JSON.parse(
-              JSON.stringify(call)
-            );
+  for (const XHR of xhrConstructors) {
+    try {
+      const originalOpen =
+        XHR.prototype.open;
 
-            console.info(
-              '[chantelle-worker] ✅ geldige getStock RPC-template gevangen'
-            );
+      const originalSend =
+        XHR.prototype.send;
+
+
+      XHR.prototype.open = function(method, url) {
+        this.__chantelleUrl =
+          String(url || '');
+
+        return originalOpen.apply(
+          this,
+          arguments
+        );
+      };
+
+
+      XHR.prototype.send = function(body) {
+        try {
+          if (
+            /\/apexremote(?:\?|$)/i.test(
+              this.__chantelleUrl || ''
+            ) &&
+            typeof body === 'string'
+          ) {
+            const parsed =
+              JSON.parse(body);
+
+            const call =
+              Array.isArray(parsed)
+                ? parsed.find(
+                    x =>
+                      x?.action === 'ccCLProductMatrixRCBTCtrl' &&
+                      x?.method === 'getStock'
+                  )
+                : null;
+
+            if (call) {
+              rpcTemplate =
+                JSON.parse(
+                  JSON.stringify(call)
+                );
+
+              console.info(
+                '[chantelle-worker] ✅ geldige getStock RPC-template gevangen'
+              );
+            }
           }
-        }
-      } catch {}
+        } catch {}
 
-      return originalSend.apply(
-        this,
-        arguments
+        return originalSend.apply(
+          this,
+          arguments
+        );
+      };
+
+      hookedCount++;
+
+    } catch (e) {
+      console.warn(
+        '[chantelle-worker] XHR-context kon niet worden gekoppeld:',
+        e
       );
-    };
-
-
-    console.info(
-      '[chantelle-worker] apexremote template-sniffer actief'
-    );
-
-  } catch (e) {
-    console.warn(
-      '[chantelle-worker] template-sniffer kon niet starten:',
-      e
-    );
+    }
   }
+
+
+  console.info(
+    `[chantelle-worker] apexremote template-sniffer actief ` +
+    `(${hookedCount} XHR-context(en))`
+  );
 })();
 
     // -------------------------------------------------------------
@@ -3408,7 +3436,7 @@ const failedSkus =
 
 
     console.info(
-      `[chantelle-worker] v5.2 actief | directe apexremote batching max ${APEX_BATCH_SIZE}`
+      `[chantelle-worker] v5.3 actief | directe apexremote batching max ${APEX_BATCH_SIZE}`
     );
   }
 
