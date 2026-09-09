@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.6.0
+// @version      1.6.2
 // @description  Versleepbare toolbox met Beheerder/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.6.0';
+  const VERSION = '1.6.2';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -76,16 +76,16 @@
       ':host{position:fixed;right:10px;top:10px;width:215px;max-width:calc(100vw - 8px);z-index:99999999;color:#25313b;font:12px/1.25 system-ui}' +
       '*{box-sizing:border-box}.box{background:#fff;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0002;overflow:hidden}' +
       'header{height:28px;padding:0 8px;display:flex;align-items:center;justify-content:space-between;background:#263746;color:#fff;cursor:move;touch-action:none}' +
+      '.header-controls{display:flex;align-items:center;gap:7px}.collapse{border:0;background:transparent;color:#fff;width:22px;height:22px;padding:0;line-height:1;display:grid;place-items:center}.collapse svg{width:14px;height:14px}.box.collapsed>.user,.box.collapsed>.grid,.box.collapsed>footer{display:none}' +
       '.version{font-size:9px}.user{padding:7px 8px;border-bottom:1px solid #edf1f4;font-size:10px;overflow-wrap:anywhere}.role{color:#6d7880;margin-top:3px}' +
       '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px}' +
       'button{font:inherit;cursor:pointer}.feature{aspect-ratio:1;border:0;border-radius:4px;background:#d6dce1;color:#56616a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:6px;font-size:10px}' +
       '.feature.active{background:#18864b;color:white}.feature:disabled{color:#7b858d;cursor:not-allowed}.feature:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid #0877b9;outline-offset:2px}' +
       '.icon{display:block;width:27px;height:27px;flex-shrink:0}.icon svg{display:block;width:100%;height:100%}footer{padding:5px 7px;background:#f4f7f9;border-top:1px solid #dfe5e9;font-size:9px}' +
       'a,.check{color:#0877b9}.check{background:none;border:0;padding:0;font-size:10px}.update-state{margin-top:3px;overflow-wrap:anywhere}' +
-      '</style><div class="box" role="region" aria-label="GG Toolbox"><header><span>GG Toolbox</span><span class="version">v' + VERSION +
-      '</span></header><div class="user"><div class="name"></div><div class="role"></div></div><div class="grid"></div><footer><button type="button" class="check">Check op Updates</button> · <a class="install" target="_blank" rel="noopener noreferrer">Update-link</a><div class="update-state" role="status"></div></footer></div>';
+      '</style><div class="box" role="region" aria-label="GG Toolbox"><header><span>GG Toolbox</span><span class="header-controls"><span class="version">v' + VERSION +
+      '</span><button type="button" class="collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="user"><div class="name"></div><div class="role"></div></div><div class="grid"></div><footer><button type="button" class="check">Check op Updates</button><div class="update-state" role="status"></div></footer></div>';
     const $ = selector => root.querySelector(selector);
-    $('.install').href = UPDATE;
     for (const [id, feature] of Object.entries(FEATURES)) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'feature';
@@ -128,12 +128,25 @@
       host.style.left = Math.max(0, Math.min(innerWidth - host.offsetWidth, left)) + 'px';
       host.style.top = Math.max(0, Math.min(innerHeight - host.offsetHeight, top)) + 'px';
     };
+    function setCollapsed(collapsed, persist = true) {
+      $('.box').classList.toggle('collapsed', collapsed);
+      const button = $('.collapse');
+      button.setAttribute('aria-expanded', String(!collapsed));
+      button.title = collapsed ? 'Maximaliseren' : 'Minimaliseren';
+      button.setAttribute('aria-label', collapsed ? 'Toolbox maximaliseren' : 'Toolbox minimaliseren');
+      button.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' + (collapsed ? '<rect x="3" y="3" width="10" height="10" rx="1"/>' : '<path d="M3 11h10"/>') + '</svg>';
+      if (persist) write('collapsed', collapsed);
+      const rect = host.getBoundingClientRect();
+      clamp(rect.left, rect.top);
+    }
+    $('.collapse').onclick = () => setCollapsed(!$('.box').classList.contains('collapsed'));
+    setCollapsed(read('collapsed', false) === true, false);
     const saved = read('position', null);
     if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) clamp(saved.left, saved.top);
     const handle = $('header');
     let drag = null;
     handle.onpointerdown = event => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || event.target.closest('button')) return;
       const rect = host.getBoundingClientRect();
       drag = { x: event.clientX - rect.left, y: event.clientY - rect.top };
       handle.setPointerCapture(event.pointerId);
@@ -151,24 +164,33 @@
     function targets() {
       return [
         { label: 'Core', version: VERSION, url: UPDATE },
-        ...Object.values(FEATURES).map(feature => ({ label: feature.label, version: window[feature.adapter]?.version || '', url: ADAPTER_BASE + feature.file })),
+        ...Object.values(FEATURES).filter(feature => window[feature.adapter]?.version).map(feature => ({ label: feature.label, version: window[feature.adapter]?.version || '', url: ADAPTER_BASE + feature.file })),
       ];
     }
     function renderUpdate(cache) {
       const state = $('.update-state');
       state.replaceChildren();
       if (!cache?.results) { state.textContent = 'Nog niet gecontroleerd'; return; }
-      for (const item of cache.results) {
-        const row = document.createElement('div');
-        if (item.error) row.textContent = item.label + ': ' + item.error;
-        else if (!item.version || newer(item.remote, item.version)) {
+      const current = targets(), local = new Map(current.map(item => [item.url, item.version]));
+      const results = cache.results.filter(item => local.has(item.url));
+      const failures = results.filter(item => item.error);
+      const updates = results.filter(item => !item.error && newer(item.remote, local.get(item.url)));
+      const time = new Date(cache.at).toLocaleString('nl-NL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+      if (updates.length) {
+        state.append(updates.length + (updates.length === 1 ? ' update: ' : ' updates: '));
+        updates.forEach((item, index) => {
+          if (index) state.append(' · ');
           const link = document.createElement('a');
           link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-          link.textContent = item.label + ': ' + (item.version ? 'update naar v' : 'installeer v') + item.remote;
-          row.append(link);
-        } else row.textContent = item.label + ': up-to-date';
-        state.append(row);
-      }
+          link.textContent = item.label + ' v' + item.remote;
+          link.title = 'Download update voor ' + item.label;
+          link.style.textDecoration = 'underline';
+          state.append(link);
+        });
+      } else if (failures.length || results.length !== current.length) {
+        state.append('Controle onvolledig · ' + time);
+      } else state.append('Core + ' + (current.length - 1) + ' adapter(s) actueel · ' + time);
+      if (failures.length) state.append(document.createElement('br'), 'Mislukt: ' + failures.map(item => item.label + ' (' + item.error + ')').join(' · '));
     }
     function remoteVersion(target) {
       return new Promise(resolve => {
@@ -190,9 +212,14 @@
     async function checkUpdates() {
       if ($('.check').disabled) return;
       $('.check').disabled = true;
-      $('.update-state').textContent = 'Controleren…';
       const current = targets();
-      const results = await Promise.all(current.map(remoteVersion));
+      let finished = 0;
+      $('.update-state').textContent = 'Controleren… 0/' + current.length;
+      const results = await Promise.all(current.map(async target => {
+        const result = await remoteVersion(target);
+        $('.update-state').textContent = 'Controleren… ' + (++finished) + '/' + current.length;
+        return result;
+      }));
       const cache = { results, at: Date.now(), signature: JSON.stringify(current) };
       write('update', cache); renderUpdate(cache); $('.check').disabled = false;
     }
@@ -201,7 +228,7 @@
     renderUpdate(cache);
     setTimeout(() => {
       if (!cache || cache.signature !== JSON.stringify(targets()) || Date.now() - cache.at >= 86400000) checkUpdates();
-    }, 500);
+    }, 1500);
     paint();
   }
   if (document.body) queueMicrotask(startUI);
