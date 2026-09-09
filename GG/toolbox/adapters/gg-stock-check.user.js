@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Stock Check
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Stock Check voorbereiden, scans injecteren, bulklijst en foutieve EANs beheren.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        none
@@ -39,8 +39,12 @@
   }
   async function prepare() {
     prepared = '';
-    input(await waitFor(() => document.querySelector('#bulk_reason')), 'other');
-    input(await waitFor(() => document.querySelector('#other_reason')), 'Stock Check');
+    if (mode() === 'outgoing') {
+      input(await waitFor(() => document.querySelector('textarea#reason[name="reason"]')), 'Stock Check');
+    } else {
+      input(await waitFor(() => document.querySelector('#bulk_reason')), 'other');
+      input(await waitFor(() => document.querySelector('#other_reason')), 'Stock Check');
+    }
     if (mode() === 'incoming') {
       input(await waitFor(() => document.querySelector('#inbound_location')), 'otherLocation');
       const fancy = await waitFor(() => document.querySelector('.fancy-input-otherLocation,#picklocationSelect .fancy-input'));
@@ -100,7 +104,10 @@
   }
   async function inject() {
     if (prepared !== mode()) throw new Error('Bereid eerst het formulier voor');
-    if (document.querySelector('#other_reason')?.value !== 'Stock Check' || document.querySelector('#bulk_reason')?.value !== 'other') { prepared = ''; throw new Error('Formulier gewijzigd; bereid opnieuw voor'); }
+    const reasonCorrect = mode() === 'outgoing'
+      ? document.querySelector('textarea#reason[name="reason"]')?.value === 'Stock Check'
+      : document.querySelector('#other_reason')?.value === 'Stock Check' && document.querySelector('#bulk_reason')?.value === 'other';
+    if (!reasonCorrect) { prepared = ''; throw new Error('Formulier gewijzigd; bereid opnieuw voor'); }
     if (mode() === 'incoming' && (document.querySelector('#inbound_location')?.value !== 'otherLocation' || document.querySelector('#otherLocation')?.value !== selectedLocation)) { prepared='';throw new Error('Locatie gewijzigd; bereid opnieuw voor'); }
     if (pending) throw new Error('Bevestig eerst de vorige batch');
     if (unfinished()) throw new Error('Er staan nog onverwerkte scantaken');
@@ -175,6 +182,6 @@
     panel.querySelector('.stock-status').textContent=message+' · '+queue.reduce((sum,item)=>sum+item.qty,0)+' scans in lijst · '+failures().length+' unieke fouten';
   }
   function getState(){return {ready:allowed()&&!busy,reason:allowed()?'Bereid Stock Check-formulieren voor':'Open inkomende of uitgaande producten'};}
-  window.__ggStockCheck={version:'1.0.0',getState,run:()=>operation(prepare)};
+  window.__ggStockCheck={version:'1.0.1',getState,run:()=>operation(prepare)};
   setInterval(render,1000);
 })();
