@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.9.0
+// @version      1.10.1
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.9.0';
+  const VERSION = '1.10.1';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -32,7 +32,7 @@
     tabber: { label: 'Tabber', managerPlus: true, manager: true, picker: true, icon: 'tabs', adapter: '__ggTabber', file: 'gg-tabber.user.js' },
     openInDDO: { label: 'Open in DDO', managerPlus: true, manager: true, picker: false, icon: 'external', adapter: '__ggOpenInDDO', file: 'gg-open-in-ddo.user.js' },
     reserved: { label: 'Gereserveerd', managerPlus: true, manager: true, picker: true, icon: 'recycle', adapter: '__ggReserved', file: 'gg-gereserveerd.user.js' },
-    anitaSale: { label: 'Anita Sale', managerPlus: true, manager: false, picker: false, icon: 'sale', adapter: '__ggAnitaSale', file: 'gg-anita-sale.user.js' },
+    productDetails: { label: 'Product Details', managerPlus: true, manager: false, picker: false, icon: 'sale', adapter: '__ggAnitaSale', file: 'gg-product-details.user.js' },
   };
   // Eenvoudige lijnsymbolen: dezelfde maat, lijndikte en kleur voor alle iconen.
   const ICONS = {
