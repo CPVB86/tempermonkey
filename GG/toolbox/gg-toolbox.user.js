@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.10.2
+// @version      1.11.0
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.10.2';
+  const VERSION = '1.11.0';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -33,9 +33,11 @@
     openInDDO: { label: 'Open in DDO', managerPlus: true, manager: true, picker: false, icon: 'external', adapter: '__ggOpenInDDO', file: 'gg-open-in-ddo.user.js' },
     reserved: { label: 'Gereserveerd', managerPlus: true, manager: true, picker: true, icon: 'recycle', adapter: '__ggReserved', file: 'gg-gereserveerd.user.js' },
     productDetails: { label: 'Product Details', managerPlus: true, manager: false, picker: false, icon: 'sale', adapter: '__ggAnitaSale', file: 'gg-product-details.user.js' },
+    stockCheck: { label: 'Stock Check', managerPlus: true, manager: false, picker: false, icon: 'stock', adapter: '__ggStockCheck', file: 'gg-stock-check.user.js', action: true },
   };
   // Eenvoudige lijnsymbolen: dezelfde maat, lijndikte en kleur voor alle iconen.
   const ICONS = {
+    stock: '<path d="M4 4h16v16H4zM8 2v4m8-4v4M8 13l3 3 6-7"/>',
     sale: '<path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="7" cy="7" r="1"/><path d="m10 16 6-6"/><circle cx="11" cy="11" r="1"/><circle cx="15" cy="15" r="1"/>',
     recycle: '<path d="m8 7 3-5 4 7m-4-7 4 1m0 6 2-4m1 6 4 6H14m8 0-2 3m-6-3 3 3M11 21H4l4-7m-4 7-2-3m6-4-4 1"/>',
     external: '<path d="M14 3h7v7m0-7L10 14M10 3H3v18h18v-7"/>',
@@ -81,7 +83,7 @@
       ':host{position:fixed;right:10px;top:10px;width:215px;max-width:calc(100vw - 8px);z-index:99999999;color:#25313b;font:12px/1.25 system-ui}' +
       '*{box-sizing:border-box}.box{background:#fff;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0002;overflow:hidden}' +
       'header{height:28px;padding:0 8px;display:flex;align-items:center;justify-content:space-between;background:#263746;color:#fff;cursor:move;touch-action:none}' +
-      '.header-controls{display:flex;align-items:center;gap:7px}.collapse{border:0;background:transparent;color:#fff;width:22px;height:22px;padding:0;line-height:1;display:grid;place-items:center}.collapse svg{width:14px;height:14px}.box.collapsed>.user,.box.collapsed>.grid,.box.collapsed>footer{display:none}' +
+      '.header-controls{display:flex;align-items:center;gap:7px}.collapse{border:0;background:transparent;color:#fff;width:22px;height:22px;padding:0;line-height:1;display:grid;place-items:center}.collapse svg{width:14px;height:14px}.box.collapsed>.extras,.box.collapsed>.user,.box.collapsed>.grid,.box.collapsed>footer{display:none}' +
       '.version{font-size:9px}.user{padding:7px 8px;border-bottom:1px solid #edf1f4;font-size:10px;overflow-wrap:anywhere}.role{color:#6d7880;margin-top:3px}' +
       '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px}' +
       'button{font:inherit;cursor:pointer}.feature{aspect-ratio:1;border:0;border-radius:4px;background:#d6dce1;color:#56616a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:3px;font-size:9px;line-height:1.15;min-width:0;overflow-wrap:anywhere}' +
@@ -91,6 +93,15 @@
       '</style><div class="box" role="region" aria-label="GG Toolbox"><header><span>GG Toolbox</span><span class="header-controls"><span class="version">v' + VERSION +
       '</span><button type="button" class="collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="user"><div class="name"></div><div class="role"></div></div><div class="grid"></div><footer><button type="button" class="check">Check op Updates</button><div class="update-state" role="status"></div></footer></div>';
     const $ = selector => root.querySelector(selector);
+    window.__ggToolbox.getPanel = id => {
+      if (!enabled(id)) return null;
+      let panel = root.querySelector('[data-extra="' + id + '"]');
+      if (!panel) {
+        panel = document.createElement('section'); panel.className = 'extras'; panel.dataset.extra = id;
+        $('.box').insertBefore(panel, $('footer'));
+      }
+      return panel;
+    };
     for (const [id, feature] of Object.entries(FEATURES)) {
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'feature';
@@ -109,6 +120,7 @@
       const user = identity();
       $('.name').textContent = user.name || 'Gebruiker wordt geladen…';
       $('.role').textContent = user.role || 'Geen toegang';
+      root.querySelectorAll('[data-extra]').forEach(panel => { if (!enabled(panel.dataset.extra)) panel.remove(); });
       for (const button of root.querySelectorAll('[data-feature]')) {
         const feature = FEATURES[button.dataset.feature];
         const adapter = window[feature.adapter];
