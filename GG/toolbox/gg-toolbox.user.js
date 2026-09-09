@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.6.2
-// @description  Versleepbare toolbox met Beheerder/Manager/Picker-toegang en Barcode Fixer.
+// @version      1.9.0
+// @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -15,24 +15,29 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.6.2';
+  const VERSION = '1.9.0';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
-  // TOEGANG: manager en picker true/false per functie; Beheerder heeft altijd toegang.
+  // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
     Beheerder: ['Chantor Pascal van Beek'],
-    Manager: ['Folkert van Beek', 'Monique van Beek'],
+    'Manager+': ['Folkert van Beek'],
+    Manager: ['Monique van Beek'],
     Picker: ['Chantal Timmer', 'Anke Adams'],
   };
   const FEATURES = {
-    barcodeFixer: { label: 'Barcode Fixer', manager: true, picker: true, icon: 'barcode', adapter: '__ggBarcodeFixer', file: 'gg-barcode-fixer.user.js' },
-    wagroPrio: { label: 'WaGro Prio', manager: true, picker: true, icon: 'medal', adapter: '__ggWaGroPrio', file: 'gg-wagro-prio.user.js', action: true },
-    ddoProductLinker: { label: 'DDO Productlinker', manager: true, picker: false, icon: 'link', adapter: '__ggDDOProductLinker', file: 'gg-ddo-productlinker.user.js' },
-    twoOrder: { label: '2Order', manager: true, picker: false, icon: 'cart', adapter: '__gg2Order', file: 'gg-2order.user.js' },
-    tabber: { label: 'Tabber', manager: true, picker: true, icon: 'tabs', adapter: '__ggTabber', file: 'gg-tabber.user.js' },
-    openInDDO: { label: 'Open in DDO', manager: true, picker: false, icon: 'external', adapter: '__ggOpenInDDO', file: 'gg-open-in-ddo.user.js' },
+    barcodeFixer: { label: 'Barcode Fixer', managerPlus: true, manager: true, picker: true, icon: 'barcode', adapter: '__ggBarcodeFixer', file: 'gg-barcode-fixer.user.js' },
+    wagroPrio: { label: 'WaGro Prio', managerPlus: true, manager: true, picker: true, icon: 'medal', adapter: '__ggWaGroPrio', file: 'gg-wagro-prio.user.js', action: true },
+    ddoProductLinker: { label: 'DDO Productlinker', managerPlus: true, manager: true, picker: false, icon: 'link', adapter: '__ggDDOProductLinker', file: 'gg-ddo-productlinker.user.js' },
+    twoOrder: { label: '2Order', managerPlus: true, manager: false, picker: false, icon: 'cart', adapter: '__gg2Order', file: 'gg-2order.user.js' },
+    tabber: { label: 'Tabber', managerPlus: true, manager: true, picker: true, icon: 'tabs', adapter: '__ggTabber', file: 'gg-tabber.user.js' },
+    openInDDO: { label: 'Open in DDO', managerPlus: true, manager: true, picker: false, icon: 'external', adapter: '__ggOpenInDDO', file: 'gg-open-in-ddo.user.js' },
+    reserved: { label: 'Gereserveerd', managerPlus: true, manager: true, picker: true, icon: 'recycle', adapter: '__ggReserved', file: 'gg-gereserveerd.user.js' },
+    anitaSale: { label: 'Anita Sale', managerPlus: true, manager: false, picker: false, icon: 'sale', adapter: '__ggAnitaSale', file: 'gg-anita-sale.user.js' },
   };
   // Eenvoudige lijnsymbolen: dezelfde maat, lijndikte en kleur voor alle iconen.
   const ICONS = {
+    sale: '<path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="7" cy="7" r="1"/><path d="m10 16 6-6"/><circle cx="11" cy="11" r="1"/><circle cx="15" cy="15" r="1"/>',
+    recycle: '<path d="m8 7 3-5 4 7m-4-7 4 1m0 6 2-4m1 6 4 6H14m8 0-2 3m-6-3 3 3M11 21H4l4-7m-4 7-2-3m6-4-4 1"/>',
     external: '<path d="M14 3h7v7m0-7L10 14M10 3H3v18h18v-7"/>',
     tabs: '<rect x="3" y="7" width="14" height="14" rx="2"/><path d="M7 7V3h14v14h-4M3 11h14"/>',
     cart: '<path d="M2 3h3l3 12h11l3-9H6m2 9-1 3h12"/><circle cx="9" cy="21" r="1"/><circle cx="18" cy="21" r="1"/>',
@@ -54,7 +59,7 @@
   }
   function enabled(id) {
     const user = identity(), feature = FEATURES[id];
-    return !!feature && (user.role === 'Beheerder' || (user.role === 'Manager' && feature.manager === true) || (user.role === 'Picker' && feature.picker === true));
+    return !!feature && (user.role === 'Beheerder' || (user.role === 'Manager+' && feature.managerPlus === true) || (user.role === 'Manager' && feature.manager === true) || (user.role === 'Picker' && feature.picker === true));
   }
 
   window.__ggToolbox = { isEnabled: enabled, version: VERSION };
@@ -79,9 +84,9 @@
       '.header-controls{display:flex;align-items:center;gap:7px}.collapse{border:0;background:transparent;color:#fff;width:22px;height:22px;padding:0;line-height:1;display:grid;place-items:center}.collapse svg{width:14px;height:14px}.box.collapsed>.user,.box.collapsed>.grid,.box.collapsed>footer{display:none}' +
       '.version{font-size:9px}.user{padding:7px 8px;border-bottom:1px solid #edf1f4;font-size:10px;overflow-wrap:anywhere}.role{color:#6d7880;margin-top:3px}' +
       '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px}' +
-      'button{font:inherit;cursor:pointer}.feature{aspect-ratio:1;border:0;border-radius:4px;background:#d6dce1;color:#56616a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:6px;font-size:10px}' +
+      'button{font:inherit;cursor:pointer}.feature{aspect-ratio:1;border:0;border-radius:4px;background:#d6dce1;color:#56616a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:3px;font-size:9px;line-height:1.15;min-width:0;overflow-wrap:anywhere}' +
       '.feature.active{background:#18864b;color:white}.feature:disabled{color:#7b858d;cursor:not-allowed}.feature:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid #0877b9;outline-offset:2px}' +
-      '.icon{display:block;width:27px;height:27px;flex-shrink:0}.icon svg{display:block;width:100%;height:100%}footer{padding:5px 7px;background:#f4f7f9;border-top:1px solid #dfe5e9;font-size:9px}' +
+      '.icon{display:block;width:23px;height:23px;flex-shrink:0}.icon svg{display:block;width:100%;height:100%}footer{padding:5px 7px;background:#f4f7f9;border-top:1px solid #dfe5e9;font-size:9px}' +
       'a,.check{color:#0877b9}.check{background:none;border:0;padding:0;font-size:10px}.update-state{margin-top:3px;overflow-wrap:anywhere}' +
       '</style><div class="box" role="region" aria-label="GG Toolbox"><header><span>GG Toolbox</span><span class="header-controls"><span class="version">v' + VERSION +
       '</span><button type="button" class="collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="user"><div class="name"></div><div class="role"></div></div><div class="grid"></div><footer><button type="button" class="check">Check op Updates</button><div class="update-state" role="status"></div></footer></div>';
