@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GG Toolbox | Adapter | Anita Sale
+// @name         GG Toolbox | Adapter | Product Details
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.0.0
+// @version      1.1.2
 // @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-support en badmode-voorkeur.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @run-at       document-idle
@@ -10,8 +10,8 @@
 // @connect      b2b.anita.com
 // @author       Chantor van Beek
 // @author       Chantor van Beek
-// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/adapters/gg-anita-sale.user.js
-// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/adapters/gg-anita-sale.user.js
+// @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/adapters/gg-product-details.user.js
+// @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/adapters/gg-product-details.user.js
 // ==/UserScript==
 
 (function () {
@@ -19,8 +19,8 @@
 
     const window = unsafeWindow;
     if (window.__ggAnitaSale) return;
-    window.__ggAnitaSale = { version: '1.0.0' };
-    const allowed = () => /^\/orders\/view\//.test(location.pathname) && window.__ggToolbox?.isEnabled('anitaSale') === true;
+    window.__ggAnitaSale = { version: '1.1.2' };
+    const allowed = () => /^\/orders\/view\//.test(location.pathname) && window.__ggToolbox?.isEnabled('productDetails') === true;
 
     function buildSaleUrl(arnr, fbnr, vakn, koll) {
         return `https://b2b.anita.com/nl/shop/441/?fssc=N&vsas=&koll=${encodeURIComponent(
@@ -110,12 +110,58 @@
         return { koll, arnr, fbnr };
     }
 
+
+    function supplierDetails(productName) {
+        const name = String(productName || '').replace(/\s+/g, ' ').trim();
+        // Only the supplier-code segment immediately before [ext].
+        const match = name.match(/ - ([^]*?) - \[ext\]/i);
+        if (!match) return null;
+        let id = match[1].split(' - ').pop().trim();
+        let base = '';
+        if (/\b(?:pastunette|rebelle|robson|ringella|mundo|muchacho\w*|chicamala)\b/i.test(name)) return null;
+        if (/\b(?:anita|rosa\s+faia)\b/i.test(name)) {
+            const { arnr, fbnr, koll } = parseAnitaCode(id);
+            if (arnr) return { id, url:buildNormalUrl(arnr, fbnr, koll) };
+            return /^\d{4}[a-z]?(?:-\d)?$/i.test(id) ? { id, url:buildNormalUrl(id, '', '') } : null;
+        }
+        if (/^(?:chantelle|femilet)\b/i.test(name)) base = 'https://chantelle-lingerie.my.site.com/DefaultStore/ccrz__ProductDetails?sku=';
+        else if (/\bafter\s+eden\b/i.test(name)) { base = 'https://bcg.fashionportal.shop/item/'; id = id.replace(/[^a-z0-9]/gi, ''); }
+        else if (/\bmey\b/i.test(name)) { base = 'https://meyb2b.com/d-reorder-mey/search/products/'; id = id.split('-')[0].trim(); }
+        else if (/\b(?:wacoal|freya|fantasie|elomi)\b/i.test(name)) base = 'https://b2b.wacoal-europe.com/b2b/en/EUR/search/?text=';
+        else if (/\blisca\b/i.test(name)) { base = 'https://b2b-eu.lisca.com/catalogsearch/result/?q='; id = id.split('-')[0].trim(); }
+        else if (/\btriumph\b/i.test(name)) base = 'https://b2b.triumph.com/products/NL_TriumphPROD?search=';
+        else if (/\bsloggi\b/i.test(name)) base = 'https://b2b.triumph.com/products/NL_sloggiPROD?search=';
+        else if (/\blingadore\b/i.test(name)) base = 'https://b2b.lingadore.com/nl/catalog/item/';
+        else if (/\bsugar\s*candy\b/i.test(name)) base = 'https://b2b.cakelingerie.eu/search?controller=search&s=';
+        else if (/\b(?:charlie\s+choe|mila)\b/i.test(name)) { base = 'https://vangennip.itsperfect.it/webshop/search/'; id = id.split('-').slice(0, 2).join('-'); }
+        return base && id ? { id, url:base + encodeURIComponent(id) } : null;
+    }
+    function addSupplierLinks() {
+        for (const row of document.querySelectorAll('tr.normal')) {
+            const anchor = row.querySelector('td[data-field="picture"] a[data-product-uuid],.productDataTd a[data-product-uuid]');
+            const detail = anchor ? supplierDetails(anchor.textContent) : null;
+            const existing = row.querySelector('.gg-order-me-ext-link');
+            if (!detail) { existing?.remove(); continue; }
+            if (existing?.getAttribute('href') === detail.url) continue;
+            existing?.remove();
+            const link = document.createElement('a');
+            link.href = detail.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+            link.title = 'Open leverancier (' + detail.id + ')'; link.setAttribute('aria-label', link.title);
+            link.className = 'gg-order-me-ext-link';
+            link.style.cssText = 'display:inline-flex;vertical-align:middle;margin-left:4px;color:#0877b9';
+            link.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7m0-7L10 14M10 3H3v18h18v-7"/></svg>';
+            link.onclick = event => { if (!allowed()) event.preventDefault(); };
+            anchor.insertAdjacentElement('afterend', link);
+        }
+    }
+
     function processRows() {
         if (!allowed()) {
-            document.querySelectorAll('.anita-sale-marker,.anita-login-pill').forEach(el => el.remove());
+            document.querySelectorAll('.anita-sale-marker,.anita-login-pill,.gg-order-me-ext-link').forEach(el => el.remove());
             document.querySelectorAll('[data-anita-sale-checked]').forEach(row => delete row.dataset.anitaSaleChecked);
             return;
         }
+        addSupplierLinks();
         injectStyles();
 
         const rows = document.querySelectorAll('table.table tbody tr.normal');
