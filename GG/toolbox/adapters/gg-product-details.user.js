@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Product Details
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.1.2
+// @version      1.1.3
 // @description  Check Anita B2B sale status per kleur en toon een klikbare 🟩 (sale) of ⬛ (normaal) bij Anita/Rosa Faia met locatie 00. Extern, met koll-support en badmode-voorkeur.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @run-at       document-idle
@@ -19,7 +19,7 @@
 
     const window = unsafeWindow;
     if (window.__ggAnitaSale) return;
-    window.__ggAnitaSale = { version: '1.1.2' };
+    window.__ggAnitaSale = { version: '1.1.3' };
     const allowed = () => /^\/orders\/view\//.test(location.pathname) && window.__ggToolbox?.isEnabled('productDetails') === true;
 
     function buildSaleUrl(arnr, fbnr, vakn, koll) {
@@ -119,11 +119,8 @@
         let id = match[1].split(' - ').pop().trim();
         let base = '';
         if (/\b(?:pastunette|rebelle|robson|ringella|mundo|muchacho\w*|chicamala)\b/i.test(name)) return null;
-        if (/\b(?:anita|rosa\s+faia)\b/i.test(name)) {
-            const { arnr, fbnr, koll } = parseAnitaCode(id);
-            if (arnr) return { id, url:buildNormalUrl(arnr, fbnr, koll) };
-            return /^\d{4}[a-z]?(?:-\d)?$/i.test(id) ? { id, url:buildNormalUrl(id, '', '') } : null;
-        }
+        // Anita/Rosa Faia gebruiken uitsluitend de link van de salechecker.
+        if (/\b(?:anita|rosa\s+faia)\b/i.test(name)) return null;
         if (/^(?:chantelle|femilet)\b/i.test(name)) base = 'https://chantelle-lingerie.my.site.com/DefaultStore/ccrz__ProductDetails?sku=';
         else if (/\bafter\s+eden\b/i.test(name)) { base = 'https://bcg.fashionportal.shop/item/'; id = id.replace(/[^a-z0-9]/gi, ''); }
         else if (/\bmey\b/i.test(name)) { base = 'https://meyb2b.com/d-reorder-mey/search/products/'; id = id.split('-')[0].trim(); }
