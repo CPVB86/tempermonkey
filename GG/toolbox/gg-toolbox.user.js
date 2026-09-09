@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.10.1
+// @version      1.10.2
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.10.1';
+  const VERSION = '1.10.2';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -169,17 +169,29 @@
     function targets() {
       return [
         { label: 'Core', version: VERSION, url: UPDATE },
-        ...Object.values(FEATURES).filter(feature => window[feature.adapter]?.version).map(feature => ({ label: feature.label, version: window[feature.adapter]?.version || '', url: ADAPTER_BASE + feature.file })),
+        ...Object.entries(FEATURES).filter(([id, feature]) => enabled(id) || window[feature.adapter]?.version).map(([, feature]) => ({ label: feature.label, version: window[feature.adapter]?.version || '', url: ADAPTER_BASE + feature.file })),
       ];
     }
     function renderUpdate(cache) {
       const state = $('.update-state');
       state.replaceChildren();
-      if (!cache?.results) { state.textContent = 'Nog niet gecontroleerd'; return; }
-      const current = targets(), local = new Map(current.map(item => [item.url, item.version]));
+      const current = targets(), missing = current.filter(item => !item.version);
+      if (missing.length) {
+        state.append('Installeren: ');
+        missing.forEach((item, index) => {
+          if (index) state.append(' · ');
+          const link = document.createElement('a');
+          link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.textContent = item.label; link.title = 'Installeer ' + item.label + ' (adapter niet geladen)';
+          state.append(link);
+        });
+        state.append(document.createElement('br'));
+      }
+      if (!cache?.results) { state.append('Nog niet gecontroleerd'); return; }
+      const local = new Map(current.map(item => [item.url, item.version]));
       const results = cache.results.filter(item => local.has(item.url));
       const failures = results.filter(item => item.error);
-      const updates = results.filter(item => !item.error && newer(item.remote, local.get(item.url)));
+      const updates = results.filter(item => !item.error && local.get(item.url) && newer(item.remote, local.get(item.url)));
       const time = new Date(cache.at).toLocaleString('nl-NL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
       if (updates.length) {
         state.append(updates.length + (updates.length === 1 ? ' update: ' : ' updates: '));
@@ -192,7 +204,7 @@
           link.style.textDecoration = 'underline';
           state.append(link);
         });
-      } else if (failures.length || results.length !== current.length) {
+      } else if (failures.length || results.length !== current.length || missing.length) {
         state.append('Controle onvolledig · ' + time);
       } else state.append('Core + ' + (current.length - 1) + ' adapter(s) actueel · ' + time);
       if (failures.length) state.append(document.createElement('br'), 'Mislukt: ' + failures.map(item => item.label + ' (' + item.error + ')').join(' · '));
@@ -234,6 +246,15 @@
     setTimeout(() => {
       if (!cache || cache.signature !== JSON.stringify(targets()) || Date.now() - cache.at >= 86400000) checkUpdates();
     }, 1500);
+    let lastTargets = JSON.stringify(targets());
+    setInterval(() => {
+      const signature = JSON.stringify(targets());
+      if (!$('.check').disabled && signature !== lastTargets) {
+        lastTargets = signature;
+        renderUpdate(read('update', null));
+        checkUpdates();
+      }
+    }, 2000);
     paint();
   }
   if (document.body) queueMicrotask(startUI);
