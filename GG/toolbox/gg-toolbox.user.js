@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.11.0
+// @version      1.12.0
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.11.0';
+  const VERSION = '1.12.0';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -33,7 +33,7 @@
     openInDDO: { label: 'Open in DDO', managerPlus: true, manager: true, picker: false, icon: 'external', adapter: '__ggOpenInDDO', file: 'gg-open-in-ddo.user.js' },
     reserved: { label: 'Gereserveerd', managerPlus: true, manager: true, picker: true, icon: 'recycle', adapter: '__ggReserved', file: 'gg-gereserveerd.user.js' },
     productDetails: { label: 'Product Details', managerPlus: true, manager: false, picker: false, icon: 'sale', adapter: '__ggAnitaSale', file: 'gg-product-details.user.js' },
-    stockCheck: { label: 'Stock Check', managerPlus: true, manager: false, picker: false, icon: 'stock', adapter: '__ggStockCheck', file: 'gg-stock-check.user.js', action: true },
+    stockCheck: { label: 'Stock Check', managerPlus: true, manager: false, picker: false, icon: 'stock', adapter: '__ggStockCheck', file: 'gg-stock-check.user.js' },
   };
   // Eenvoudige lijnsymbolen: dezelfde maat, lijndikte en kleur voor alle iconen.
   const ICONS = {
