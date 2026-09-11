@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.13.0
+// @version      1.14.0
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.13.0';
+  const VERSION = '1.14.0';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -35,9 +35,11 @@
     productDetails: { label: 'Product Details', managerPlus: true, manager: false, picker: false, icon: 'sale', adapter: '__ggAnitaSale', file: 'gg-product-details.user.js' },
     stockCheck: { label: 'Stock Check', managerPlus: true, manager: false, picker: false, icon: 'stock', adapter: '__ggStockCheck', file: 'gg-stock-check.user.js' },
     warehousing: { label: 'Warehousing', managerPlus: false, manager: false, picker: false, icon: 'warehouse', adapter: '__ggWarehousing', file: 'gg-warehousing.user.js' },
+    workspace: { label: 'Workspace', managerPlus: true, manager: true, picker: false, icon: 'workspace', adapter: '__ggWorkspace', file: 'gg-workspace.user.js', action: true },
   };
   // Eenvoudige lijnsymbolen: dezelfde maat, lijndikte en kleur voor alle iconen.
   const ICONS = {
+    workspace: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11m3-7h6m-6 3h4"/>',
     warehouse: '<path d="m2 9 10-6 10 6v12H2V9Zm4 12V11h12v10M6 15h12M6 18h12"/>',
     stock: '<path d="M4 4h16v16H4zM8 2v4m8-4v4M8 13l3 3 6-7"/>',
     sale: '<path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="7" cy="7" r="1"/><path d="m10 16 6-6"/><circle cx="11" cy="11" r="1"/><circle cx="15" cy="15" r="1"/>',
