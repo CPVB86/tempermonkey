@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Workspace
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Klantberichten maken vanuit een geopende GoedGepickt-order.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        unsafeWindow
@@ -31,7 +31,7 @@
     try { instance ||= initialize(); instance.host.hidden=false; await instance.open(); }
     catch(error) { if(allowed()) alert(error.message); }
   }
-  page.__ggWorkspace = {version:'1.0.0',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
+  page.__ggWorkspace = {version:'1.1.0',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
   setInterval(()=>{if(instance && !allowed()){instance.close();instance.host.hidden=true;}},1000);
   function initialize() {
     requireAccess();
@@ -103,7 +103,7 @@
     <div class="backdrop" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="ddo-title">
         <aside class="side"><p class="eyebrow">Dutch Designers Outlet</p><h2>Workspace</h2><p class="action-label" style="margin-top:24px">Handeling</p><div class="actions"></div><div class="order-card"><span>Geopende order</span><div class="order-link-row"><a class="order-number" href="#" target="_blank" rel="noopener">Laden…</a><button class="copy-order-data" type="button" title="Kopieer onderzoeksregel" aria-label="Kopieer onderzoeksregel"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div><div class="order-customer"><small>Klantgegevens ophalen</small></div></div></aside>
-        <main class="main"><div class="language-switch" aria-label="Taal"></div><button class="gmail-settings" type="button" title="Gmail instellen" aria-label="Gmail instellen">⚙</button><button class="close" type="button" aria-label="Sluiten">×</button><div class="gmail-config" hidden><label for="ddo-gmail-url">Apps Script /exec-URL</label><input id="ddo-gmail-url" class="gmail-url" type="url" spellcheck="false" placeholder="https://script.google.com/.../exec"><label for="ddo-gmail-secret">Toegangssleutel</label><input id="ddo-gmail-secret" class="gmail-secret" type="password" autocomplete="off" spellcheck="false"><label for="ddo-gmail-account">Gmail-accountslot (0, 1, 2, …)</label><input id="ddo-gmail-account" class="gmail-account" type="number" min="0" step="1" inputmode="numeric" value="1"><label class="signature-option"><input class="gmail-signature" type="checkbox" checked> Standaardhandtekening gebruiken</label><button class="save-gmail" type="button">Opslaan</button><p class="config-status"></p></div><div class="loading"><div><div class="spinner"></div><span>Ordergegevens ophalen…</span></div></div><section class="editor" hidden><div class="grid"><div class="scenario-wrap" hidden><label class="field-label" for="ddo-scenario">Scenario</label><select id="ddo-scenario" class="scenario"></select></div><div class="field full"><label for="ddo-subject">Onderwerp</label><input id="ddo-subject" class="subject"></div><div class="dynamic-fields"></div><div class="field full"><label>Bericht</label><div class="message" contenteditable="true" role="textbox" aria-multiline="true"></div></div></div><div class="copyrow"><button class="copy" id="copyMessage" type="button">Kopieer bericht</button><button class="copy" id="createGmailDraft" type="button">Maak bericht</button></div></section></main>
+        <main class="main"><div class="language-switch" aria-label="Taal"></div><button class="gmail-settings" type="button" title="Gmail instellen" aria-label="Gmail instellen">⚙</button><button class="close" type="button" aria-label="Sluiten">×</button><div class="gmail-config" hidden><p>Toegang via je @dutchdesignersoutlet.com-account.</p><a class="google-login" target="_blank" rel="noopener noreferrer">Inloggen bij Google</a><label for="ddo-google-account">Jouw Google-bedrijfsaccount (optioneel)</label><input id="ddo-google-account" class="google-account" type="email" placeholder="naam@dutchdesignersoutlet.com"><p>Bij meerdere Google-accounts kun je hier je bedrijfsaccount kiezen. De conceptmailbox wordt automatisch bepaald.</p><label class="signature-option"><input class="gmail-signature" type="checkbox" checked> Standaardhandtekening gebruiken</label><button class="save-gmail" type="button">Opslaan</button><p class="config-status"></p></div><div class="loading"><div><div class="spinner"></div><span>Ordergegevens ophalen…</span></div></div><section class="editor" hidden><div class="grid"><div class="scenario-wrap" hidden><label class="field-label" for="ddo-scenario">Scenario</label><select id="ddo-scenario" class="scenario"></select></div><div class="field full"><label for="ddo-subject">Onderwerp</label><input id="ddo-subject" class="subject"></div><div class="dynamic-fields"></div><div class="field full"><label>Bericht</label><div class="message" contenteditable="true" role="textbox" aria-multiline="true"></div></div></div><div class="copyrow"><button class="copy" id="copyMessage" type="button">Kopieer bericht</button><button class="copy" id="createGmailDraft" type="button">Maak bericht</button></div></section></main>
       </section>
     </div>`;
   document.documentElement.append(host);
@@ -247,9 +247,9 @@
     button.textContent = '✓';
     setTimeout(() => { button.innerHTML = original; }, 1300);
   };
-  const GMAIL_URL_KEY = 'ddoWorkspaceGmailWebAppUrl';
-  const GMAIL_SECRET_KEY = 'ddoWorkspaceGmailSecret';
-  const GMAIL_ACCOUNT_KEY = 'ddoWorkspaceGmailAccount';
+  const GMAIL_WEB_APP_URL = 'https://script.google.com/a/macros/dutchdesignersoutlet.com/s/AKfycbzRj2qvNtS0SNY0EiWYrdGSL3yZvpcEyeMNx9iiz_ouK8vRo7XzbDeHWLr0ai3Y9Cdt/exec';
+  const GMAIL_PROTOCOL = 'gg-workspace-google-v1';
+  const GOOGLE_EMAIL_KEY = 'ggWorkspaceGoogleEmail';
   const GMAIL_SIGNATURE_KEY = 'ddoWorkspaceGmailSignature';
   function validAppsScriptUrl(value) {
     try {
@@ -260,40 +260,78 @@
   }
   function configureGmail() {
     const panel = $('.gmail-config');
-    $('.gmail-url').value = GM_getValue(GMAIL_URL_KEY, '');
-    $('.gmail-secret').value = GM_getValue(GMAIL_SECRET_KEY, '');
-    $('.gmail-account').value = String(GM_getValue(GMAIL_ACCOUNT_KEY, 1));
+    $('.google-login').href = googleBridgeUrl().href;
+    $('.google-account').value = GM_getValue(GOOGLE_EMAIL_KEY, '');
     $('.gmail-signature').checked = GM_getValue(GMAIL_SIGNATURE_KEY, true);
     $('.config-status').textContent = '';
     panel.hidden = !panel.hidden;
-    if (!panel.hidden) setTimeout(() => $('.gmail-url').focus(), 0);
+    if (!panel.hidden) $('.google-login').focus();
   }
   $('.gmail-settings').onclick = configureGmail;
   $('.save-gmail').onclick = () => {
-    const url = $('.gmail-url').value.trim();
-    const secret = $('.gmail-secret').value.trim();
-    const account = Number($('.gmail-account').value);
+    const account = $('.google-account').value.trim().toLowerCase();
     const useSignature = $('.gmail-signature').checked;
-    if (!validAppsScriptUrl(url)) { $('.config-status').textContent = 'Gebruik een geldige Google /exec-URL.'; return; }
-    if (!secret) { $('.config-status').textContent = 'Vul de toegangssleutel in.'; return; }
-    if (!Number.isInteger(account) || account < 0) { $('.config-status').textContent = 'Het accountslot moet 0 of hoger zijn.'; return; }
-    GM_setValue(GMAIL_URL_KEY, url);
-    GM_setValue(GMAIL_SECRET_KEY, secret);
-    GM_setValue(GMAIL_ACCOUNT_KEY, account);
+    if (account && !/^[^\s@]+@dutchdesignersoutlet\.com$/.test(account)) { $('.config-status').textContent = 'Gebruik je @dutchdesignersoutlet.com-adres.'; return; }
+    GM_setValue(GOOGLE_EMAIL_KEY, account);
+    $('.google-login').href = googleBridgeUrl().href;
     GM_setValue(GMAIL_SIGNATURE_KEY, useSignature);
     $('.config-status').textContent = 'Instellingen opgeslagen.';
     setTimeout(() => { $('.gmail-config').hidden = true; }, 900);
   };
-  function createDraftRequest(payload) {
+  function googleBridgeUrl(email = GM_getValue(GOOGLE_EMAIL_KEY, '')) {
+    const url = new URL(GMAIL_WEB_APP_URL);
+    if (email) url.searchParams.set('authuser', email);
+    return url;
+  }
+  function gmailDraftUrl(result) {
+    if (!/^[^\s@]+@dutchdesignersoutlet\.com$/i.test(result.mailboxEmail || '')) throw new Error('De backend heeft geen geldige conceptmailbox teruggegeven.');
+    const url = new URL('https://mail.google.com/mail/');
+    url.searchParams.set('authuser', result.mailboxEmail);
+    url.hash = result.threadId ? 'drafts/' + encodeURIComponent(result.threadId) : 'drafts';
+    return url.href;
+  }
+  function bridgeRequest(method, payload, email) {
     requireAccess();
-    if(!validAppsScriptUrl(GM_getValue(GMAIL_URL_KEY,'')))throw new Error('Controleer de Google /exec-URL in de Workspace-instellingen');
+    const url = googleBridgeUrl(email);
+    if (method === 'GET') {
+      url.searchParams.set('action', 'session');
+      url.searchParams.set('_', String(Date.now()));
+    }
     return new Promise((resolve, reject) => GM_xmlhttpRequest({
-      method: 'POST', url: GM_getValue(GMAIL_URL_KEY, ''),
-      headers: { 'Content-Type': 'application/json' }, data: JSON.stringify(payload), timeout: 30000,
-      onload: response => { try { const result = JSON.parse(response.responseText); result.ok ? resolve(result) : reject(new Error(result.error || 'Concept maken is mislukt.')); } catch { reject(new Error('Apps Script gaf geen geldig antwoord.')); } },
-      onerror: () => reject(new Error('Apps Script kon niet worden bereikt.')),
-      ontimeout: () => reject(new Error('Apps Script reageerde niet op tijd.'))
+      method, url: url.href, anonymous: false,
+      headers: method === 'POST' ? { 'Content-Type': 'application/json' } : {},
+      ...(method === 'POST' ? {data: JSON.stringify(payload)} : {}), timeout: 60000,
+      onload: response => {
+        let result;
+        try { result = JSON.parse(response.responseText); }
+        catch { reject(new Error('Google-login nodig, of de backend is nog niet bijgewerkt. Open Inloggen bij Google via het tandwiel en probeer daarna opnieuw.')); return; }
+        if (response.status < 200 || response.status >= 300 || !result?.ok) {
+          reject(new Error(result?.error || 'Google-toegang geweigerd. Log in met je bedrijfsaccount.')); return;
+        }
+        resolve(result);
+      },
+      onerror: () => reject(new Error('Google kon niet worden bereikt.')),
+      ontimeout: () => reject(new Error('Google reageerde niet op tijd.'))
     }));
+  }
+  async function workspaceSession() {
+    const expected = GM_getValue(GOOGLE_EMAIL_KEY, '');
+    const session = await bridgeRequest('GET');
+    if (session.protocol !== GMAIL_PROTOCOL || !/^[^\s@]+@dutchdesignersoutlet\.com$/i.test(session.email || '') || !session.csrf) {
+      throw new Error('Werk eerst de Gmail-backend bij naar de versie met Google-login.');
+    }
+    if (expected && expected.toLowerCase() !== session.email.toLowerCase()) throw new Error('Google gebruikte een ander account. Selecteer je bedrijfsaccount via Inloggen bij Google.');
+    GM_setValue(GOOGLE_EMAIL_KEY, session.email.toLowerCase());
+    return session;
+  }
+  async function createDraftRequest(payload, session) {
+    requireAccess();
+    try {
+      return await bridgeRequest('POST', {...payload, csrf: session.csrf, requestId: crypto.randomUUID()}, session.email);
+    } catch (error) {
+      // Never repeat a POST automatically: its response may have been lost after creating the draft.
+      throw new Error(error.message + ' Controleer eerst je Gmail-concepten voordat je opnieuw op Maak bericht klikt.');
+    }
   }
   function arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -342,29 +380,29 @@
   $('#createGmailDraft').onclick = async event => {
     requireAccess();
     if (!order?.email) return alert('Bij deze order is geen e-mailadres gevonden.');
-    if (!GM_getValue(GMAIL_URL_KEY, '') || !GM_getValue(GMAIL_SECRET_KEY, '')) {
-      $('.gmail-config').hidden = false;
-      $('.gmail-url').value = GM_getValue(GMAIL_URL_KEY, '');
-      $('.gmail-secret').value = GM_getValue(GMAIL_SECRET_KEY, '');
-      $('.gmail-account').value = String(GM_getValue(GMAIL_ACCOUNT_KEY, 1));
-      $('.gmail-signature').checked = GM_getValue(GMAIL_SIGNATURE_KEY, true);
-      $('.config-status').textContent = 'Vul eerst beide instellingen in en sla ze op.';
-      return;
-    }
     const button = event.currentTarget;
-    button.disabled = true; button.textContent = 'Bericht maken…';
+    if (button.disabled) return;
+    button.disabled = true; button.textContent = 'Google controleren…';
     try {
+      const session = await workspaceSession();
+      requireAccess();
+      button.textContent = 'Bericht maken…';
       const action = ACTIONS[selectedAction];
       const scenario = currentScenario();
       const attachmentType = scenario?.attachment || action.attachment;
       const effectiveLang = scenario?.language || selectedLang;
       const attachments = attachmentType === 'invoice' ? [await downloadInvoice(order.orderId)] : attachmentType === 'nov' ? [await downloadNovStatement(effectiveLang)] : [];
-      const result = await createDraftRequest({ action: 'createDraft', secret: GM_getValue(GMAIL_SECRET_KEY, ''), to: scenario?.recipient || action.recipient || order.email, subject: $('.subject').value, htmlBody: $('.message').innerHTML, plainBody: $('.message').innerText, useSignature: GM_getValue(GMAIL_SIGNATURE_KEY, true), attachments });
+      const result = await createDraftRequest({ action: 'createDraft', to: scenario?.recipient || action.recipient || order.email, subject: $('.subject').value, htmlBody: $('.message').innerHTML, plainBody: $('.message').innerText, useSignature: GM_getValue(GMAIL_SIGNATURE_KEY, true), attachments }, session);
       button.textContent = 'Bericht gemaakt';
-      const account = GM_getValue(GMAIL_ACCOUNT_KEY, 1);
-      const draftPath = result.threadId ? `#drafts/${encodeURIComponent(result.threadId)}` : '#drafts';
-      window.open(`https://mail.google.com/mail/u/${account}/${draftPath}`, '_blank', 'noopener');
-    } catch (error) { alert(error.message); button.textContent = 'Maak bericht'; }
+      window.open(gmailDraftUrl(result), '_blank', 'noopener');
+    } catch (error) {
+      $('.google-login').href = googleBridgeUrl().href;
+      $('.google-account').value = GM_getValue(GOOGLE_EMAIL_KEY, '');
+      $('.gmail-signature').checked = GM_getValue(GMAIL_SIGNATURE_KEY, true);
+      $('.gmail-config').hidden = false;
+      $('.config-status').textContent = error.message;
+      button.textContent = 'Maak bericht';
+    }
     finally { button.disabled = false; setTimeout(() => { button.textContent = 'Maak bericht'; }, 1800); }
   };
 
