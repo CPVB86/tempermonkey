@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Workspace
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.1.7
+// @version      1.1.8
 // @description  Klantberichten maken vanuit een geopende GoedGepickt-order.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        unsafeWindow
@@ -32,7 +32,7 @@
     try { instance ||= initialize(); instance.host.hidden=false; await instance.open(); }
     catch(error) { if(allowed()) alert(error.message); }
   }
-  page.__ggWorkspace = {version:'1.1.7',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
+  page.__ggWorkspace = {version:'1.1.8',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
   setInterval(()=>{if(instance && !allowed()){instance.close();instance.host.hidden=true;}},1000);
   function initialize() {
     requireAccess();
@@ -249,7 +249,7 @@
     button.textContent = '✓';
     setTimeout(() => { button.innerHTML = original; }, 1300);
   };
-  const GMAIL_WEB_APP_URL = 'https://script.google.com/a/macros/dutchdesignersoutlet.com/s/AKfycbz0f3rllMOPimRDAuK_8lETNftwnYI6ZwuUUcuvmW3Bz4jCxy9CwWWkbWm7ch7Wzrg2/exec';
+  const GMAIL_WEB_APP_URL = 'https://script.google.com/a/macros/dutchdesignersoutlet.com/s/AKfycbwii3uoOCZo_AnkkldYzbIybHbCYePh9FcLeLGeYk95XGJ2iPXyOfHsGkgBoHf1QY-J/exec';
   const GMAIL_PROTOCOL = 'gg-workspace-google-v1';
   const GOOGLE_EMAIL_KEY = 'ggWorkspaceGoogleEmail';
   const GMAIL_SIGNATURE_KEY = 'ddoWorkspaceGmailSignature';
