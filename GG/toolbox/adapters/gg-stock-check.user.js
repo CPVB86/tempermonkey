@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Stock Check
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.8.3
+// @version      1.8.7
 // @description  Stock Check voorbereiden, scans injecteren, bulklijst en foutieve EANs beheren.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        none
@@ -167,7 +167,15 @@
   async function failureAction() {
     if (failuresViewed()) {
       const eans=failures();
-      await navigator.clipboard.writeText(eans.join('\n'));
+      const reasons = new Map();
+      for (const row of tasks().filter(failedTask)) {
+        const ean = taskBarcode(row);
+        if (!ean) continue;
+        if (!reasons.has(ean)) reasons.set(ean, new Set());
+        const reason = failureReason(row).replace(/\s+/g, ' ').trim();
+        if (reason) reasons.get(ean).add(reason);
+      }
+      await navigator.clipboard.writeText(eans.map(ean => ean + '\t' + ([...(reasons.get(ean) || [])].join(' | ') || 'Geen reden vermeld')).join('\n'));
       message=eans.length+' unieke foutieve EANs gekopieerd.';
     } else clean();
   }
@@ -307,46 +315,64 @@
   const locationWarnings = new Set();
   const locationNotice = 'De volgende producten hebben geen geldige voorraadlocatie geselecteerd. Controleer de locatie en probeer het opnieuw.';
   const normalizeNotice = text => String(text || '').replace(/\s+/g,' ').trim();
+  const noticeSelector = '[data-notify="message"], #swal2-content, .swal2-html-container';
+  function warningSkus(text) {
+    return [...String(text || '').matchAll(/\b(\d{5})\s*[-‐‑–]\s*(\d{1,3})\s*[-‐‑–]\s*(\d{1,3})\b/g)].map(match=>match.slice(1).join('-'));
+  }
   function captureLocationNotice(notice) {
     if (!allowed() || mode() !== 'outgoing') return;
-    if (!normalizeNotice(notice.textContent).startsWith(locationNotice)) return;
+    const text = normalizeNotice(notice.textContent).toLowerCase();
+    if (!text.includes(locationNotice.split('.')[0].toLowerCase()) && !text.includes('mutatie groter dan de huidige vrije voorraad')) return;
     for (const item of notice.querySelectorAll('li')) {
       // textContent also joins SKU fragments split by the DDO product-link adapter.
-      const match = normalizeNotice(item.textContent).match(/\((\d{5}-\d{1,3}-\d{1,3})\)\s*$/);
-      if (match) locationWarnings.add(match[1]);
+      const skus=warningSkus(item.textContent);
+      if(skus.length)locationWarnings.add(skus[skus.length-1]);
     }
   }
   function inspectLocationNotices(node) {
     if (!node) return;
     if (node.nodeType === 3) node = node.parentElement;
     if (!node) return;
-    const parentNotice = node.closest?.('[data-notify="message"]');
+    const parentNotice = node.closest?.(noticeSelector);
     if (parentNotice) captureLocationNotice(parentNotice);
-    node.querySelectorAll?.('[data-notify="message"]').forEach(captureLocationNotice);
+    node.querySelectorAll?.(noticeSelector).forEach(captureLocationNotice);
   }
   function updateLocationWarnings() {
     const active = allowed() && mode() === 'outgoing';
     if (active) inspectLocationNotices(document);
     else locationWarnings.clear();
+    const rows = new Set(document.querySelectorAll('tr[data-product-uuid],tr[data-product_uuid],tr.rrr,tr.gg-stock-location-warning'));
+    const invalidRows = new Set();
+    for (const select of document.querySelectorAll('select.picklocationSelectPicker')) {
+      const row=select.closest('tr');if(!row)continue;
+      rows.add(row);
+      const selected=select.options?.[select.selectedIndex];
+      if(active && !select.disabled && (!selected || !select.value || selected.disabled || selected.parentElement?.disabled))invalidRows.add(row);
+      const amount = row.querySelector('input.times_scanned_input');
+      const rawFree = selected?.getAttribute?.('data-free_stock') ?? selected?.dataset?.free_stock;
+      const free = rawFree == null || String(rawFree).trim() === '' ? NaN : Number(rawFree);
+      const count = amount?.value == null || String(amount.value).trim() === '' ? NaN : Number(amount.value);
+      if (active && !select.disabled && Number.isFinite(free) && Number.isFinite(count) && Math.abs(count) > free) invalidRows.add(row);
+    }
     let style = document.getElementById('gg-stock-location-style');
-    if (active && locationWarnings.size && !style) {
+    if (active && (locationWarnings.size || invalidRows.size) && !style) {
       style=document.createElement('style');style.id='gg-stock-location-style';
       // Yellow takes priority over WaGro red/orange without removing those classifications.
       style.textContent='tr.gg-stock-location-warning.gg-stock-location-warning,tr.gg-stock-location-warning.gg-stock-location-warning>td{background-color:#f4d03f!important}';
       document.head.appendChild(style);
     } else if (!active) style?.remove();
-    const rows = new Set(document.querySelectorAll('tr[data-product-uuid],tr[data-product_uuid],tr.gg-stock-location-warning'));
     for (const row of rows) {
-      const cell=row.querySelector('td[data-field="ProductSKU"]');
-      const skus=(cell?.textContent || '').match(/\b\d{5}-\d{1,3}-\d{1,3}\b/g) || [];
-      const marked=active && skus.some(sku=>locationWarnings.has(sku));
+      const cell=row.querySelector('td[data-field="ProductSKU"]') || row.querySelector('td[data-field="productsku" i]');
+      const barcodeData=[...(row.querySelectorAll?.('[data-barcodes]') || [])].map(el=>el.getAttribute('data-barcodes')).join(' ');
+      const skus=warningSkus((cell?.textContent || row.textContent || '')+' '+barcodeData);
+      const marked=active && (invalidRows.has(row) || skus.some(sku=>locationWarnings.has(sku)));
       row.classList.toggle('gg-stock-location-warning',marked);
       const note=row.querySelector('.gg-stock-location-note');
       if (marked && !note) {
-        const target=row.querySelector('td.originalStockLocations') || cell;
+        const target=row.querySelector('td.originalStockLocations') || cell || row.querySelector('td');
         if (!target) continue;
         const icon=document.createElement('span');icon.className='gg-stock-location-note';icon.textContent='⚠ ';
-        icon.title='GG meldde voor dit product geen geldige voorraadlocatie. Controleer de locatie.';
+        icon.title='Geen geldige voorraadlocatie, aantal groter dan de vrije locatievoorraad of een GG-voorraadmelding ontvangen. Controleer locatie en aantal.';
         icon.setAttribute('aria-label',icon.title);target.prepend(icon);
       } else if (!marked) note?.remove();
     }
@@ -360,7 +386,7 @@
         mutation.addedNodes?.forEach(inspectLocationNotices);
         mutation.removedNodes?.forEach(inspectLocationNotices);
       }
-      if (locationWarnings.size) updateLocationWarnings();
+      updateLocationWarnings();
     });
     locationObserver.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
   }
@@ -495,9 +521,13 @@
     changeButton.setAttribute('aria-label',changeButton.title);
 
   }
+  let lastRenderMode = null;
   function render() {
-    const wagroCount = updateWaGro();
-    updateLocationWarnings();
+    const currentMode = mode();
+    const outgoingOrChanged = currentMode === 'outgoing' || currentMode !== lastRenderMode;
+    const wagroCount = outgoingOrChanged ? updateWaGro() : 0;
+    if (outgoingOrChanged) updateLocationWarnings();
+    lastRenderMode = currentMode;
     if (!allowed()) { if(panel) panel.hidden=true;prepared='';return; }
     restore();mount();if(!panel)return;panel.hidden=false;
     const flow=flowState();
@@ -514,7 +544,7 @@
       if(id==='list')button.textContent=flow.label;
       if(id==='errors'){
         button.textContent=failuresViewed()?'📋 Kopieer':'⚠ Fouten';
-        button.title=failuresViewed()?'Kopieer unieke foutieve EANs':'Log opschonen en fouten bekijken';
+        button.title=failuresViewed()?'Kopieer unieke foutieve EANs met reden':'Log opschonen en fouten bekijken';
         if(!button.disabled){button.style.background='#f4d03f';button.style.color='#111';}
       }
       if(id==='errors'||id==='wagro'||id==='wagroChange'){
@@ -528,6 +558,6 @@
     status.hidden=!status.textContent;
   }
   function getState(){return {ready:allowed()&&!busy,reason:allowed()?'Bereid Stock Check-formulieren voor':'Open inkomende of uitgaande producten'};}
-  window.__ggStockCheck={version:'1.8.3',getState,run:()=>operation(prepare)};
+  window.__ggStockCheck={version:'1.8.7',isActivated:()=>allowed() && !!mode() && prepared===mode(),isInjecting:()=>busy && mode()==='incoming',getState,run:()=>operation(prepare)};
   setInterval(render,1000);
 })();
