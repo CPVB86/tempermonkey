@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Workspace
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.1.5
+// @version      1.1.7
 // @description  Klantberichten maken vanuit een geopende GoedGepickt-order.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        unsafeWindow
@@ -32,7 +32,7 @@
     try { instance ||= initialize(); instance.host.hidden=false; await instance.open(); }
     catch(error) { if(allowed()) alert(error.message); }
   }
-  page.__ggWorkspace = {version:'1.1.5',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
+  page.__ggWorkspace = {version:'1.1.7',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
   setInterval(()=>{if(instance && !allowed()){instance.close();instance.host.hidden=true;}},1000);
   function initialize() {
     requireAccess();
@@ -100,11 +100,11 @@
       .gmail-settings{position:absolute;z-index:4;right:62px;top:17px;display:grid;width:36px;height:36px;place-items:center;border:0;border-radius:50%;background:#f0e9ee;color:#512056;font-size:17px;cursor:pointer}.gmail-settings:hover{background:#e6dce3}.gmail-config{position:absolute;z-index:5;right:18px;top:59px;width:min(310px,calc(100% - 36px));padding:13px;border:1px solid #ded3db;border-radius:12px;background:white;box-shadow:0 15px 40px #220c2630}.gmail-config[hidden]{display:none}.gmail-config label{display:block;margin:0 0 4px;color:#6c6070;font-size:9px;font-weight:800;text-transform:uppercase}.gmail-config input{width:100%;margin-bottom:8px;border:1px solid #d8cdd5;border-radius:7px;background:#fff;color:#2d1b30;padding:7px 8px;font-size:10px}.gmail-config .signature-option{display:flex;align-items:center;gap:6px;margin:2px 0 10px;text-transform:none}.gmail-config .signature-option input{width:auto;margin:0;padding:0} .gmail-config .signature-option[hidden]{display:none}.google-login:disabled{cursor:default}.google-login:not(:disabled){cursor:pointer}.config-status{min-height:15px;margin:6px 0 0;color:#39766d;font-size:9px}
       .scenario-wrap{grid-column:1/-1}.scenario-wrap label{display:block;margin:0 0 6px;color:#665a69;font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase}.scenario-wrap select{width:100%;border:1px solid #d8cdd5;border-radius:9px;background:#fff;color:#3b263e;padding:10px 11px;font-size:12px}.order-link-row{display:flex;align-items:center;gap:5px}.order-number{display:inline-block;margin:3px 0;color:white;font-size:17px;font-weight:800;text-decoration:none}.order-number:hover{text-decoration:underline}.copy-order-data{display:inline-flex;align-items:center;border:0;background:transparent;color:#bce9e1;padding:0;cursor:pointer}.copy-order-data:hover{color:white}
       @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&display=swap');:host{all:initial}*{box-sizing:border-box}button,input{font:inherit}.backdrop{position:fixed;z-index:2147483646;inset:0;display:grid;place-items:center;padding:20px;background:#21102599;backdrop-filter:blur(4px);font:14px/1.48 Inter,"Segoe UI",system-ui,sans-serif;color:#2d1b30}.backdrop[hidden]{display:none}.modal{position:relative;width:min(900px,100%);max-height:min(820px,calc(100vh - 40px));display:grid;grid-template-columns:285px minmax(0,1fr);border:1px solid #ffffff30;border-radius:23px;background:#fffdfb;box-shadow:0 35px 100px #13061675;overflow:hidden}.side{padding:28px 24px;background:linear-gradient(155deg,#421446,#642568);color:white;overflow:auto}.eyebrow{margin:0 0 6px;color:#a8e5da;font-size:10px;font-weight:850;letter-spacing:.15em;text-transform:uppercase}.side h2{margin:0;font:700 25px/1.2 Orbitron,sans-serif;letter-spacing:.02em}.side-intro{margin:9px 0 23px;color:#ddcede;font-size:12px}.action-label{margin:0 0 9px;color:#ddcede;font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase}.actions{display:grid;gap:8px}.action{display:grid;grid-template-columns:36px 1fr;gap:10px;align-items:center;width:100%;border:1px solid #ffffff20;border-radius:13px;background:#ffffff0b;color:white;padding:10px;text-align:left;cursor:pointer;transition:.14s}.action:hover{background:#ffffff17}.action.active{border-color:#93dfd2;background:#ffffff20;box-shadow:inset 3px 0 #72d0c1}.action i{display:grid;width:36px;height:36px;place-items:center;border-radius:10px;background:#ffffff16;color:#9ce3d7;font-style:normal;font-size:18px;font-weight:850}.action strong,.action small{display:block}.action small{margin-top:2px;color:#cdbbce;font-size:10px;line-height:1.3}.order-card{margin-top:22px;padding:13px;border:1px solid #ffffff18;border-radius:13px;background:#ffffff0b}.order-card span,.order-card strong,.order-card small{display:block}.order-card span{color:#cdbbce;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.order-card strong{margin:3px 0;font-size:17px}.order-card small{margin-top:3px;color:#d8c9da;overflow:hidden;text-overflow:ellipsis}.main{position:relative;padding:60px 34px 30px;overflow:auto}.close{position:absolute;right:18px;top:17px;display:grid;width:36px;height:36px;place-items:center;border:0;border-radius:50%;background:#f0e9ee;color:#512056;font-size:23px;cursor:pointer}.language-switch{position:absolute;left:34px;top:19px;display:flex;gap:4px}.language-switch button{border:1px solid #d9cfd6;border-radius:8px;background:white;color:#695c6b;padding:5px 8px;font-size:10px;font-weight:850;cursor:pointer}.language-switch button.active{border-color:#55205a;background:#55205a;color:white}.loading{display:grid;min-height:360px;place-items:center;color:#807582;text-align:center}.loading[hidden],.editor[hidden]{display:none}.spinner{width:35px;height:35px;margin:0 auto 13px;border:3px solid #dfd5dc;border-top-color:#68cabb;border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.error{max-width:410px;color:#af2945}.retry{margin-top:12px;border:0;border-radius:10px;background:#68cabb;color:#173c37;padding:9px 14px;font-weight:800;cursor:pointer}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dynamic-fields{display:contents}.field.full{grid-column:1/-1}.field label{display:block;margin:0 0 6px;color:#665a69;font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase}.field input{width:100%;border:1px solid #dcd2d9;border-radius:11px;background:white;color:#2d1b30;padding:11px 12px;outline:0}.field input:focus,.message:focus{border-color:#642568;box-shadow:0 0 0 3px #64256813}.message{min-height:280px;padding:16px;border:1px solid #dcd2d9;border-radius:11px;background:white;outline:0;line-height:1.55}.message p{margin:0 0 14px}.message a{color:#511c56;font-weight:700}.language-divider{margin:24px 0;border:0;border-top:2px solid #ded3db}.stars{color:#e8a000;letter-spacing:2px;font-size:17px}.copyrow{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.copy{border:1px solid #511c56;border-radius:10px;background:white;color:#511c56;padding:10px 14px;font-weight:800;cursor:pointer}.toast{position:absolute;right:22px;bottom:20px;border-radius:10px;background:#2d1b30;color:white;padding:10px 13px;box-shadow:0 8px 25px #0004}.toast[hidden]{display:none}@media(max-width:720px){.backdrop{padding:0}.modal{width:100%;height:100%;max-height:none;grid-template-columns:1fr;border-radius:0;overflow:auto}.side{padding:22px}.actions{grid-template-columns:repeat(2,1fr)}.action{display:block;text-align:center}.action i{margin:0 auto 5px}.action small{display:none}.order-card{display:none}.main{overflow:visible;padding:55px 20px 25px}.language-switch{left:20px}.grid{grid-template-columns:1fr}.field.full{grid-column:auto}}
-    </style>
+    .gmail-settings[hidden]{display:none}.main{padding-top:17px}.workspace-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding-right:30px;min-height:36px;margin-bottom:18px}.workspace-toolbar .language-switch{position:static;flex-wrap:wrap}.workspace-toolbar .google-login{margin-left:auto;white-space:nowrap}.workspace-toolbar .language-switch[hidden]{display:none}</style>
     <div class="backdrop" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="ddo-title">
         <aside class="side"><p class="eyebrow">Dutch Designers Outlet</p><h2>Workspace</h2><p class="action-label" style="margin-top:24px">Handeling</p><div class="actions"></div><div class="order-card"><span>Geopende order</span><div class="order-link-row"><a class="order-number" href="#" target="_blank" rel="noopener">Laden…</a><button class="copy-order-data" type="button" title="Kopieer onderzoeksregel" aria-label="Kopieer onderzoeksregel"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div><div class="order-customer"><small>Klantgegevens ophalen</small></div></div></aside>
-        <main class="main"><div class="language-switch" aria-label="Taal"></div><button class="gmail-settings" type="button" title="Gmail instellen" aria-label="Gmail instellen">⚙</button><button class="close" type="button" aria-label="Sluiten">×</button><div class="gmail-config" hidden><p class="google-session-status" role="status" aria-live="polite">Inlogstatus nog niet gecontroleerd.</p><button class="google-login" type="button" disabled style="display:inline-flex;align-items:center;gap:12px;padding:10px 16px;border:1px solid #747775;border-radius:20px;background:#fff;color:#1f1f1f;text-decoration:none;font-family:Arial,sans-serif;font-size:14px;font-weight:400"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.7-.4-4H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.2h6.7c3.9-3.6 6-8.9 6-15.2z"/><path fill="#34A853" d="M24 44c5.4 0 9.9-1.8 13.2-4.8l-6.7-5.2c-1.8 1.2-4 1.9-6.5 1.9-5.2 0-9.6-3.5-11.2-8.2H5.9V33A20 20 0 0 0 24 44z"/><path fill="#FBBC05" d="M12.8 27.7a12 12 0 0 1 0-7.4V15H5.9a20 20 0 0 0 0 18z"/><path fill="#EA4335" d="M24 12.1c2.9 0 5.5 1 7.5 2.9l5.6-5.6A19 19 0 0 0 24 4 20 20 0 0 0 5.9 15l6.9 5.3c1.6-4.7 6-8.2 11.2-8.2z"/></svg><span class="google-login-label">Google controleren…</span></button><label class="signature-option" hidden><input class="gmail-signature" type="checkbox" checked> Standaardhandtekening gebruiken</label><p class="config-status"></p></div><div class="loading"><div><div class="spinner"></div><span>Ordergegevens ophalen…</span></div></div><section class="editor" hidden><div class="grid"><div class="scenario-wrap" hidden><label class="field-label" for="ddo-scenario">Scenario</label><select id="ddo-scenario" class="scenario"></select></div><div class="field full"><label for="ddo-subject">Onderwerp</label><input id="ddo-subject" class="subject"></div><div class="dynamic-fields"></div><div class="field full"><label>Bericht</label><div class="message" contenteditable="true" role="textbox" aria-multiline="true"></div></div></div><div class="copyrow"><button class="copy" id="copyMessage" type="button">Kopieer bericht</button><button class="copy" id="createGmailDraft" type="button">Maak bericht</button></div></section></main>
+        <main class="main"><div class="workspace-toolbar"><div class="language-switch" aria-label="Taal"></div><button class="google-login" type="button" disabled style="display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid #747775;border-radius:20px;background:#fff;color:#1f1f1f;text-decoration:none;font-family:Arial,sans-serif;font-size:12px;font-weight:400"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.7-.4-4H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.2h6.7c3.9-3.6 6-8.9 6-15.2z"/><path fill="#34A853" d="M24 44c5.4 0 9.9-1.8 13.2-4.8l-6.7-5.2c-1.8 1.2-4 1.9-6.5 1.9-5.2 0-9.6-3.5-11.2-8.2H5.9V33A20 20 0 0 0 24 44z"/><path fill="#FBBC05" d="M12.8 27.7a12 12 0 0 1 0-7.4V15H5.9a20 20 0 0 0 0 18z"/><path fill="#EA4335" d="M24 12.1c2.9 0 5.5 1 7.5 2.9l5.6-5.6A19 19 0 0 0 24 4 20 20 0 0 0 5.9 15l6.9 5.3c1.6-4.7 6-8.2 11.2-8.2z"/></svg><span class="google-login-label">Google controleren…</span></button></div><button class="gmail-settings" hidden type="button" title="Gmail instellen" aria-label="Gmail instellen">⚙</button><button class="close" type="button" aria-label="Sluiten">×</button><div class="gmail-config" hidden><p class="google-session-status" hidden role="status" aria-live="polite">Inlogstatus nog niet gecontroleerd.</p><p class="config-status"></p></div><div class="loading"><div><div class="spinner"></div><span>Ordergegevens ophalen…</span></div></div><section class="editor" hidden><div class="grid"><div class="scenario-wrap" hidden><label class="field-label" for="ddo-scenario">Scenario</label><select id="ddo-scenario" class="scenario"></select></div><div class="field full"><label for="ddo-subject">Onderwerp</label><input id="ddo-subject" class="subject"></div><div class="dynamic-fields"></div><div class="field full"><label>Bericht</label><div class="message" contenteditable="true" role="textbox" aria-multiline="true"></div></div></div><div class="copyrow"><button class="copy" id="copyMessage" type="button">Kopieer bericht</button><button class="copy" id="createGmailDraft" type="button">Maak bericht</button></div></section></main>
       </section>
     </div>`;
   document.documentElement.append(host);
@@ -225,6 +225,7 @@
   function automaticLanguage(countryCode) { const code=(countryCode||'').toUpperCase(); if(code==='BE')return'nlfr'; if(['NL'].includes(code))return'nl'; if(['DE','AT','LI','CH'].includes(code))return'de'; if(['FR','MC','RE','GP','MQ','GF'].includes(code))return'fr'; return'en'; }
   function renderLanguageSwitch(){const scenario=currentScenario();const choices=scenario?.languages|| (order?.countryCode?.toUpperCase()==='BE'?['nlfr','nl','fr','en','de']:['nl','en','de','fr']);$('.language-switch').innerHTML=choices.map(code=>`<button type="button" data-lang="${code}" class="${code===selectedLang?'active':''}">${LANGUAGE_LABELS[code]}</button>`).join('');$$('[data-lang]').forEach(button=>button.onclick=()=>{selectedLang=button.dataset.lang;$('.subject').value=ACTIONS[selectedAction].subject(order,selectedLang);renderLanguageSwitch();renderMessage()})}
   async function openWorkspace() {
+    void checkGoogleStatus();
     requireAccess();
     $('.backdrop').hidden = false;
     if(previousOverflow===null)previousOverflow=document.documentElement.style.overflow;
@@ -259,8 +260,9 @@
       return parsed.protocol === 'https:' && allowedHost && /\/exec\/?$/i.test(parsed.pathname);
     } catch { return false; }
   }
-  let checkingGoogleStatus = false;
-  async function checkGoogleStatus() {
+  let checkingGoogleStatus = false, loginPending = false;
+  const LOGIN_STATUS_KEY = 'ggWorkspaceLoginStatus';
+  async function checkGoogleStatus(force = false) {
     if (checkingGoogleStatus || !allowed()) return;
     checkingGoogleStatus = true;
     const status = $('.google-session-status');
@@ -273,17 +275,17 @@
     login.style.background = '#fff';
     login.style.color = '#1f1f1f';
     label.textContent = 'Google controleren…';
-    $('.signature-option').hidden = true;
     try {
-      const session = await workspaceSession();
+      const cached = GM_getValue(LOGIN_STATUS_KEY, null);
+      const session = !force && cached?.email && Date.now() - cached.at < 15*60*1000 ? cached : await workspaceSession();
+      GM_setValue(LOGIN_STATUS_KEY, {email:session.email,at:session.at || Date.now()});
       status.textContent = 'Ingelogd als ' + session.email;
       status.style.color = '#188038';
       label.textContent = '✓ Ingelogd met Google';
       login.style.background = '#e6f4ea';
       login.style.color = '#137333';
-      $('.gmail-signature').checked = GM_getValue(GMAIL_SIGNATURE_KEY, true);
-      $('.signature-option').hidden = false;
       } catch (error) {
+      GM_setValue(LOGIN_STATUS_KEY, null);
       status.textContent = 'Niet ingelogd of toegang niet bevestigd.';
       status.style.color = '#b3261e';
       status.title = error.message;
@@ -292,11 +294,10 @@
     } finally { checkingGoogleStatus = false; }
   }
   window.addEventListener('focus', () => {
-    if (!host.hidden && !$('.gmail-config').hidden) checkGoogleStatus();
+    if (loginPending) { loginPending = false; checkGoogleStatus(true); }
   });
   function configureGmail() {
     const panel = $('.gmail-config');
-    $('.gmail-signature').checked = GM_getValue(GMAIL_SIGNATURE_KEY, true);
     $('.config-status').textContent = '';
     panel.hidden = !panel.hidden;
     if (!panel.hidden) { $('.google-login').focus(); checkGoogleStatus(); }
@@ -304,11 +305,7 @@
   $('.gmail-settings').onclick = configureGmail;
   $('.google-login').onclick = () => {
     requireAccess();
-    if (!$('.google-login').disabled) GM_openInTab(googleBridgeUrl().href, {active: true, insert: true, setParent: true});
-  };
-  $('.gmail-signature').onchange = () => {
-    requireAccess();
-    GM_setValue(GMAIL_SIGNATURE_KEY, $('.gmail-signature').checked);
+    if (!$('.google-login').disabled) {loginPending = true; GM_openInTab(googleBridgeUrl().href, {active: true, insert: true, setParent: true});}
   };
   function googleBridgeUrl(email = GM_getValue(GOOGLE_EMAIL_KEY, '')) {
     const url = new URL(GMAIL_WEB_APP_URL);
@@ -336,7 +333,7 @@
       onload: response => {
         let result;
         try { result = JSON.parse(response.responseText); }
-        catch { reject(new Error('Google-login nodig, of de backend is nog niet bijgewerkt. Open Inloggen bij Google via het tandwiel en probeer daarna opnieuw.')); return; }
+        catch { reject(new Error('Google-login nodig, of de backend is nog niet bijgewerkt. Gebruik de Google-knop bovenaan en probeer daarna opnieuw.')); return; }
         if (response.status < 200 || response.status >= 300 || !result?.ok) {
           reject(new Error(result?.error || 'Google-toegang geweigerd. Log in met je bedrijfsaccount.')); return;
         }
@@ -424,13 +421,14 @@
       const attachmentType = scenario?.attachment || action.attachment;
       const effectiveLang = scenario?.language || selectedLang;
       const attachments = attachmentType === 'invoice' ? [await downloadInvoice(order.orderId)] : attachmentType === 'nov' ? [await downloadNovStatement(effectiveLang)] : [];
-      const result = await createDraftRequest({ action: 'createDraft', to: scenario?.recipient || action.recipient || order.email, subject: $('.subject').value, htmlBody: $('.message').innerHTML, plainBody: $('.message').innerText, useSignature: GM_getValue(GMAIL_SIGNATURE_KEY, true), attachments }, session);
+      const result = await createDraftRequest({ action: 'createDraft', to: scenario?.recipient || action.recipient || order.email, subject: $('.subject').value, htmlBody: $('.message').innerHTML, plainBody: $('.message').innerText, useSignature: true, attachments }, session);
       button.textContent = 'Bericht gemaakt';
       GM_openInTab(gmailDraftUrl(result), { active: true, insert: true, setParent: true });
     } catch (error) {
-          $('.gmail-signature').checked = GM_getValue(GMAIL_SIGNATURE_KEY, true);
-      $('.gmail-config').hidden = false;
-      checkGoogleStatus();
+      // Settings stay hidden; operation errors remain visible in the editor.
+      window.alert(error.message);
+      GM_setValue(LOGIN_STATUS_KEY, null);
+      checkGoogleStatus(true);
       $('.config-status').textContent = error.message;
       button.textContent = 'Maak bericht';
     }
