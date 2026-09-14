@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Gereserveerd
 // @namespace    gg-incoming-reserved-orders
-// @version      1.0.0
+// @version      1.1.0
 // @description  Toont bij gescande inkomende producten voor welke bestellingen de voorraad is gereserveerd.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @updateURL    https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/adapters/gg-gereserveerd.user.js
@@ -13,7 +13,7 @@
     "use strict";
 
     if (window.__ggReserved) return;
-    window.__ggReserved = { version: '1.0.0' };
+    window.__ggReserved = { version: '1.1.0' };
     const allowed = () => window === window.top && /^\/products\/incoming(?:\/|$)/.test(location.pathname) && window.__ggToolbox?.isEnabled('reserved') === true;
     const SCRIPT_NAME = "[GG Incoming Reserved Orders]";
     const TABLE_SELECTOR = "#scannedIncomingProductsTable";
@@ -257,12 +257,37 @@
         });
     }
 
+    const productQueue = [];
+    let activeProductLoads = 0, productQueueTimer = null;
+    const scanningIncoming = () => window.__ggStockCheck?.isInjecting?.() === true;
+    function pumpProductQueue() {
+        clearTimeout(productQueueTimer); productQueueTimer = null;
+        if (!allowed()) {
+            for (const job of productQueue.splice(0)) job.reject(new Error('Geen toegang via de core'));
+            return;
+        }
+        if (scanningIncoming()) {
+            if (productQueue.length) productQueueTimer = setTimeout(pumpProductQueue, 1000);
+            return;
+        }
+        while (activeProductLoads < 2 && productQueue.length) {
+            const job = productQueue.shift(); activeProductLoads++;
+            Promise.resolve().then(() => loadRenderedProductPage(job.uuid)).then(job.resolve, job.reject)
+                .finally(() => { activeProductLoads--; pumpProductQueue(); });
+        }
+    }
+    function queueProductPage(uuid) {
+        return new Promise((resolve, reject) => {
+            productQueue.push({uuid, resolve, reject}); pumpProductQueue();
+        });
+    }
+
     async function fetchReservedOrders(productUuid) {
         if (cache.has(productUuid)) return cache.get(productUuid);
         if (inFlight.has(productUuid)) return inFlight.get(productUuid);
 
         const request = (async () => {
-            const productDocument = await loadRenderedProductPage(productUuid);
+            const productDocument = await queueProductPage(productUuid);
             const orders = parseReservedOrders(productDocument);
             cache.set(productUuid, orders);
             return orders;
@@ -302,6 +327,7 @@
             cache.clear();
             return;
         }
+        if (scanningIncoming()) return;
         if (root instanceof Element && root.matches(ROW_SELECTOR)) {
             void processRow(root);
         }
