@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.14.0
+// @version      1.15.1
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.14.0';
+  const VERSION = '1.15.1';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -63,12 +63,49 @@
   function write(key, value) {
     try { localStorage.setItem('gg_toolbox_' + key, JSON.stringify(value)); } catch {}
   }
+  function blocked(id) {
+    const role = identity().role;
+    return id === 'reserved' && ['Beheerder', 'Manager+'].includes(role) &&
+      (role === 'Beheerder' || FEATURES.reserved.managerPlus === true) &&
+      typeof location !== 'undefined' && /^\/products\/incoming(?:-products)?(?:\/|$)/.test(location.pathname) &&
+      window.__ggStockCheck?.isActivated?.() === true;
+  }
   function enabled(id) {
     const user = identity(), feature = FEATURES[id];
+    if (blocked(id)) return false;
     return !!feature && (user.role === 'Beheerder' || (user.role === 'Manager+' && feature.managerPlus === true) || (user.role === 'Manager' && feature.manager === true) || (user.role === 'Picker' && feature.picker === true));
   }
 
   window.__ggToolbox = { isEnabled: enabled, version: VERSION };
+  // GG queues an html/body scroll animation after each incoming scan.
+  // Intercept only page scrolling during our injection, not user scrolling or other effects.
+  const suppressIncomingScroll = () => typeof location !== 'undefined' &&
+    /^\/products\/incoming(?:-products)?(?:\/|$)/.test(location.pathname) &&
+    enabled('stockCheck') && window.__ggStockCheck?.isInjecting?.() === true;
+  function installIncomingScrollGuard() {
+    const jq = window.jQuery;
+    if (!jq?.fn?.animate || jq.fn.animate.__ggIncomingScrollGuard) return;
+    const original = jq.fn.animate;
+    function guardedAnimate(properties, ...args) {
+      if (!suppressIncomingScroll() || !properties ||
+          !Object.prototype.hasOwnProperty.call(properties, 'scrollTop')) {
+        return original.call(this, properties, ...args);
+      }
+      const isPage = element => element === document.documentElement || element === document.body;
+      const pageTargets = this.filter(function () { return isPage(this); });
+      if (!pageTargets.length) return original.call(this, properties, ...args);
+      pageTargets.stop(true, false);
+      const otherTargets = this.filter(function () { return !isPage(this); });
+      if (otherTargets.length) original.call(otherTargets, properties, ...args);
+      const remaining = {...properties}; delete remaining.scrollTop;
+      if (Object.keys(remaining).length) original.call(pageTargets, remaining, ...args);
+      return this;
+    }
+    guardedAnimate.__ggIncomingScrollGuard = true;
+    jq.fn.animate = guardedAnimate;
+  }
+  installIncomingScrollGuard();
+  if (typeof setInterval === 'function') setInterval(installIncomingScrollGuard, 1000);
   const ADAPTER_BASE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/adapters/';
   const newer = (remote, local) => {
     const a = remote.split('.').map(Number), b = local.split('.').map(Number);
@@ -77,6 +114,30 @@
     }
     return false;
   };
+  function applicable(id, adapter) {
+    if (typeof adapter?.getState === 'function') return !!adapter.getState().ready;
+    const path = typeof location === 'undefined' ? '' : location.pathname;
+    const routes = {
+      twoOrder: /^\/orders(?:\/|$)/,
+      tabber: /^\/(?:products(?:\/|$)|picklocations\/view(?:\/|$))/,
+      reserved: /^\/products\/incoming(?:\/|$)/,
+      productDetails: /^\/orders\/view\//,
+      openInDDO: /^\/orders\/view\//,
+      ddoProductLinker: /^\/(?:products(?:\/|$)|orders\/view\/|picklocations\/view\/|goods\/inbound\/)/,
+      warehousing: /^\/(?:returns(?:\/|$)|orders(?:\/|$))/,
+      barcodeFixer: /./
+    };
+    if (id === 'openInDDO' && document.querySelector('.webshopName')?.textContent.trim() !== 'Dutch Designers Outlet') return false;
+    if (id === 'warehousing' && /^\/orders\/view\//.test(path)) return false;
+    return routes[id]?.test(path) || false;
+  }
+  function tileStatus(id, adapter, results = []) {
+    if (adapter && blocked(id)) return 'blocked';
+    if (!enabled(id) || !adapter) return 'unavailable';
+    const result = results.find(item => item.url === ADAPTER_BASE + FEATURES[id].file);
+    if (result && !result.error && result.remote && adapter.version && newer(result.remote, adapter.version)) return 'outdated';
+    return applicable(id, adapter) ? 'usable' : 'installed';
+  }
   function startUI() {
     if (document.getElementById('gg-toolbox')) return;
     const host = document.createElement('section');
@@ -91,7 +152,7 @@
       '.version{font-size:9px}.user{padding:7px 8px;border-bottom:1px solid #edf1f4;font-size:10px;overflow-wrap:anywhere}.role{color:#6d7880;margin-top:3px}' +
       '.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px}' +
       'button{font:inherit;cursor:pointer}.feature{aspect-ratio:1;border:0;border-radius:4px;background:#d6dce1;color:#56616a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:3px;font-size:9px;line-height:1.15;min-width:0;overflow-wrap:anywhere}' +
-      '.feature.active{background:#18864b;color:white}.feature:disabled{color:#7b858d;cursor:not-allowed}.feature:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid #0877b9;outline-offset:2px}' +
+      '.feature[data-status=blocked]{background:#c83939;color:white}.feature[data-status=installed]{background:#18864b;color:white}.feature[data-status=usable]{background:#0877b9;color:white}.feature[data-status=outdated]{background:#e6a400;color:#111}.feature:disabled{cursor:default}.feature:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid #0877b9;outline-offset:2px}' +
       '.icon{display:block;width:23px;height:23px;flex-shrink:0}.icon svg{display:block;width:100%;height:100%}footer{padding:5px 7px;background:#f4f7f9;border-top:1px solid #dfe5e9;font-size:9px}' +
       'a,.check{color:#0877b9}.check{background:none;border:0;padding:0;font-size:10px}.update-state{margin-top:3px;overflow-wrap:anywhere}' +
       '</style><div class="box" role="region" aria-label="GG Toolbox"><header><span>GG Toolbox</span><span class="header-controls"><span class="version">v' + VERSION +
@@ -125,6 +186,7 @@
       $('.name').textContent = user.name || 'Gebruiker wordt geladen…';
       $('.role').textContent = user.role || 'Geen toegang';
       root.querySelectorAll('[data-extra]').forEach(panel => { if (!enabled(panel.dataset.extra)) panel.remove(); });
+      const updateResults = read('update', null)?.results || [];
       for (const button of root.querySelectorAll('[data-feature]')) {
         const feature = FEATURES[button.dataset.feature];
         const adapter = window[feature.adapter];
@@ -134,9 +196,11 @@
         button.disabled = feature.action && !active;
         button.setAttribute('aria-disabled', String(!feature.action || !active));
         button.style.cursor = feature.action && active ? 'pointer' : 'default';
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-label', feature.label + (active ? ': actief' : ': inactief'));
-        button.title = !enabled(button.dataset.feature) ? 'Niet ingeschakeld voor jouw toegangsniveau' : !available ? 'Adapter ontbreekt' : feature.action ? state.reason : 'Actief via de core-configuratie';
+        const status = tileStatus(button.dataset.feature, adapter, updateResults);
+        button.dataset.status = status;
+        const statusLabel = {blocked:'Geblokkeerd zolang Stock Check is geactiveerd',unavailable:'Niet beschikbaar',installed:'Geïnstalleerd; niet toepasbaar op deze pagina',usable:'Te gebruiken op deze pagina',outdated:'Update beschikbaar'}[status];
+        button.setAttribute('aria-label', feature.label + ': ' + statusLabel);
+        button.title = status === 'blocked' ? statusLabel : !enabled(button.dataset.feature) ? 'Niet ingeschakeld voor jouw toegangsniveau' : !available ? 'Adapter ontbreekt' : statusLabel + (feature.action && state.reason ? ' · ' + state.reason : '');
       }
     }
     setInterval(paint, 1000);
