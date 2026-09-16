@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Mey
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 2.0.1
+// @version 2.0.2
 // @description Exacte Mey OrderDetail-productdata, EAN en voorraad voor de DDO Toolbox.
-// @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
+// @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
 // @connect meyb2b.com
 // @run-at document-start
@@ -12,7 +12,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='mey', VERSION='2.0.1';
+  const ID='mey', VERSION='2.0.2';
   const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container';
   const CONTEXT={dataareaid:'ME:NO',custid:'385468',assortid:'ddd8763b-b678-4004-ba8b-c64d45b5333c',ordertypeid:'NO',webSocketUniqueId:crypto?.randomUUID?.()||`ws-${Date.now()}-${Math.floor(Math.random()*1e6)}`};
   const $=(selector,root=document)=>root.querySelector(selector), norm=value=>String(value||'').toUpperCase().replace(/\s+/g,'').replace(/\(.*?\)/g,'').trim();
