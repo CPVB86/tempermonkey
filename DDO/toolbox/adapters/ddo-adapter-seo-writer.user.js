@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO Toolbox | Adapter | SEO Writer
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.3.0
+// @version      2.3.3
 // @description  Verbindt SEO Writer met de Toolbox en voegt aparte leveranciersproducttekstknoppen toe.
 // @match        https://www.dutchdesignersoutlet.com/admin.php*
 // @grant        GM_addStyle
@@ -25,11 +25,12 @@
   'use strict';
 
   const ID = 'seoWriter';
-  const VERSION = '2.3.0';
+  const VERSION = '2.3.3';
   const UPDATE_URL = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-seo-writer.user.js';
   const SEO_OPENER = 'seo-writer-opener';
   const PRODUCT_BUTTON_ID = 'ddo-toolbox-product-writer';
   const SEO_SOURCE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/SEO/ddo-seo-gen-v3.0.user.js';
+  const SUPPORTED_SECTIONS = new Set(['categories', 'brands', 'products', 'news', 'publisher']);
   const PRODUCT_WRITERS = Object.freeze([
     {
       id: 'ddo-vdv-producttekst',
@@ -70,9 +71,11 @@
     'textarea[name*="footer"]'
   ].join(','));
 
+  const supportedSection = () => { const params = new URLSearchParams(location.search); return params.get('action') === 'edit' && SUPPORTED_SECTIONS.has(params.get('section')); };
+
   const target = () => {
     const opener = document.getElementById(SEO_OPENER);
-    const available = seoFieldsExist();
+    const available = supportedSection() && seoFieldsExist();
     return {
       element: opener,
       label: 'SEO Writer',
@@ -80,7 +83,7 @@
       ready: available && !opener?.disabled,
       source: SEO_SOURCE,
       expectedId: SEO_OPENER,
-      reason: available ? (opener ? 'SEO Writer gereed' : 'SEO Writer wordt bij gebruik geladen') : 'Geen ondersteunde tekstvelden op deze pagina'
+      reason: available ? (opener ? 'SEO Writer gereed' : 'SEO Writer wordt bij gebruik geladen') : supportedSection() ? 'Geen ondersteunde tekstvelden op deze pagina' : 'Niet beschikbaar in deze sectie'
     };
   };
 
