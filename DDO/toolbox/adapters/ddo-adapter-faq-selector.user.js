@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO Toolbox | Adapter | FAQ Selector
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      3.0.0
+// @version      3.0.4
 // @description  Zelfstandige FAQ-selectie, lokale relevantieanalyse, AI-selectie en automatische tags.
 // @match        https://www.dutchdesignersoutlet.com/admin.php*
 // @grant        GM_addStyle
@@ -14,6 +14,165 @@
 // @downloadURL  https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-faq-selector.user.js
 // @run-at       document-end
 // ==/UserScript==
+
+(() => {
+  'use strict';
+
+  const ID = 'faqSelector';
+  const VERSION = '3.0.4';
+  const UPDATE_URL = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-faq-selector.user.js';
+  const OPENER_ID = 'ddo-faq';
+  const PANEL_ID = 'ddo-faq-panel';
+  const POSITION_KEY = 'ddoFaqPosition';
+  const SECTIONS = new Set(['categories', 'brands', 'products', 'news', 'publisher']);
+
+  const applicable = () => { const params = new URLSearchParams(location.search); return params.get('action') === 'edit' && SECTIONS.has(params.get('section')) && !!document.querySelector([
+    '.faq__header.controlbutton',
+    '.faq__dropdown .faq__item',
+    '[name*="faq"]',
+    '[id*="faq"]'
+  ].join(',')); };
+
+  const state = () => {
+    const available = applicable();
+    const opener = document.getElementById(OPENER_ID);
+    return {
+      id: ID,
+      kind: 'feature',
+      label: 'FAQ Selector',
+      version: VERSION,
+      updateUrl: UPDATE_URL,
+      available,
+      ready: available && !opener?.disabled,
+      reason: available
+        ? (opener ? 'FAQ Selector gereed' : 'FAQ Selector wordt bij gebruik geladen')
+        : 'Geen FAQ-velden op deze pagina'
+    };
+  };
+
+  const report = () => document.dispatchEvent(new CustomEvent('ddo-toolbox:adapter-state', {
+    detail: JSON.stringify(state())
+  }));
+
+  const hideOpener = () => document.getElementById(OPENER_ID)?.classList.add('ddo-faq-adapter-control');
+
+  const decorate = () => {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel || panel.dataset.ddoFloating === '1') return;
+    panel.dataset.ddoFloating = '1';
+    const saved = (() => {
+      try { return JSON.parse(localStorage.getItem(POSITION_KEY) || 'null'); }
+      catch { return null; }
+    })();
+    const toolbox = document.getElementById('ddo-toolbox')?.getBoundingClientRect();
+    const width = Math.min(700, innerWidth - 20);
+    Object.entries({
+      position: 'fixed',
+      right: 'auto',
+      bottom: 'auto',
+      width: `${width}px`,
+      maxWidth: 'calc(100vw - 20px)',
+      maxHeight: 'calc(100vh - 20px)',
+      overflow: 'auto'
+    }).forEach(([property, value]) => panel.style.setProperty(property, value, 'important'));
+    panel.style.setProperty(
+      'left',
+      `${Math.min(saved?.left ?? Math.max(10, (toolbox?.left ?? innerWidth - 225) - width - 8), innerWidth - width - 10)}px`,
+      'important'
+    );
+    panel.style.setProperty(
+      'top',
+      `${Math.min(saved?.top ?? Math.max(10, toolbox?.top ?? 10), innerHeight - 40)}px`,
+      'important'
+    );
+
+    const handle = panel.firstElementChild;
+    if (!handle) return;
+    handle.style.cursor = 'move';
+    handle.style.touchAction = 'none';
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || event.target.closest('button,input,a,select,textarea')) return;
+      const rect = panel.getBoundingClientRect();
+      const dx = event.clientX - rect.left;
+      const dy = event.clientY - rect.top;
+      handle.setPointerCapture?.(event.pointerId);
+      const move = e => {
+        panel.style.setProperty(
+          'left',
+          `${Math.max(0, Math.min(innerWidth - panel.offsetWidth, e.clientX - dx))}px`,
+          'important'
+        );
+        panel.style.setProperty(
+          'top',
+          `${Math.max(0, Math.min(innerHeight - 32, e.clientY - dy))}px`,
+          'important'
+        );
+      };
+      const stop = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', stop);
+        try {
+          localStorage.setItem(POSITION_KEY, JSON.stringify({
+            left: panel.offsetLeft,
+            top: panel.offsetTop
+          }));
+        } catch {}
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', stop, {once:true});
+    });
+  };
+
+  const waitForOpener = (timeout = 10000) => new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const opener = document.getElementById(OPENER_ID);
+      if (opener) return resolve(opener);
+      if (Date.now() - started >= timeout) {
+        return reject(new Error('FAQ-module is gestart, maar de bediening verscheen niet'));
+      }
+      setTimeout(check, 100);
+    };
+    check();
+  });
+
+  const load = () => waitForOpener();
+
+  const refresh = () => {
+    hideOpener();
+    decorate();
+    report();
+  };
+
+  const style = document.createElement('style');
+  style.textContent = [
+    '.ddo-faq-adapter-control{display:none!important}',
+    '#ddo-faq-tag-overlay{background:transparent!important;pointer-events:none!important}',
+    '#ddo-faq-panel{pointer-events:auto!important;background:#fff!important;color:#25313b!important;border:1px solid #cbd5df!important;border-radius:7px!important;box-shadow:0 5px 18px #0002!important}',
+    '#ddo-faq-panel>div:first-child{background:#263746!important;color:#fff!important;margin:-1px -1px 8px!important;padding:7px 9px!important;border-radius:7px 7px 0 0!important}',
+    '#ddo-faq-panel .ddo-btn{border:0!important;border-radius:4px!important;background:#0877b9!important;color:#fff!important}',
+    '#ddo-faq-panel .ddo-btn:hover{background:#18864b!important}'
+  ].join('');
+  document.documentElement.appendChild(style);
+
+  document.addEventListener('ddo-toolbox:discover', refresh);
+  document.addEventListener('ddo-toolbox:run-feature', async event => {
+    let data = {};
+    try { data = JSON.parse(event.detail || '{}'); } catch {}
+    if (data.id !== ID || !applicable()) return;
+    try {
+      const opener = await load();
+      refresh();
+      opener.click();
+      decorate();
+    } catch (error) {
+      console.error('[DDO Adapter / FAQ Selector]', error);
+      alert(`FAQ Selector kon niet starten: ${error.message}`);
+    }
+  });
+
+  refresh();
+})();
 
 (function () {
   'use strict';
@@ -1349,162 +1508,3 @@
   else document.addEventListener('DOMContentLoaded', () => setTimeout(main, 100));
 
 })();
-
-(() => {
-  'use strict';
-
-  const ID = 'faqSelector';
-  const VERSION = '3.0.0';
-  const UPDATE_URL = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-faq-selector.user.js';
-  const OPENER_ID = 'ddo-faq';
-  const PANEL_ID = 'ddo-faq-panel';
-  const POSITION_KEY = 'ddoFaqPosition';
-
-  const applicable = () => !!document.querySelector([
-    '.faq__header.controlbutton',
-    '.faq__dropdown .faq__item',
-    '[name*="faq"]',
-    '[id*="faq"]'
-  ].join(','));
-
-  const state = () => {
-    const available = applicable();
-    const opener = document.getElementById(OPENER_ID);
-    return {
-      id: ID,
-      kind: 'feature',
-      label: 'FAQ Selector',
-      version: VERSION,
-      updateUrl: UPDATE_URL,
-      available,
-      ready: available && !opener?.disabled,
-      reason: available
-        ? (opener ? 'FAQ Selector gereed' : 'FAQ Selector wordt bij gebruik geladen')
-        : 'Geen FAQ-velden op deze pagina'
-    };
-  };
-
-  const report = () => document.dispatchEvent(new CustomEvent('ddo-toolbox:adapter-state', {
-    detail: JSON.stringify(state())
-  }));
-
-  const hideOpener = () => document.getElementById(OPENER_ID)?.classList.add('ddo-faq-adapter-control');
-
-  const decorate = () => {
-    const panel = document.getElementById(PANEL_ID);
-    if (!panel || panel.dataset.ddoFloating === '1') return;
-    panel.dataset.ddoFloating = '1';
-    const saved = (() => {
-      try { return JSON.parse(localStorage.getItem(POSITION_KEY) || 'null'); }
-      catch { return null; }
-    })();
-    const toolbox = document.getElementById('ddo-toolbox')?.getBoundingClientRect();
-    const width = Math.min(700, innerWidth - 20);
-    Object.entries({
-      position: 'fixed',
-      right: 'auto',
-      bottom: 'auto',
-      width: `${width}px`,
-      maxWidth: 'calc(100vw - 20px)',
-      maxHeight: 'calc(100vh - 20px)',
-      overflow: 'auto'
-    }).forEach(([property, value]) => panel.style.setProperty(property, value, 'important'));
-    panel.style.setProperty(
-      'left',
-      `${Math.min(saved?.left ?? Math.max(10, (toolbox?.left ?? innerWidth - 225) - width - 8), innerWidth - width - 10)}px`,
-      'important'
-    );
-    panel.style.setProperty(
-      'top',
-      `${Math.min(saved?.top ?? Math.max(10, toolbox?.top ?? 10), innerHeight - 40)}px`,
-      'important'
-    );
-
-    const handle = panel.firstElementChild;
-    if (!handle) return;
-    handle.style.cursor = 'move';
-    handle.style.touchAction = 'none';
-    handle.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || event.target.closest('button,input,a,select,textarea')) return;
-      const rect = panel.getBoundingClientRect();
-      const dx = event.clientX - rect.left;
-      const dy = event.clientY - rect.top;
-      handle.setPointerCapture?.(event.pointerId);
-      const move = e => {
-        panel.style.setProperty(
-          'left',
-          `${Math.max(0, Math.min(innerWidth - panel.offsetWidth, e.clientX - dx))}px`,
-          'important'
-        );
-        panel.style.setProperty(
-          'top',
-          `${Math.max(0, Math.min(innerHeight - 32, e.clientY - dy))}px`,
-          'important'
-        );
-      };
-      const stop = () => {
-        document.removeEventListener('pointermove', move);
-        document.removeEventListener('pointerup', stop);
-        try {
-          localStorage.setItem(POSITION_KEY, JSON.stringify({
-            left: panel.offsetLeft,
-            top: panel.offsetTop
-          }));
-        } catch {}
-      };
-      document.addEventListener('pointermove', move);
-      document.addEventListener('pointerup', stop, {once:true});
-    });
-  };
-
-  const waitForOpener = (timeout = 10000) => new Promise((resolve, reject) => {
-    const started = Date.now();
-    const check = () => {
-      const opener = document.getElementById(OPENER_ID);
-      if (opener) return resolve(opener);
-      if (Date.now() - started >= timeout) {
-        return reject(new Error('FAQ-module is gestart, maar de bediening verscheen niet'));
-      }
-      setTimeout(check, 100);
-    };
-    check();
-  });
-
-  const load = () => waitForOpener();
-
-  const refresh = () => {
-    hideOpener();
-    decorate();
-    report();
-  };
-
-  const style = document.createElement('style');
-  style.textContent = [
-    '.ddo-faq-adapter-control{display:none!important}',
-    '#ddo-faq-tag-overlay{background:transparent!important;pointer-events:none!important}',
-    '#ddo-faq-panel{pointer-events:auto!important;background:#fff!important;color:#25313b!important;border:1px solid #cbd5df!important;border-radius:7px!important;box-shadow:0 5px 18px #0002!important}',
-    '#ddo-faq-panel>div:first-child{background:#263746!important;color:#fff!important;margin:-1px -1px 8px!important;padding:7px 9px!important;border-radius:7px 7px 0 0!important}',
-    '#ddo-faq-panel .ddo-btn{border:0!important;border-radius:4px!important;background:#0877b9!important;color:#fff!important}',
-    '#ddo-faq-panel .ddo-btn:hover{background:#18864b!important}'
-  ].join('');
-  document.documentElement.appendChild(style);
-
-  document.addEventListener('ddo-toolbox:discover', refresh);
-  document.addEventListener('ddo-toolbox:run-feature', async event => {
-    let data = {};
-    try { data = JSON.parse(event.detail || '{}'); } catch {}
-    if (data.id !== ID || !applicable()) return;
-    try {
-      const opener = await load();
-      refresh();
-      opener.click();
-      decorate();
-    } catch (error) {
-      console.error('[DDO Adapter / FAQ Selector]', error);
-      alert(`FAQ Selector kon niet starten: ${error.message}`);
-    }
-  });
-
-  refresh();
-})();
-
