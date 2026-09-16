@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | Lisca
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.1
+// @version 1.0.2
 // @description Exacte Lisca/Lisca Swimwear EAN- en stockkoppeling voor de DDO Toolbox.
-// @match https://www.dutchdesignersoutlet.com/admin.php?section=products*
+// @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
 // @connect docs.google.com
 // @connect googleusercontent.com
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const ID='lisca',VERSION='1.0.1',SHEET='1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww',GID='933070542',TTL=120000,CACHE_SCHEMA=2;
+  const ID='lisca',VERSION='1.0.2',SHEET='1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww',GID='933070542',TTL=120000,CACHE_SCHEMA=2;
   const TABLE='#tabs-3 table.options',PID='#tabs-1 input[name="supplier_pid"]',BRAND='#tabs-1 #select2-brand-container';
   const $=(selector,root=document)=>root.querySelector(selector),decode=event=>{try{return JSON.parse(event.detail||'{}')}catch{return {}}},send=(name,data)=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
   let sheetMemory=null;
