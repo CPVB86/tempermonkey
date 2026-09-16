@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO Toolbox | Adapter | FluentL
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      2.1.0
+// @version      2.1.3
 // @description  Zelfstandige Toolbox-koppeling voor de FluentL-vertaalmachine.
 // @match        https://www.dutchdesignersoutlet.com/admin.php*
 // @grant        GM_addStyle
@@ -17,11 +17,11 @@
   'use strict';
 
   const ID = 'fluentL';
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.3';
   const UPDATE_URL = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-fluentl.user.js';
   const SOURCE_URL = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/fluentl.user.js';
   const OPENER_ID = 'ddo-opener';
-  const SECTIONS = new Set(['categories', 'brands', 'products', 'publisher', 'news']);
+  const SECTIONS = new Set(['categories', 'brands', 'products', 'news', 'publisher']);
   let loading = null;
 
   const supported = () => {
