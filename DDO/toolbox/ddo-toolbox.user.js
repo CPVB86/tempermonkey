@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Core
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 3.4.1
+// @version 3.5.0
 // @description Statische toolbox met los installeerbare leverancieradapters.
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const VERSION='3.4.1', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
+  const VERSION='3.5.0', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
@@ -40,7 +40,8 @@
     seoWriter:{label:'SEO Writer',description:'Genereer en analyseer uitgebreide SEO-teksten.',manager:true,picker:true,icon:'search',action:true,adapter:true,file:'ddo-adapter-seo-writer.user.js'},
     fluentL:{label:'FluentL',description:'Vertaal product- en paginavelden naar geselecteerde talen.',manager:true,picker:true,icon:'translate',action:true,adapter:true,file:'ddo-adapter-fluentl.user.js'},
     faqSelector:{label:'FAQ Selector',description:'Zoek en selecteer relevante FAQ’s voor de pagina.',manager:true,picker:true,icon:'help',action:true,adapter:true,file:'ddo-adapter-faq-selector.user.js'},
-    ggQueue:{label:'GG Queue',description:'Stuur geselecteerde producten één voor één naar GoedGepickt.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'}
+    ggQueue:{label:'GG Queue',description:'Stuur geselecteerde producten één voor één naar GoedGepickt.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'},
+    productValidator:{label:'Product Validator',description:'Controleer geselecteerde producten op kleuren en prijsafwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
   };
   const ADAPTER_CATALOG=[
     {id:'faqSelector',label:'FAQ Selector',file:'ddo-adapter-faq-selector.user.js'},
@@ -49,13 +50,14 @@
     {id:'lisca',label:'Lisca',file:'ddo-adapter-lisca.user.js'},
     {id:'mey',label:'Mey',file:'ddo-adapter-mey.user.js'},
     {id:'seoWriter',label:'SEO Writer',file:'ddo-adapter-seo-writer.user.js'},
+    {id:'productValidator',label:'Product Validator',file:'ddo-adapter-product-validator.user.js'},
     {id:'triumph-sloggi',label:'Triumph/Sloggi',file:'ddo-adapter-triumph.user.js'},
     {id:'wacoal-group',label:'Wacoal',file:'ddo-adapter-wacoal.user.js'}
   ].map(item=>({...item,updateUrl:`https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/${item.file}`}));
   const EDI_ACTIONS={scraper:{label:'Stock & EAN Scraper',manager:true,picker:true},autopaster:{label:'Stock & EAN Manueel',manager:true,picker:true},stockfixer:{label:'Zero Stock Fixer',manager:true,picker:true},importer:{label:'Product Verrijken',manager:true,picker:true},prune:{label:'Prune',manager:true,picker:true}};
   const CORE_FEATURES={shiftSelect:{manager:true,picker:true},productActions:{manager:true,picker:true},updateFlow:{manager:true,picker:true}};
   const ICONS={
-    stock:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 2v4m8-4v4M8 13l3 3 6-7"/>',barcode:'<path d="M3 5v14m3-14v14m4-14v14m2-14v14m4-14v14m2-14v14m3-14v14"/>',recycle:'<path d="m8 7 3-5 4 7m-4-7 4 1m3 7 4 7h-8m8 0-2 3M11 21H4l4-7m-4 7-2-3"/>',product:'<path d="M4 4h16v16H4zM8 8h8m-8 4h8m-8 4h5"/>',prune:'<circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m8.5 8.5 11 7.5M8.5 15.5 20 8"/>',euro:'<path d="M19 6a7 7 0 1 0 0 12M4 10h11M4 14h10"/>',ruler:'<path d="m4 17 13-13 3 3L7 20H4v-3Zm9-9 3 3m-6 0 3 3m-6 0 3 3"/>',unlock:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7-2"/>',sale:'<path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="7" cy="7" r="1"/><path d="m10 16 6-6"/>',image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',tune:'<path d="M4 6h16M8 6v4m-4 6h16m-5-4v4M4 11h16m-8-4v4"/>',link:'<path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 3 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/>',edit:'<path d="M4 20h4L20 8l-4-4L4 16v4Zm10-14 4 4"/>',tabs:'<rect x="3" y="7" width="14" height="14" rx="2"/><path d="M7 7V3h14v14h-4"/>',actions:'<path d="M5 7h12m0 0-3-3m3 3-3 3M19 17H7m0 0 3-3m-3 3 3 3"/>',flow:'<path d="M4 6h11a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4H7m0 0 3-3m-3 3 3 3"/>',cart:'<path d="M2 3h3l3 12h11l3-9H6m2 9-1 3h12"/><circle cx="9" cy="21" r="1"/><circle cx="18" cy="21" r="1"/>',sync:'<path d="M20 7h-6V1m6 6a9 9 0 0 0-15-2M4 17h6v6m-6-6a9 9 0 0 0 15 2"/>',search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>',translate:'<path d="M4 5h9M8.5 3v2m-3 4c1.5 3 4 5 7 6m-1-6c-1 3-3.5 5.5-7.5 7"/><path d="m14 20 3.5-8 3.5 8m-5.5-3h4"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2 1-1.2 1.8v.5M12 17.5h.01"/>',palette:'<path d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 0-4H12a1.5 1.5 0 0 1 0-3h3a6 6 0 0 0 0-12h-3Z"/><circle cx="7.5" cy="9" r="1"/><circle cx="10" cy="6.5" r="1"/><circle cx="14" cy="6.5" r="1"/><circle cx="16.5" cy="9" r="1"/>',rocket:'<path d="M14 4c3-2 5-2 6-2 0 1 0 3-2 6l-5 5-5-1-1-5 5-5Z"/><path d="m9 15-4 4m1-6-3 1 4-4m4 8-1 3-2-3"/><circle cx="15.5" cy="6.5" r="1.5"/>'
+    stock:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 2v4m8-4v4M8 13l3 3 6-7"/>',barcode:'<path d="M3 5v14m3-14v14m4-14v14m2-14v14m4-14v14m2-14v14m3-14v14"/>',recycle:'<path d="m8 7 3-5 4 7m-4-7 4 1m3 7 4 7h-8m8 0-2 3M11 21H4l4-7m-4 7-2-3"/>',product:'<path d="M4 4h16v16H4zM8 8h8m-8 4h8m-8 4h5"/>',prune:'<circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m8.5 8.5 11 7.5M8.5 15.5 20 8"/>',euro:'<path d="M19 6a7 7 0 1 0 0 12M4 10h11M4 14h10"/>',ruler:'<path d="m4 17 13-13 3 3L7 20H4v-3Zm9-9 3 3m-6 0 3 3m-6 0 3 3"/>',unlock:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7-2"/>',sale:'<path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="7" cy="7" r="1"/><path d="m10 16 6-6"/>',image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',tune:'<path d="M4 6h16M8 6v4m-4 6h16m-5-4v4M4 11h16m-8-4v4"/>',link:'<path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 3 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/>',edit:'<path d="M4 20h4L20 8l-4-4L4 16v4Zm10-14 4 4"/>',tabs:'<rect x="3" y="7" width="14" height="14" rx="2"/><path d="M7 7V3h14v14h-4"/>',actions:'<path d="M5 7h12m0 0-3-3m3 3-3 3M19 17H7m0 0 3-3m-3 3 3 3"/>',flow:'<path d="M4 6h11a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4H7m0 0 3-3m-3 3 3 3"/>',cart:'<path d="M2 3h3l3 12h11l3-9H6m2 9-1 3h12"/><circle cx="9" cy="21" r="1"/><circle cx="18" cy="21" r="1"/>',sync:'<path d="M20 7h-6V1m6 6a9 9 0 0 0-15-2M4 17h6v6m-6-6a9 9 0 0 0 15 2"/>',search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>',translate:'<path d="M4 5h9M8.5 3v2m-3 4c1.5 3 4 5 7 6m-1-6c-1 3-3.5 5.5-7.5 7"/><path d="m14 20 3.5-8 3.5 8m-5.5-3h4"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2 1-1.2 1.8v.5M12 17.5h.01"/>',palette:'<path d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 0-4H12a1.5 1.5 0 0 1 0-3h3a6 6 0 0 0 0-12h-3Z"/><circle cx="7.5" cy="9" r="1"/><circle cx="10" cy="6.5" r="1"/><circle cx="14" cy="6.5" r="1"/><circle cx="16.5" cy="9" r="1"/>',rocket:'<path d="M14 4c3-2 5-2 6-2 0 1 0 3-2 6l-5 5-5-1-1-5 5-5Z"/><path d="m9 15-4 4m1-6-3 1 4-4m4 8-1 3-2-3"/><circle cx="15.5" cy="6.5" r="1.5"/>',checklist:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m7 8 1.5 1.5L11 7M13 8h4m-10 5 1.5 1.5L11 12m2 1h4m-10 5 1.5 1.5L11 17m2 1h4"/>'
   };
   const adapters=new Map(), messages=new Map(); let busy=false, requestId='',pendingModelSelection=null;
   const pruneState={known:false,count:0};
