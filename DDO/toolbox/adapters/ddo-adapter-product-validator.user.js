@@ -16,6 +16,10 @@
   const ID='productValidator', VERSION='1.3.0';
   const UPDATE_URL='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-product-validator.user.js';
   const PANEL_ID='ddo-product-validator-status', BADGE='ddo-product-validator-badge';
+const REQUIRED_TAGS = {
+  promo: 'SYST - Promo',
+  webwinkelkeur: 'SYST - Webwinkelkeur'
+};
   let run=null;
 
   const params=()=>new URLSearchParams(location.search);
@@ -47,7 +51,9 @@
     checks.priceTab3||
     checks.adviceTab3||
     checks.vipTab3||
-    checks.referenceNme
+    checks.referenceNme||
+  checks.promoTag||
+  checks.webwinkelkeurTag
   );
 
   function validateDocument(doc){
@@ -58,7 +64,9 @@
       priceTab3:false,
       adviceTab3:false,
       vipTab3:false,
-      referenceNme:false
+      referenceNme:false,
+  promoTag:false,
+  webwinkelkeurTag:false
     };
 
     const mainPrice=cents(value(doc,'price'));
@@ -125,6 +133,21 @@
       checks.referenceNme=true;
       issues.push(`Reference bevat [NME]: ${reference}`);
     }
+
+// Verplichte tags op tab 7
+const assignedTags=[...doc.querySelectorAll('tr[id^="tagdelete_"]')]
+  .filter(row=>!row.classList.contains('empty_set'))
+  .map(row=>(row.querySelector('td.control')?.textContent||'').trim().toLowerCase());
+
+if(!assignedTags.includes(REQUIRED_TAGS.promo.toLowerCase())){
+  checks.promoTag=true;
+  issues.push(`Tag ontbreekt: ${REQUIRED_TAGS.promo}`);
+}
+
+if(!assignedTags.includes(REQUIRED_TAGS.webwinkelkeur.toLowerCase())){
+  checks.webwinkelkeurTag=true;
+  issues.push(`Tag ontbreekt: ${REQUIRED_TAGS.webwinkelkeur}`);
+}
 
     return {issues,checks};
   }
@@ -229,38 +252,183 @@
     return node;
   }
 
-  function render(progress){
-    const node=panel();
-    if(!node)return;
+function summaryCounts(){
+  const results=run?.results||[];
 
-    const canApply=!progress.running&&run?.results?.some(
-      result=>!result.error&&fixable(result.currentChecks||result.checks)
-    );
+  return {
+    vipTab1:results.filter(r=>r.checks?.vipTab1).length,
+    referenceNme:results.filter(r=>r.checks?.referenceNme).length,
 
-    node.innerHTML=`
+    colorsTab2:results.filter(r=>r.checks?.colorsTab2).length,
+
+    priceTab3:results.filter(r=>r.checks?.priceTab3).length,
+    adviceTab3:results.filter(r=>r.checks?.adviceTab3).length,
+    vipTab3:results.filter(r=>r.checks?.vipTab3).length,
+
+    promoTag:results.filter(r=>r.checks?.promoTag).length,
+    webwinkelkeurTag:results.filter(r=>r.checks?.webwinkelkeurTag).length,
+
+    failed:results.filter(r=>r.error).length
+  };
+}
+
+function render(progress){
+  const node=panel();
+  if(!node)return;
+
+  const canApply=!progress.running&&run?.results?.some(
+    result=>!result.error&&fixable(result.currentChecks||result.checks)
+  );
+
+  const s=summaryCounts();
+
+  node.style.cssText=`
+    margin:0 0 8px;
+    padding:7px 9px;
+    border:1px solid #cad5df;
+    border-radius:6px;
+    background:#f7fafc;
+    color:#25313b;
+    font:11px/1.3 system-ui;
+  `;
+
+  node.innerHTML=`
+    <div style="
+      display:flex;
+      align-items:center;
+      gap:8px;
+    ">
       <strong>Product Validator</strong>
+
       <span>${safe(progress.status)}</span>
       <span>${progress.done}/${progress.total}</span>
-      <span style="color:#b42318">${progress.errors} afwijkend</span>
-      <span style="color:#a15c00">${progress.failed} mislukt</span>
+
+      <span style="color:#b42318">
+        ${progress.errors} afwijkend
+      </span>
+
+      <span style="color:#a15c00">
+        ${progress.failed} mislukt
+      </span>
+
+      <span style="flex:1"></span>
+
       ${
         progress.running
-          ?'<button type="button" data-action="stop">Stop</button>'
-          :`${canApply?'<button type="button" data-action="apply">Pas wijzigingen toe</button>':''}${run?.results?.length?'<button type="button" data-action="export">Exporteer CSV</button>':''}`
+          ? '<button type="button" data-action="stop">Stop</button>'
+          : `
+              ${canApply
+                ? '<button type="button" data-action="apply">Pas wijzigingen toe</button>'
+                : ''
+              }
+              ${run?.results?.length
+                ? '<button type="button" data-action="export">Exporteer CSV</button>'
+                : ''
+              }
+            `
       }
+    </div>
+
+    <div style="
+  margin-top:6px;
+  padding-top:6px;
+  border-top:1px solid #dce3e8;
+  display:flex;
+  gap:7px;
+  align-items:center;
+  flex-wrap:wrap;
+  font-size:10px;
+">
+
+  <strong>Tab 1:</strong>
+
+  <span title="VIP-prijs op tab 1 is niet 0,00">
+    VIP-prijs <strong>${s.vipTab1}</strong>
+  </span>
+
+  <span title="Reference bevat [NME]">
+    NME <strong>${s.referenceNme}</strong>
+  </span>
+
+  <span style="color:#aeb8bf">|</span>
+
+  <strong>Tab 2:</strong>
+
+  <span title="Producten met meer dan 2 kleuren">
+    Dubbele kleuren <strong>${s.colorsTab2}</strong>
+  </span>
+
+  <span style="color:#aeb8bf">|</span>
+
+  <strong>Tab 3:</strong>
+
+  <span title="Optieprijzen die afwijken van de hoofdprijs">
+    Prijs <strong>${s.priceTab3}</strong>
+  </span>
+
+  <span title="Optie-adviesprijzen die afwijken van de hoofdadviesprijs">
+    Adviesprijs <strong>${s.adviceTab3}</strong>
+  </span>
+
+  <span title="VIP-prijzen bij opties hoger dan 0,00">
+    VIP-prijs <strong>${s.vipTab3}</strong>
+  </span>
+
+<span style="color:#aeb8bf">|</span>
+
+<strong>Tab 7:</strong>
+
+<span title="Producten zonder SYST - Promo">
+  Promo <strong>${s.promoTag}</strong>
+</span>
+
+<span title="Producten zonder SYST - Webwinkelkeur">
+  Webwinkelkeur <strong>${s.webwinkelkeurTag}</strong>
+</span>
+
+<span style="color:#aeb8bf">|</span>
+
+<span
+  title="Producten die niet gecontroleerd konden worden"
+  style="${s.failed?'color:#a15c00':''}"
+>
+  Niet controleerbaar <strong>${s.failed}</strong>
+</span>
+
+  <span style="color:#aeb8bf">|</span>
+
+  <span
+    title="Producten die niet gecontroleerd konden worden"
+    style="${s.failed?'color:#a15c00':''}"
+  >
+    Niet controleerbaar <strong>${s.failed}</strong>
+  </span>
+
+</div>
+  `;
+
+  node.querySelectorAll('button').forEach(button=>{
+    button.style.cssText=`
+      border:0;
+      border-radius:4px;
+      padding:3px 7px;
+      background:#0877b9;
+      color:#fff;
+      cursor:pointer;
     `;
+  });
 
-    node.querySelectorAll('button').forEach(button=>{
-      button.style.cssText='margin-left:auto;border:0;border-radius:4px;padding:3px 7px;background:#0877b9;color:#fff;cursor:pointer';
-    });
-
-    node.querySelector('[data-action="stop"]')?.addEventListener('click',()=>{
+  node.querySelector('[data-action="stop"]')
+    ?.addEventListener('click',()=>{
       if(run)run.cancelled=true;
     });
 
-    node.querySelector('[data-action="apply"]')?.addEventListener('click',applyChanges);
-    node.querySelector('[data-action="export"]')?.addEventListener('click',exportCsv);
-  }
+  node.querySelector('[data-action="apply"]')
+    ?.addEventListener('click',applyChanges);
+
+  node.querySelector('[data-action="export"]')
+    ?.addEventListener('click',exportCsv);
+}
 
   const csvCell=value=>`"${String(value??'').replace(/"/g,'""')}"`;
 
@@ -336,6 +504,7 @@
       const mainAdviceField=doc.querySelector('input[name="price_advice"]');
       const mainVipField=doc.querySelector('input[name="price_vip"]');
       const referenceField=doc.querySelector('input[name="reference"]');
+const tagsSelect=doc.querySelector('select[name="tags[]"]');
 
       const mainPrice=mainPriceField?.value;
       const mainAdvice=mainAdviceField?.value;
@@ -398,6 +567,34 @@
           changes.push(`Reference "${oldReference}" → "${newReference}"`);
         }
       }
+
+// Ontbrekende verplichte tags toevoegen
+if(tagsSelect){
+  const ensureTag=(label)=>{
+    const option=[...tagsSelect.options].find(option=>
+      (option.textContent||'').trim().toLowerCase()===label.toLowerCase()
+    );
+
+    if(!option){
+      throw new Error(`Ontbrekende tag niet beschikbaar in tags[]: ${label}`);
+    }
+
+    if(!option.selected){
+      option.selected=true;
+      return true;
+    }
+
+    return false;
+  };
+
+  if(result.currentChecks?.promoTag && ensureTag(REQUIRED_TAGS.promo)){
+    changes.push(`Tag toegevoegd: ${REQUIRED_TAGS.promo}`);
+  }
+
+  if(result.currentChecks?.webwinkelkeurTag && ensureTag(REQUIRED_TAGS.webwinkelkeur)){
+    changes.push(`Tag toegevoegd: ${REQUIRED_TAGS.webwinkelkeur}`);
+  }
+}
 
       if(!changes.length){
         return {
