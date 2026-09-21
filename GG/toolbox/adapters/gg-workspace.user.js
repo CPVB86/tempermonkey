@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Workspace
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.1.8
+// @version      1.2.1
 // @description  Klantberichten maken vanuit een geopende GoedGepickt-order.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        unsafeWindow
@@ -32,10 +32,17 @@
     try { instance ||= initialize(); instance.host.hidden=false; await instance.open(); }
     catch(error) { if(allowed()) alert(error.message); }
   }
-  page.__ggWorkspace = {version:'1.1.8',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
+  page.__ggWorkspace = {version:'1.2.1',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
   setInterval(()=>{if(instance && !allowed()){instance.close();instance.host.hidden=true;}},1000);
   function initialize() {
     requireAccess();
+
+  // Landtarieven voor claims (exclusief btw): hier zelfstandig aan te passen.
+  const CLAIM_COSTS = {
+    NL: { shipping: '5.76', fuel: '0.84' },
+    DE: { shipping: '6.00', fuel: '0.84' },
+    BE: { shipping: '7.00', fuel: '0.84' }
+  };
 
   const ACTIONS = {
     uncollected: {
@@ -60,10 +67,11 @@
       label: 'DPD Onderzoek', icon: '⌕', description: 'Start een onderzoek naar een niet ontvangen pakket.',
       fields: [],
       scenarios: [
-        { id:'deliveredMissingHome',label:'Bezorgd maar niet ontvangen - Thuis',language:'nl',recipient:'customerservice@dpd.nl',attachment:'invoice',subject:o=>`Pakket ${o.tracking||'$tracking'} (eigen ref: ${o.orderId||'$orderID'})`,html:o=>`<p>Beste,</p><p>Pakket ${escapeHtml(o.tracking||'$tracking')} (eigen ref: ${escapeHtml(o.orderId||'$orderID')}) is volgens de tracking bezorgd, echter niet bij consument. Het pakket bleek ook niet af te halen bij de buren. Graag verneem ik waar dit pakket feitelijk is.</p><p>Factuur in bijlage. Zending betreft dames ondermode verzonden in een neutrale bruine vouwdoos.</p>` },
+        { id:'deliveredMissingHome',label:'Bezorgd maar niet ontvangen - Thuis',language:'nl',recipient:'customerservice@dpd.nl',attachments:['invoice','nov'],subject:o=>`Pakket ${o.tracking||'$tracking'} (eigen ref: ${o.orderId||'$orderID'})`,html:o=>`<p>Beste,</p><p>Pakket ${escapeHtml(o.tracking||'$tracking')} (eigen ref: ${escapeHtml(o.orderId||'$orderID')}) is volgens de tracking bezorgd, echter niet bij consument. Het pakket bleek ook niet af te halen bij de buren. Graag verneem ik waar dit pakket feitelijk is.</p><p>Factuur en niet-ontvangen verklaring in bijlage. Zending betreft dames ondermode verzonden in een neutrale bruine vouwdoos.</p>` },
         { id:'directReturnCredit',label:'Direct retour - Creditkosten',language:'nl',recipient:'customerservice@dpd.nl',subject:o=>`Credit verzend- en retourkosten pakket ${o.tracking||'$tracking'} (eigen ref: ${o.orderId||'$orderID'})`,html:o=>`<p>Beste,</p><p>Graag een credit voor zowel verzend- als retourkosten van pakket ${escapeHtml(o.tracking||'$tracking')} (eigen ref: ${escapeHtml(o.orderId||'$orderID')}). Dit pakket is niet uitgeleverd, maar direct retour afzender gestuurd. Daar is vast een verklaring voor; die zou ik graag willen weten.</p>` },
-        { id:'stuckAtDepot',label:'Blijft hangen in depot',language:'nl',recipient:'customerservice@dpd.nl',subject:o=>`Vertraging pakket ${o.tracking||'$tracking'} (eigen ref: ${o.orderId||'$orderID'})`,html:o=>`<p>Beste,</p><p>Pakket ${escapeHtml(o.tracking||'$tracking')} (eigen ref: ${escapeHtml(o.orderId||'$orderID')}) blijft hangen in het depot. Ik verneem graag de reden van vertraging en zie het pakket spoedig uitgeleverd worden.</p><p>Alvast bedankt.</p>` },
-        { id:'nonReceiptStatement',label:'Niet ontvangen verklaring',languages:['nl','de','en'],attachment:'nov',subject:(o,l)=>({nl:`Niet-ontvangenverklaring bestelling ${o.orderId}`,de:`Erklärung über den Nichterhalt – Bestellung ${o.orderId}`,en:`Non-receipt statement for order ${o.orderId}`}[l]),html:(o,l)=>nonReceiptHtml(l,o) }
+        { id:'stuckAtDepot',label:'Blijft hangen in depot',language:'nl',recipient:'customerservice@dpd.nl',attachment:'invoice',subject:o=>`Vertraging pakket ${o.tracking||'$tracking'} (eigen ref: ${o.orderId||'$orderID'})`,html:o=>`<p>Beste,</p><p>Pakket ${escapeHtml(o.tracking||'$tracking')} (eigen ref: ${escapeHtml(o.orderId||'$orderID')}) blijft hangen in het depot. Ik verneem graag de reden van vertraging en zie het pakket spoedig uitgeleverd worden.</p><p>Factuur in bijlage. Zending betreft dames ondermode verzonden in een neutrale bruine vouwdoos.</p><p>Alvast bedankt.</p>` },
+        { id:'nonReceiptStatement',label:'Niet ontvangen verklaring',languages:['nl','de','en'],attachment:'nov',subject:(o,l)=>({nl:`Niet-ontvangenverklaring bestelling ${o.orderId}`,de:`Erklärung über den Nichterhalt – Bestellung ${o.orderId}`,en:`Non-receipt statement for order ${o.orderId}`}[l]),html:(o,l)=>nonReceiptHtml(l,o) },
+        { id:'claim',label:'Claim indienen',language:'nl',recipient:'customerservice@dpd.nl',attachment:'claim',fields:[{id:'salePrice',label:'Verkoopprijs excl. btw',placeholder:'Bijv. 89,95',required:true},{id:'margin',label:'Margefactor',placeholder:'Bijv. 2,5',required:true},{id:'shippingDate',label:'Verzenddatum pakket',type:'date',required:true},{id:'shippingCost',label:'Verzendkosten DPD excl. btw',required:true},{id:'fuelSurcharge',label:'Brandstoftoeslag excl. btw',required:true}],subject:o=>`Aansprakelijkheidstelling pakket ${o.tracking||'$tracking'} (eigen ref: ${o.orderId||'$orderID'})`,html:o=>`<p>Beste,</p><p>In de bijlage de door u opgevraagde documenten inzake pakket ${escapeHtml(o.tracking||'$tracking')} (eigen ref: ${escapeHtml(o.orderId||'$orderID')}).</p>` }
       ],
       subject: (o,lang) => currentScenario().subject(o,lang),
       html: (o,v,lang) => currentScenario().html(o,lang)
@@ -119,6 +127,11 @@
   let previousOverflow = null;
   const selectedScenarios = { dpdInvestigation: 'deliveredMissingHome' };
   const actionValues = { uncollected: { paymentUrl: '' }, tracking: { tracking: '', trackingUrl: '' } };
+  let claimValues = null;
+  function claimDefaults(o) {
+    const costs = CLAIM_COSTS[String(o.countryCode || '').toUpperCase()] || {};
+    return {salePrice:'',margin:'1,5',shippingDate:o.shipmentDate||'',shippingCost:costs.shipping||'',fuelSurcharge:costs.fuel||''};
+  }
   function currentScenario(){const action=ACTIONS[selectedAction];return action.scenarios?.find(s=>s.id===selectedScenarios[selectedAction])||action.scenarios?.[0]}
 
   $('.actions').innerHTML = Object.entries(ACTIONS).map(([id, a]) => `<button class="action${id === selectedAction ? ' active' : ''}" data-action="${id}" type="button"><i>${a.icon}</i><span><strong>${a.label}</strong><small>${a.description}</small></span></button>`).join('');
@@ -154,17 +167,30 @@
     if (/name=["'](?:email|password)["']/i.test(text) && /login|inloggen/i.test(text)) throw new Error('Je sessie is verlopen. Log opnieuw in en probeer het nogmaals.');
     return text;
   }
+  function shipmentDateIso(text) {
+    const match=String(text||'').trim().match(/^(\d{2})-(\d{2})-(\d{4})(?:\s|$)/);
+    if(!match)return '';
+    const iso=`${match[3]}-${match[2]}-${match[1]}`;
+    const date=new Date(`${iso}T12:00:00Z`);
+    return !Number.isNaN(date.getTime())&&date.toISOString().slice(0,10)===iso?iso:'';
+  }
+  function shipmentDateForLink(link) {
+    const table=link.closest('table'),row=link.closest('tr');
+    const headers=[...(table?.querySelectorAll('thead th')||[])];
+    const index=headers.findIndex(header=>header.classList.contains('shipmentCreatedAt')||/aangemaakt op/i.test(header.textContent||''));
+    return index<0?'':shipmentDateIso(row?.cells?.[index]?.textContent);
+  }
   function waitForShipment(timeout = 5000) {
     return new Promise(resolve => {
       const started = Date.now();
       const inspect = () => {
         const links = [...document.querySelectorAll('#order_shipment_overview_datatable tbody td:first-child a[href]')];
         const link = links.find(item => /^https?:\/\//i.test(item.href));
-        if (link) return resolve({ tracking: link.textContent.trim(), trackingUrl: link.href });
+        if (link) return resolve({ tracking: link.textContent.trim(), trackingUrl: link.href, shipmentDate:shipmentDateForLink(link) });
         const processing = document.querySelector('#order_shipment_overview_datatable_processing');
         const busy = processing && getComputedStyle(processing).display !== 'none';
         const info = document.querySelector('#order_shipment_overview_datatable_info')?.textContent || '';
-        if ((!busy && /van 0 resultaten/i.test(info)) || Date.now() - started >= timeout) return resolve({ tracking: '', trackingUrl: '' });
+        if ((!busy && /van 0 resultaten/i.test(info)) || Date.now() - started >= timeout) return resolve({ tracking: '', trackingUrl: '', shipmentDate:'' });
         setTimeout(inspect, 160);
       };
       inspect();
@@ -207,8 +233,10 @@
     $('.scenario-wrap').hidden = !scenarios.length;
     $('.scenario').innerHTML = scenarios.map(item => `<option value="${item.id}"${item.id===scenario?.id?' selected':''}>${escapeHtml(item.label)}</option>`).join('');
     $('.scenario').onchange = event => { selectedScenarios[selectedAction] = event.target.value; render(); };
-    $('.dynamic-fields').innerHTML = action.fields.map(field => `<div class="field"><label for="ddo-${field.id}">${field.label}${field.helpUrl ? ` <a href="${escapeHtml(field.helpUrl)}" target="_blank" rel="noopener" title="Open ${escapeHtml(field.label)}" aria-label="Open ${escapeHtml(field.label)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"></path></svg></a>` : ''}${field.copyMspData?` <button class="copy-msp-data" type="button" title="Kopieer klantgegevens voor MultiSafepay" aria-label="Kopieer MSP-data"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>`:''}</label><input id="ddo-${field.id}" data-action-field="${field.id}" value="${escapeHtml(actionValues[selectedAction][field.id] || '')}" placeholder="${field.placeholder}"></div>`).join('');
-    $$('[data-action-field]').forEach(input => input.addEventListener('input', () => { actionValues[selectedAction][input.dataset.actionField] = input.value; renderMessage(); }));
+    const fields = scenario?.fields || action.fields;
+    const values = scenario?.id==='claim' ? (claimValues ||= claimDefaults(order)) : actionValues[selectedAction];
+    $('.dynamic-fields').innerHTML = fields.map(field => `<div class="field"><label for="ddo-${field.id}">${field.label}${field.required?' *':''}${field.helpUrl ? ` <a href="${escapeHtml(field.helpUrl)}" target="_blank" rel="noopener" title="Open ${escapeHtml(field.label)}" aria-label="Open ${escapeHtml(field.label)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"></path></svg></a>` : ''}${field.copyMspData?` <button class="copy-msp-data" type="button" title="Kopieer klantgegevens voor MultiSafepay" aria-label="Kopieer MSP-data"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2 2v1"></path></svg></button>`:''}</label><input id="ddo-${field.id}" data-action-field="${field.id}" type="${field.type||'text'}" ${field.required?'required':''} value="${escapeHtml(values?.[field.id] || '')}" placeholder="${escapeHtml(field.placeholder||'')}"></div>`).join('');
+    $$('[data-action-field]').forEach(input => input.addEventListener('input', () => { values[input.dataset.actionField] = input.value; renderMessage(); }));
     const mspButton = $('.copy-msp-data');
     if (mspButton) mspButton.onclick = async () => {
       const clipboardText = [order.firstName, order.lastName, order.email, `${order.orderId}a`, `Opnieuw verzenden ${order.orderId}`, order.countryCode].join('\t');
@@ -394,6 +422,84 @@
       onerror:()=>reject(new Error('De niet-ontvangenverklaring kon niet worden gedownload.')),ontimeout:()=>reject(new Error('Het downloaden van de niet-ontvangenverklaring duurde te lang.'))
     }));
   }
+  function claimCents(value, label, positive = false) {
+    const text = String(value ?? '').trim().replace(/\s/g,'');
+    if (!/^\d+(?:[.,]\d{1,2})?$/.test(text)) throw new Error(`${label}: vul een geldig bedrag zonder valutateken in.`);
+    const cents = Math.round(Number(text.replace(',','.')) * 100);
+    if (!Number.isSafeInteger(cents) || (positive ? cents <= 0 : cents < 0)) throw new Error(`${label}: bedrag buiten bereik.`);
+    return cents;
+  }
+  function claimData(o, values, senderEmail, today = new Date()) {
+    if (!o?.tracking || !o?.orderId) throw new Error('Voor de claim zijn een tracking-ID en eigen orderreferentie verplicht.');
+    const sender = String(senderEmail||'').toLowerCase();
+    const signer = sender==='folkert@dutchdesignersoutlet.com'?'Folkert van Beek':sender==='chantor@dutchdesignersoutlet.com'?'Chantor Pascal van Beek':'';
+    if (!signer) throw new Error('Claim indienen kan alleen vanuit folkert@ of chantor@dutchdesignersoutlet.com.');
+    const marginText=String(values?.margin||'').trim().replace(',','.');
+    if (!/^\d+(?:\.\d+)?$/.test(marginText) || Number(marginText)<=0 || Number(marginText)>100) throw new Error('Vul een geldige margefactor groter dan 0 en maximaal 100 in.');
+    const margin=Number(marginText),sale=claimCents(values.salePrice,'Verkoopprijs',true),shipping=claimCents(values.shippingCost,'Verzendkosten'),fuel=claimCents(values.fuelSurcharge,'Brandstoftoeslag');
+    const rawDate=String(values.shippingDate||'');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(rawDate))throw new Error('Vul de verzenddatum van het pakket in.');
+    const sent=new Date(`${rawDate}T12:00:00Z`);
+    if(Number.isNaN(sent.getTime()) || sent.toISOString().slice(0,10)!==rawDate)throw new Error('De verzenddatum is ongeldig.');
+    const purchase=Math.round(sale/margin),total=purchase+shipping+fuel;
+    const dateFormat=new Intl.DateTimeFormat('nl-NL',{day:'numeric',month:'long',year:'numeric',timeZone:'Europe/Amsterdam'});
+    return {tracking:o.tracking,reference:o.orderId,sender,signer,cc:sender.startsWith('folkert@')?'chantor@dutchdesignersoutlet.com':'folkert@dutchdesignersoutlet.com',sale,margin:marginText.replace('.',','),purchase,shipping,fuel,total,shipDate:dateFormat.format(sent),today:dateFormat.format(today)};
+  }
+  function claimEuro(cents){return '€ '+(cents/100).toFixed(2).replace('.',',')}
+  function claimPdfBytes(data) {
+    // Eén A4-pagina met ingebouwde PDF-standaardlettertypen: geen externe bibliotheek nodig.
+    const commands=[];
+    const rgb=hex=>[1,3,5].map(i=>(parseInt(hex.slice(i,i+2),16)/255).toFixed(3)).join(' ');
+    const fill=(hex)=>commands.push(`${rgb(hex)} rg`);
+    const stroke=(hex)=>commands.push(`${rgb(hex)} RG`);
+    const rect=(x,y,w,h,hex)=>{fill(hex);commands.push(`${x} ${y} ${w} ${h} re f`)};
+    const line=(x1,y1,x2,y2,hex,width=1)=>{stroke(hex);commands.push(`${width} w ${x1} ${y1} m ${x2} ${y2} l S`)};
+    const escaped=value=>[...String(value)].map(char=>{const code=char.charCodeAt(0);if(char==='\\'||char==='('||char===')')return'\\'+char;if(code===0x20AC)return'\\200';if(code>=32&&code<=126)return char;if(code>=160&&code<=255)return'\\'+code.toString(8).padStart(3,'0');return'-'}).join('');
+    const text=(value,x,y,size=10,bold=false,color='#25313b')=>{fill(color);commands.push(`BT /${bold?'F2':'F1'} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${escaped(value)}) Tj ET`)};
+    const pill=(label,x,y,w)=>{const h=23,r=11.5,k=0.5523*r;fill('#f2eaf3');commands.push(`${x+r} ${y} m ${x+w-r} ${y} l ${x+w-r+k} ${y} ${x+w} ${y+r-k} ${x+w} ${y+r} c ${x+w} ${y+r+k} ${x+w-r+k} ${y+h} ${x+w-r} ${y+h} c ${x+r} ${y+h} l ${x+r-k} ${y+h} ${x} ${y+r+k} ${x} ${y+r} c ${x} ${y+r-k} ${x+r-k} ${y} ${x+r} ${y} c f`);text(label,x+10,y+8,8,true,'#54235b')};
+    rect(0,0,595,842,'#ffffff');rect(0,826,595,16,'#54235b');
+    text('F&M',54,775,21,true,'#54235b');text('DUTCH DESIGNERS OUTLET',54,755,9,true,'#57716c');
+    text('Lindenhoutseweg 57a',384,781,10,false);text('6545 AH Nijmegen',384,764,10,false);
+    line(54,733,541,733,'#d6c9d7',1.5);
+    text(`Nijmegen, ${data.today}`,54,700,10,false);
+    text('AANSPRAKELIJKHEIDSTELLING',54,656,10,true,'#57716c');
+    text(`Pakket ${data.tracking}`,54,633,16,true,'#54235b');
+    text(`Eigen referentie: ${data.reference}`,54,613,10,false);
+    text('Geachte heer, mevrouw,',54,576,11,false);
+    text('Hierbij stellen wij DPD Nederland B.V., gevestigd te Oirschot,',54,550,10,false);
+    text(`aansprakelijk voor het verlies van pakket ${data.tracking}.`,54,534,10,false);
+    const rows=[
+      ['Verzenddatum pakket',data.shipDate],
+      ['Factuurbedrag exclusief btw',claimEuro(data.sale)],
+      ['Inkoopwaarde* exclusief btw',claimEuro(data.purchase)],
+      ['Verzendkosten DPD exclusief btw',claimEuro(data.shipping)],
+      ['Brandstoftoeslag',claimEuro(data.fuel)],
+      ['Totaal schadebedrag',claimEuro(data.total)]
+    ];
+    const top=500,height=34;rows.forEach(([label,value],index)=>{const y=top-(index+1)*height;if(index===5)rect(54,y,487,height,'#f2eaf3');else if(index%2===0)rect(54,y,487,height,'#f7f8f8');text(label,67,y+12,10,index===5);text(value,407,y+12,10,index===5,'#54235b')});
+    line(54,top-6*height,541,top-6*height,'#d6c9d7');
+    text(`*Marge is ${data.margin} op deze collectie.`,54,273,9,false,'#67746f');
+    text('Ervan uitgaande u hiermee voldoende te hebben geïnformeerd.',54,237,10,false);
+    text('Met vriendelijke groet,',54,207,10,false);text(data.signer,54,173,11,true,'#54235b');
+    line(54,130,541,130,'#d6c9d7');
+    pill('BTW NL161820529B01',54,85,125);pill('KVK 09086520',186,85,90);pill('IBAN NL19INGB0009146002',283,85,165);pill('BIC INGBNL2A',455,85,85);
+    text('office@dutchdesignersoutlet.com',54,48,8,false);text('+316243773103',292,48,8,false);text('https://www.dutchdesignersoutlet.com',389,48,7,false);
+    const stream=commands.join('\n')+'\n';
+    const objects=[
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+      `<< /Length ${stream.length} >>\nstream\n${stream}endstream`
+    ];
+    let output='%PDF-1.4\n',offsets=[0];objects.forEach((body,index)=>{offsets.push(output.length);output+=`${index+1} 0 obj\n${body}\nendobj\n`});const start=output.length;
+    output+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`;
+    for(const offset of offsets.slice(1))output+=`${String(offset).padStart(10,'0')} 00000 n \n`;
+    output+=`trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
+    return Uint8Array.from(output,char=>char.charCodeAt(0));
+  }
+  function claimAttachment(data){const bytes=claimPdfBytes(data),safeId=String(data.tracking).replace(/[^a-z0-9-]/gi,'_');return{name:`aansprakelijkheidstelling-${safeId}.pdf`,mimeType:'application/pdf',base64:arrayBufferToBase64(bytes.buffer)}}
   $('#copyMessage').onclick = async event => {
     const button = event.currentTarget;
     const message = $('.message');
@@ -408,7 +514,6 @@
   };
   $('#createGmailDraft').onclick = async event => {
     requireAccess();
-    if (!order?.email) return alert('Bij deze order is geen e-mailadres gevonden.');
     const button = event.currentTarget;
     if (button.disabled) return;
     button.disabled = true; button.textContent = 'Google controleren…';
@@ -418,10 +523,18 @@
       button.textContent = 'Bericht maken…';
       const action = ACTIONS[selectedAction];
       const scenario = currentScenario();
-      const attachmentType = scenario?.attachment || action.attachment;
       const effectiveLang = scenario?.language || selectedLang;
-      const attachments = attachmentType === 'invoice' ? [await downloadInvoice(order.orderId)] : attachmentType === 'nov' ? [await downloadNovStatement(effectiveLang)] : [];
-      const result = await createDraftRequest({ action: 'createDraft', to: scenario?.recipient || action.recipient || order.email, subject: $('.subject').value, htmlBody: $('.message').innerHTML, plainBody: $('.message').innerText, useSignature: true, attachments }, session);
+      const recipient = scenario?.recipient || action.recipient || order?.email;
+      if (!recipient) throw new Error('Bij deze order is geen ontvanger gevonden.');
+      const types = scenario?.attachments || (scenario?.attachment || action.attachment ? [scenario?.attachment || action.attachment] : []);
+      const claim = types.includes('claim') ? claimData(order,claimValues,session.email) : null;
+      const attachments = [];
+      for (const type of types) {
+        if(type==='invoice') attachments.push(await downloadInvoice(order.orderId));
+        else if(type==='nov') attachments.push(await downloadNovStatement(effectiveLang));
+        else if(type==='claim') attachments.push(claimAttachment(claim));
+      }
+      const result = await createDraftRequest({ action: 'createDraft', to: recipient, cc: claim?.cc || '', subject: $('.subject').value, htmlBody: $('.message').innerHTML, plainBody: $('.message').innerText, useSignature: true, attachments }, session);
       button.textContent = 'Bericht gemaakt';
       GM_openInTab(gmailDraftUrl(result), { active: true, insert: true, setParent: true });
     } catch (error) {
