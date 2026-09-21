@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Workspace
 // @namespace    https://dutchdesignersoutlet.com/
-// @version      1.2.1
+// @version      1.2.5
 // @description  Klantberichten maken vanuit een geopende GoedGepickt-order.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        unsafeWindow
@@ -32,16 +32,17 @@
     try { instance ||= initialize(); instance.host.hidden=false; await instance.open(); }
     catch(error) { if(allowed()) alert(error.message); }
   }
-  page.__ggWorkspace = {version:'1.2.1',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
+  page.__ggWorkspace = {version:'1.2.5',run,getState:()=>({ready:allowed(),reason:allowed()?'Open Workspace':'Open een order met Workspace-toegang'})};
   setInterval(()=>{if(instance && !allowed()){instance.close();instance.host.hidden=true;}},1000);
   function initialize() {
     requireAccess();
 
   // Landtarieven voor claims (exclusief btw): hier zelfstandig aan te passen.
   const CLAIM_COSTS = {
-    NL: { shipping: '5.76', fuel: '0.84' },
-    DE: { shipping: '6.00', fuel: '0.84' },
-    BE: { shipping: '7.00', fuel: '0.84' }
+    NL: { shipping: '5.05', fuel: '0.84' },
+    DE: { shipping: '6.80', fuel: '0.84' },
+    BE: { shipping: '6.80', fuel: '0.84' },
+    LU: { shipping: '9.32', fuel: '0.84' }
   };
 
   const ACTIONS = {
@@ -462,12 +463,13 @@
     text('Lindenhoutseweg 57a',384,781,10,false);text('6545 AH Nijmegen',384,764,10,false);
     line(54,733,541,733,'#d6c9d7',1.5);
     text(`Nijmegen, ${data.today}`,54,700,10,false);
-    text('AANSPRAKELIJKHEIDSTELLING',54,656,10,true,'#57716c');
-    text(`Pakket ${data.tracking}`,54,633,16,true,'#54235b');
-    text(`Eigen referentie: ${data.reference}`,54,613,10,false);
-    text('Geachte heer, mevrouw,',54,576,11,false);
-    text('Hierbij stellen wij DPD Nederland B.V., gevestigd te Oirschot,',54,550,10,false);
-    text(`aansprakelijk voor het verlies van pakket ${data.tracking}.`,54,534,10,false);
+    text(`AANSPRAKELIJKHEIDSTELLING PAKKET ${data.tracking} (EIGEN REF: ${data.reference})`,54,660,9,true,'#54235b');
+    text('DPD Nederland B.V.',54,630,10,false);
+    text('Headoffice Oirschot',54,615,10,false);
+    text('P.O. box 302',54,600,10,false);
+    text('5680 AH Best',54,585,10,false);
+    text('Geachte heer, mevrouw,',54,552,10,false);
+    text(`Hierbij stellen wij DPD Nederland B.V., gevestigd te Oirschot, aansprakelijk voor het verlies van pakket ${data.tracking}.`,54,526,9,false);
     const rows=[
       ['Verzenddatum pakket',data.shipDate],
       ['Factuurbedrag exclusief btw',claimEuro(data.sale)],
@@ -476,14 +478,14 @@
       ['Brandstoftoeslag',claimEuro(data.fuel)],
       ['Totaal schadebedrag',claimEuro(data.total)]
     ];
-    const top=500,height=34;rows.forEach(([label,value],index)=>{const y=top-(index+1)*height;if(index===5)rect(54,y,487,height,'#f2eaf3');else if(index%2===0)rect(54,y,487,height,'#f7f8f8');text(label,67,y+12,10,index===5);text(value,407,y+12,10,index===5,'#54235b')});
+    const top=479,height=34;rows.forEach(([label,value],index)=>{const y=top-(index+1)*height;if(index===5)rect(54,y,487,height,'#f2eaf3');else if(index%2===0)rect(54,y,487,height,'#f7f8f8');text(label,67,y+12,10,index===5);text(value,407,y+12,10,index===5,'#54235b')});
     line(54,top-6*height,541,top-6*height,'#d6c9d7');
-    text(`*Marge is ${data.margin} op deze collectie.`,54,273,9,false,'#67746f');
-    text('Ervan uitgaande u hiermee voldoende te hebben geïnformeerd.',54,237,10,false);
-    text('Met vriendelijke groet,',54,207,10,false);text(data.signer,54,173,11,true,'#54235b');
-    line(54,130,541,130,'#d6c9d7');
-    pill('BTW NL161820529B01',54,85,125);pill('KVK 09086520',186,85,90);pill('IBAN NL19INGB0009146002',283,85,165);pill('BIC INGBNL2A',455,85,85);
-    text('office@dutchdesignersoutlet.com',54,48,8,false);text('+316243773103',292,48,8,false);text('https://www.dutchdesignersoutlet.com',389,48,7,false);
+    text(`*Marge is ${data.margin} op deze collectie.`,54,251,9,false,'#67746f');
+    text('Ervan uitgaande u hiermee voldoende te hebben geïnformeerd.',54,224,10,false);
+    text('Met vriendelijke groet,',54,197,10,false);text(data.signer,54,166,11,true,'#54235b');
+    line(54,100,541,100,'#d6c9d7');
+    pill('BTW NL161820529B01',54,69,125);pill('KVK 09086520',186,69,90);pill('IBAN NL19INGB0009146002',283,69,165);pill('BIC INGBNL2A',455,69,85);
+    pill('office@dutchdesignersoutlet.com',54,38,202);pill('+316243773103',264,38,95);pill('https://www.dutchdesignersoutlet.com',367,38,174);
     const stream=commands.join('\n')+'\n';
     const objects=[
       '<< /Type /Catalog /Pages 2 0 R >>',
