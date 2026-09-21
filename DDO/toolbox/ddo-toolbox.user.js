@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Core
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 3.5.0
+// @version 3.5.2
 // @description Statische toolbox met los installeerbare leverancieradapters.
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (() => {
   'use strict';
-  const VERSION='3.5.0', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
+  const VERSION='3.5.2', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
@@ -40,10 +40,11 @@
     seoWriter:{label:'SEO Writer',description:'Genereer en analyseer uitgebreide SEO-teksten.',manager:true,picker:true,icon:'search',action:true,adapter:true,file:'ddo-adapter-seo-writer.user.js'},
     fluentL:{label:'FluentL',description:'Vertaal product- en paginavelden naar geselecteerde talen.',manager:true,picker:true,icon:'translate',action:true,adapter:true,file:'ddo-adapter-fluentl.user.js'},
     faqSelector:{label:'FAQ Selector',description:'Zoek en selecteer relevante FAQ’s voor de pagina.',manager:true,picker:true,icon:'help',action:true,adapter:true,file:'ddo-adapter-faq-selector.user.js'},
-    ggQueue:{label:'GG Queue',description:'Stuur geselecteerde producten één voor één naar GoedGepickt.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'},
-    productValidator:{label:'Product Validator',description:'Controleer geselecteerde producten op kleuren en prijsafwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
+    ggQueue:{label:'GG Queue',description:'Bouw een GoedGepickt-queue op uit selecties of Product ID’s.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'},
+    productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
   };
   const ADAPTER_CATALOG=[
+    {id:'anita',label:'Anita/Rosa Faia',file:'ddo-adapter-anita.user.js'},
     {id:'faqSelector',label:'FAQ Selector',file:'ddo-adapter-faq-selector.user.js'},
     {id:'fluentL',label:'FluentL',file:'ddo-adapter-fluentl.user.js'},
     {id:'ggQueue',label:'GG Queue',file:'ddo-adapter-gg-queue.user.js'},
