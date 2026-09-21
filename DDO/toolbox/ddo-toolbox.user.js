@@ -1,324 +1,4648 @@
 // ==UserScript==
-// @name DDO Toolbox | Core
+// @name DDO Toolbox | Adapter | LingaDore
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 3.5.2
-// @description Statische toolbox met los installeerbare leverancieradapters.
+// @version 1.0.1
+// @description LingaDore EDI: modelcheck, product, maten, EAN, foto's en DDO EAN-koppeling.
+// @match https://b2b.lingadore.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
-// @connect raw.githubusercontent.com
-// @connect docs.google.com
-// @connect googleusercontent.com
-// @connect *.googleusercontent.com
-// @run-at document-end
-// @updateURL https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js
-// @downloadURL https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js
+// @grant GM_setClipboard
+// @grant GM_download
+// @connect b2b.lingadore.com
+// @connect dutchdesignersoutlet.com
+// @connect www.dutchdesignersoutlet.com
+// @require https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
+// @run-at document-idle
+// @author C. P. v. Beek
+// @updateURL https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js
+// @downloadURL https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js
 // ==/UserScript==
 (() => {
-  'use strict';
-  const VERSION='3.5.2', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
-  const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
-  const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
-  const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
-  const TABLE='#tabs-3 table.options', PID='#tabs-1 input[name="supplier_pid"]', BRAND='#tabs-1 #select2-brand-container';
-  const USERS={Beheerder:['Chantor Pascal van Beek'],Manager:['Folkert van Beek','Monique van Beek'],Picker:['Chantal Timmer','Anke Adams']};
-  const FEATURES={
-    edi:{label:'EDI',description:'Vul en corrigeer product-, EAN- en voorraadgegevens.',manager:true,picker:true,icon:'sync'},
-    cap:{label:'Prijs Fixer',description:'Kopieer productprijzen naar alle maatvarianten.',manager:true,picker:true,icon:'euro'},
-    sizeHelper:{label:'Size Fixer',description:'Selecteer ontbrekende maten vanuit het klembord.',manager:true,picker:true,icon:'ruler'},
-    unlockStock:{label:'Unlock Stock',description:'Maak geblokkeerde voorraadvelden bewerkbaar.',manager:true,picker:true,icon:'unlock'},
-    priceHelper:{label:'Sale Setter',description:'Bereken de verkoopprijs met een kortingspercentage.',manager:true,picker:true,icon:'sale'},
-    photoLoco:{label:'PhotoLoco',description:'Verdeel meerdere productfoto’s over de afbeeldingsvelden.',manager:true,picker:true,icon:'image'},
-    nis:{label:'Copy Stock',description:'Kopieer EAN-codes en voorraad naar het klembord.',manager:true,picker:true,icon:'copy'},
-    productFinetuner:{label:'Supplier Hook',description:'Genereert een link naar de B2B-productpagina.',manager:true,picker:true,icon:'link'},
-    rowEdit:{label:'Edit Item',description:'Voeg directe bewerklinks toe aan tabelrijen.',manager:true,picker:true,icon:'edit'},
-    discountPill:{label:'Discount Pill',description:'Toon het kortingspercentage in de productlijst.',manager:true,picker:true,icon:'sale'},
-    multiTabber:{label:'Multitabber',description:'Selecteer, filter en open meerdere producten tegelijk.',manager:true,picker:true,icon:'tabs'},
-    twoOrder:{label:'2Order',description:'Selecteer, kopieer en verwerk orders voor 2Order.',manager:true,picker:true,icon:'cart'},
-    sizeChart:{label:'Inject Size Chart',description:'Vul de standaard maattabel in voor alle vier talen.',manager:true,picker:true,icon:'ruler',action:true},
-    threeForTwo:{label:'3=2 Checker',description:'Bereken en verwerk de retourcorrectie voor 3 halen, 2 betalen.',manager:true,picker:true,icon:'sale'},
-    colorManagement:{label:'Kleurbeheer',description:'Voeg kleuren toe of wijzig productkleuren vanuit een Excel-selectie.',manager:false,picker:false,icon:'palette'},
-    seoWriter:{label:'SEO Writer',description:'Genereer en analyseer uitgebreide SEO-teksten.',manager:true,picker:true,icon:'search',action:true,adapter:true,file:'ddo-adapter-seo-writer.user.js'},
-    fluentL:{label:'FluentL',description:'Vertaal product- en paginavelden naar geselecteerde talen.',manager:true,picker:true,icon:'translate',action:true,adapter:true,file:'ddo-adapter-fluentl.user.js'},
-    faqSelector:{label:'FAQ Selector',description:'Zoek en selecteer relevante FAQ’s voor de pagina.',manager:true,picker:true,icon:'help',action:true,adapter:true,file:'ddo-adapter-faq-selector.user.js'},
-    ggQueue:{label:'GG Queue',description:'Bouw een GoedGepickt-queue op uit selecties of Product ID’s.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'},
-    productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
-  };
-  const ADAPTER_CATALOG=[
-    {id:'anita',label:'Anita/Rosa Faia',file:'ddo-adapter-anita.user.js'},
-    {id:'faqSelector',label:'FAQ Selector',file:'ddo-adapter-faq-selector.user.js'},
-    {id:'fluentL',label:'FluentL',file:'ddo-adapter-fluentl.user.js'},
-    {id:'ggQueue',label:'GG Queue',file:'ddo-adapter-gg-queue.user.js'},
-    {id:'lisca',label:'Lisca',file:'ddo-adapter-lisca.user.js'},
-    {id:'mey',label:'Mey',file:'ddo-adapter-mey.user.js'},
-    {id:'seoWriter',label:'SEO Writer',file:'ddo-adapter-seo-writer.user.js'},
-    {id:'productValidator',label:'Product Validator',file:'ddo-adapter-product-validator.user.js'},
-    {id:'triumph-sloggi',label:'Triumph/Sloggi',file:'ddo-adapter-triumph.user.js'},
-    {id:'wacoal-group',label:'Wacoal',file:'ddo-adapter-wacoal.user.js'}
-  ].map(item=>({...item,updateUrl:`https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/${item.file}`}));
-  const EDI_ACTIONS={scraper:{label:'Stock & EAN Scraper',manager:true,picker:true},autopaster:{label:'Stock & EAN Manueel',manager:true,picker:true},stockfixer:{label:'Zero Stock Fixer',manager:true,picker:true},importer:{label:'Product Verrijken',manager:true,picker:true},prune:{label:'Prune',manager:true,picker:true}};
-  const CORE_FEATURES={shiftSelect:{manager:true,picker:true},productActions:{manager:true,picker:true},updateFlow:{manager:true,picker:true}};
-  const ICONS={
-    stock:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 2v4m8-4v4M8 13l3 3 6-7"/>',barcode:'<path d="M3 5v14m3-14v14m4-14v14m2-14v14m4-14v14m2-14v14m3-14v14"/>',recycle:'<path d="m8 7 3-5 4 7m-4-7 4 1m3 7 4 7h-8m8 0-2 3M11 21H4l4-7m-4 7-2-3"/>',product:'<path d="M4 4h16v16H4zM8 8h8m-8 4h8m-8 4h5"/>',prune:'<circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="m8.5 8.5 11 7.5M8.5 15.5 20 8"/>',euro:'<path d="M19 6a7 7 0 1 0 0 12M4 10h11M4 14h10"/>',ruler:'<path d="m4 17 13-13 3 3L7 20H4v-3Zm9-9 3 3m-6 0 3 3m-6 0 3 3"/>',unlock:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7-2"/>',sale:'<path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="7" cy="7" r="1"/><path d="m10 16 6-6"/>',image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',tune:'<path d="M4 6h16M8 6v4m-4 6h16m-5-4v4M4 11h16m-8-4v4"/>',link:'<path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 3 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/>',edit:'<path d="M4 20h4L20 8l-4-4L4 16v4Zm10-14 4 4"/>',tabs:'<rect x="3" y="7" width="14" height="14" rx="2"/><path d="M7 7V3h14v14h-4"/>',actions:'<path d="M5 7h12m0 0-3-3m3 3-3 3M19 17H7m0 0 3-3m-3 3 3 3"/>',flow:'<path d="M4 6h11a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4H7m0 0 3-3m-3 3 3 3"/>',cart:'<path d="M2 3h3l3 12h11l3-9H6m2 9-1 3h12"/><circle cx="9" cy="21" r="1"/><circle cx="18" cy="21" r="1"/>',sync:'<path d="M20 7h-6V1m6 6a9 9 0 0 0-15-2M4 17h6v6m-6-6a9 9 0 0 0 15 2"/>',search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>',translate:'<path d="M4 5h9M8.5 3v2m-3 4c1.5 3 4 5 7 6m-1-6c-1 3-3.5 5.5-7.5 7"/><path d="m14 20 3.5-8 3.5 8m-5.5-3h4"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2 1-1.2 1.8v.5M12 17.5h.01"/>',palette:'<path d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 0-4H12a1.5 1.5 0 0 1 0-3h3a6 6 0 0 0 0-12h-3Z"/><circle cx="7.5" cy="9" r="1"/><circle cx="10" cy="6.5" r="1"/><circle cx="14" cy="6.5" r="1"/><circle cx="16.5" cy="9" r="1"/>',rocket:'<path d="M14 4c3-2 5-2 6-2 0 1 0 3-2 6l-5 5-5-1-1-5 5-5Z"/><path d="m9 15-4 4m1-6-3 1 4-4m4 8-1 3-2-3"/><circle cx="15.5" cy="6.5" r="1.5"/>',checklist:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m7 8 1.5 1.5L11 7M13 8h4m-10 5 1.5 1.5L11 12m2 1h4m-10 5 1.5 1.5L11 17m2 1h4"/>'
-  };
-  const adapters=new Map(), messages=new Map(); let busy=false, requestId='',pendingModelSelection=null;
-  const pruneState={known:false,count:0};
-  const $=(s,r=document)=>r.querySelector(s), decode=e=>{try{return JSON.parse(e.detail||'{}')}catch{return {}}};
-  const normalizeName=value=>String(value||'').replace(/\s+/g,' ').trim().toLocaleLowerCase('nl');
-  function identity(){const name=$('.profile .profile_content h1,.profile h1')?.textContent?.replace(/\s+/g,' ').trim()||'',role=Object.keys(USERS).find(key=>USERS[key].some(user=>normalizeName(user)===normalizeName(name)))||'';return{name,role}}
-  function enabled(id){const user=identity(),feature=FEATURES[id]||EDI_ACTIONS[id]||CORE_FEATURES[id]||(['orderClipboard','statusWorker'].includes(id)?FEATURES.twoOrder:null);return !!feature&&(user.role==='Beheerder'||(user.role==='Manager'&&feature.manager===true)||(user.role==='Picker'&&feature.picker===true))}
-  window.__ddoToolbox={isEnabled:enabled,identity,version:VERSION};
-  const send=(name,data={})=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
-  const norm=v=>({'XL/2L':'XL/XXL','XL/2XL':'XL/XXL','3L/4L':'3XL/4XL','2XL':'XXL','3XL':'XXXL','4XL':'XXXXL'}[String(v||'').trim().toUpperCase().replace(/\s+/g,'')]||String(v||'').trim().toUpperCase().replace(/\s+/g,''));
-  const brand=()=>$(BRAND)?.getAttribute('title')||$(BRAND)?.textContent?.trim()||'';
-  function tab3(){if($('#tabs .ui-tabs-active a[href="#tabs-3"],#tabs .active a[href="#tabs-3"]'))return true;const p=$('#tabs-3');return !!p&&getComputedStyle(p).display!=='none'&&p.getClientRects().length>0}
-  function productEditPage(){const p=new URLSearchParams(location.search);return p.get('section')==='products'&&p.get('action')==='edit'&&!!p.get('id')}
-  function productTabActive(id){const link=$(`#tabs > .ui-tabs-nav li.ui-tabs-active a[href="#${id}"],#tabs > ul li[aria-selected="true"] a[href="#${id}"],#tabs li.ui-tabs-active a[href="#${id}"]`);if(link)return true;const panel=document.getElementById(id);return !!panel&&panel.getAttribute('aria-hidden')!=='true'&&getComputedStyle(panel).display!=='none'&&panel.getClientRects().length>0}
-  const stocks=()=>[...document.querySelectorAll('#tabs-3 input[name*="[stock]"]')].filter(i=>!i.disabled&&!i.readOnly);
-  const input=(el,v)=>{if(!el)return false;el.value=String(v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));if(window.jQuery)try{window.jQuery(el).trigger('input').trigger('change')}catch{}return true};
-  const notify=el=>{if(!el)return false;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));if(window.jQuery)try{window.jQuery(el).trigger('change')}catch{}return true};
-  function save(){const click=()=>{const b=$('input[type="submit"][name="edit"],button[name="edit"]');if(b)b.click()};if(!pendingModelSelection){click();return}const pending=pendingModelSelection;pendingModelSelection=null;pending.then(matched=>{if(matched)click();else status('importer','Model niet gevonden · niet opgeslagen','error',6000)}).catch(error=>{console.error('[DDO Toolbox / Model]',error);status('importer','Modelselectie mislukt · niet opgeslagen','error',6000)})}
-  function discover(){adapters.clear();send('discover',{brand:brand(),pid:$(PID)?.value||'',tab3:tab3(),table:!!$(TABLE)})}
-  document.addEventListener('ddo-toolbox:adapter-state',e=>{const d=decode(e);if(d.id)adapters.set(d.id,d);paint(false);renderUpdateState(readUpdateCache())});
-  document.addEventListener('ddo-toolbox:adapter-status',e=>{const d=decode(e);if(d.requestId!==requestId)return;status('scraper',d.text,d.kind,d.done?3500:0);if(d.done){busy=false;requestId='';if(d.autoSave&&d.changed>0)save();paint(false)}});
-  const adapter=()=>[...adapters.values()].filter(a=>a.kind!=='feature'&&a.available).sort((a,b)=>(b.priority||0)-(a.priority||0))[0]||null;
-  function available(){const tab=tab3(),table=!!$(TABLE),a=adapter(),gate=(id,state)=>enabled(id)?state:{...state,ok:false,why:'Geen toegang'};return{
-    scraper:gate('scraper',{ok:tab&&table&&!!a,label:'Stock & EAN Scraper',why:!tab?'Open tab 3':!table?'Tabel niet geladen':adapters.size?'Geen passende adapter':'Geen adapter geïnstalleerd'}),
-    autopaster:gate('autopaster',{ok:tab&&table,label:'Stock & EAN Manueel',why:!tab?'Open tab 3':'Tabel niet geladen'}),
-    stockfixer:gate('stockfixer',{ok:tab&&stocks().some(i=>i.value.trim()==='1'),label:'Zero Stock Fixer',why:!tab?'Open tab 3':'Geen stock 1 gevonden'}),
-    importer:gate('importer',{ok:productEditPage()&&!!$('#tabs-1')&&productTabActive('tabs-1'),label:'Product Verrijken',why:!productEditPage()?'Open product':!$('#tabs-1')?'Productformulier niet geladen':'Open tab 1'}),
-    prune:gate('prune',pruneAvailability())}}
-  function featureContext(id){
-    const feature=FEATURES[id];
-    if(feature?.adapter){
-      const installed=adapters.get(id),params=new URLSearchParams(location.search),textPage=params.get('action')==='edit'&&['news','products','brands','categories','publisher'].includes(params.get('section'));
-      if(['seoWriter','fluentL','faqSelector'].includes(id)&&!textPage)return{ready:false,reason:'Open een ondersteunde bewerkpagina'};
-      return{ready:!!installed?.ready,reason:installed?.reason||(!installed?'Adapter ontbreekt':'Niet beschikbaar op deze pagina')};
+'use strict';
+// BEGIN SHARED EDI (generated; edit EDI/shared.js)
+// Shared EDI contract. Bundled into userscripts by build-edi.cjs.
+const DDO_EDI = (() => {
+  function normalizeSize(value) {
+    let size = String(value ?? '').toUpperCase().replace(/\(.*?\)/g, '').replace(/\s+/g, '');
+    size = ({'XL/2L':'XL/XXL','XL/2XL':'XL/XXL','3L/4L':'3XL/4XL'})[size] || size;
+    return size.replace(/\b([2-5])XL\b/g, (_, n) => 'X'.repeat(Number(n)) + 'L');
+  }
+  function sizeCandidates(value) {
+    const size = normalizeSize(value), match = size.match(/^(X{2,5})L$/);
+    return match ? [size, `${match[1].length}XL`] : [size];
+  }
+  function parseEAN(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    if (doc.querySelector('input[type="password"]')) throw Error('Log eerst in bij LingaDore B2B');
+    const values = new Set();
+    for (const row of doc.querySelectorAll('tr')) {
+      const label = row.querySelector('th,td');
+      if (!/\bean\b/i.test(label?.textContent || '')) continue;
+      const value = label.nextElementSibling?.textContent?.trim() || '';
+      if (/^\d{8,14}$/.test(value)) values.add(value);
     }
-    const params=new URLSearchParams(location.search),section=params.get('section'),action=params.get('action'),product=section==='products',edit=product&&action==='edit',active1=edit&&productTabActive('tabs-1'),active2=edit&&productTabActive('tabs-2'),active3=edit&&tab3(),active7=product&&!action&&productTabActive('tabs-7'),productList=product&&!action&&!!$('input[name="products[]"]'),sizeChartReady=sizeChartPage()&&!!$('textarea[name="sizechart"],textarea[name="lang[en][sizechart]"],textarea[name="lang[de][sizechart]"],textarea[name="lang[fr][sizechart]"]');
-    const states={edi:[active1||active3,'Open producttab 1 of 3'],cap:[active3&&!!$('#tabs-3 th.product_option_small'),'Open producttab 3'],sizeHelper:[active2&&!!$('select[name="sizes[]"][multiple],select[name="sizes"][multiple]'),'Open producttab 2'],unlockStock:[active3&&!!$('#tabs-3 input[name$="[stock]"]'),'Open producttab 3'],priceHelper:[active1,'Open producttab 1'],photoLoco:[active1&&!!$('input[type="file"][name^="image["]'),'Open producttab 1'],nis:[active3&&!!$(TABLE),'Open producttab 3'],productFinetuner:[active1||productList,'Open producttab 1 of de productlijst'],rowEdit:[!!$('tr.highlight[onmousedown*="Goto"]'),'Open een ondersteunde lijst'],discountPill:[productList,'Open de productlijst'],multiTabber:[productList,'Open de productlijst'],twoOrder:[orderStatusPage()||!!paste2OrderRequest(),'Open een 2Order-statuspagina'],sizeChart:[sizeChartReady,'Open een merk met sizechartvelden'],threeForTwo:[section==='returns'&&['view','line_add'].includes(action),'Open een retour'],colorManagement:[active7&&!!$('#product_coloradd_dialog form'),'Open Producten → tab 7']};
-    const state=states[id]||[false,'Niet van toepassing'];return{ready:!!state[0],reason:state[0]?'Beschikbaar op deze pagina':state[1]};
+    if (values.size > 1) throw Error('Meerdere EAN-codes voor één variant');
+    return [...values][0] || '';
   }
-  function status(id,text,kind='info',ms=0){const button=$(`[data-edi-action="${id}"]`),tile=$('[data-feature="edi"]');if(button){button.dataset.status=kind;button.closest('.ddo-edi-row')?.querySelector('.ddo-edi-status')?.replaceChildren(text||'')}if(tile)tile.dataset.status=kind==='error'?'error':kind==='busy'?'busy':'usable';messages.set(id,ms?Date.now()+ms:kind==='busy'?Infinity:0);if(ms)setTimeout(()=>paint(),ms)}
-  function paint(scan=true){if(scan)discover();const user=identity(),name=$('#ddo-user-name'),role=$('#ddo-user-role');if(name)name.textContent=user.name||'Gebruiker wordt geladen…';if(role)role.textContent=user.role||'Geen toegang';const actions=available(),ediPanel=$('#ddo-edi-panel'),ediContext=featureContext('edi'),colorPanel=$('#ddo-color-panel'),colorContext=featureContext('colorManagement');if(ediPanel)ediPanel.hidden=!enabled('edi')||!ediContext.ready;if(colorPanel)colorPanel.hidden=!enabled('colorManagement')||!colorContext.ready;Object.entries(actions).forEach(([id,state])=>{const button=$(`[data-edi-action="${id}"]`);if(!button)return;button.textContent=state.label;button.disabled=busy||!state.ok;if((messages.get(id)||0)>Date.now())return;messages.delete(id);button.dataset.status=state.ok?'usable':'installed';button.closest('.ddo-edi-row').querySelector('.ddo-edi-status').textContent=state.ok?(id==='stockfixer'?'Stock 1 → 0':'Gereed'):state.why;button.title=state.ok?'':state.why});Object.entries(FEATURES).forEach(([id,feature])=>{const tile=$(`[data-feature="${id}"]`);if(!tile)return;const access=enabled(id),context=featureContext(id),missing=feature.adapter&&!adapters.has(id),usable=access&&!missing&&context.ready;tile.dataset.status=!access||missing?'unavailable':usable?'usable':'installed';tile.disabled=feature.action?!usable:true;tile.style.cursor=feature.action&&usable?'pointer':'default';tile.setAttribute('aria-disabled',String(!feature.action||!usable));tile.setAttribute('aria-label',`${feature.label}: ${feature.description}`);$('.ddo-tile-label',tile).textContent=feature.label;$('.ddo-tile-status',tile).textContent='';tile.title=!access?`${feature.description} Geen toegang.`:missing?`${feature.description} Adapter ontbreekt.`:feature.description})}
-  function runAdapter(autoSave,forceRefresh){const a=adapter();if(!a||busy)return;busy=true;requestId=`${Date.now()}-${Math.random()}`;status('scraper',`${a.label} starten…`,'busy');paint(false);send('run-adapter',{id:a.id,requestId,autoSave,forceRefresh});setTimeout(()=>{if(!requestId)return;status('scraper','Adapter reageert niet','error',4000);requestId='';busy=false;paint()},120000)}
-  function parseLine(line){
-    if(/^\s*\|/.test(line)){
-      const cells=line.split('|').slice(1,-1).map(cell=>cell.trim());
-      if(cells.length>=3&&!cells.every(cell=>/^:?-{3,}:?$/.test(cell)))return{size:cells[0],ean:cells[1],pid:cells[2],stock:cells[3]||''};
-      return null;
+  function variantMap(entries) {
+    const map = new Map();
+    for (const entry of entries) {
+      const size = normalizeSize(entry.size), ean = String(entry.ean || '');
+      if (!size || !/^\d{8,14}$/.test(ean)) throw Error('Ongeldige maat/EAN-regel');
+      if (map.has(size) && map.get(size).ean !== ean) throw Error(`Conflicterende EAN voor ${size}`);
+      map.set(size, {...entry, size, ean});
     }
-    const t=line.split('\t');
-    if(t.length>=3)return{size:t[0],ean:t[1],pid:t[2],stock:t.slice(3).join('\t')};
-    const m=line.match(/^(.+?)-(\d{8,14})-([^-]+)(?:-(.*))?$/);
-    return m&&{size:m[1],ean:m[2],pid:m[3],stock:m[4]||''};
+    return map;
   }
-  async function autopaste(defaultStock=''){if(busy)return;busy=true;status('autopaster','Klembord lezen…','busy');paint(false);try{const raw=await navigator.clipboard.readText(),pid=String($(PID)?.value||'').trim().toUpperCase().replace(/\s+/g,'');if(!raw.trim())throw Error('Klembord is leeg');if(!pid)throw Error('Geen Supplier PID');const entries=raw.split(/\r?\n/).map(l=>parseLine(l.trim())).filter(Boolean).map(x=>({...x,size:norm(x.size),ean:String(x.ean||'').replace(/\D/g,''),pid:String(x.pid).trim().toUpperCase().replace(/\s+/g,''),stock:String(x.stock??'').trim()||defaultStock})).filter(x=>x.pid&&(pid.startsWith(x.pid)||x.pid.startsWith(pid))),map=new Map(entries.map(x=>[x.size,x]));if(!entries.length)throw Error(`Geen matches voor ${pid}`);let ec=0,sc=0;document.querySelectorAll(`${TABLE} tbody tr`).forEach(r=>{const x=map.get(norm($('input.product_option_small',r)?.value||$('td input',r)?.value));if(!x)return;const e=$('input[name$="[barcode]"]',r),s=$('input[name$="[stock]"]',r);if(e&&x.ean){input(e,x.ean);ec++}if(s&&x.stock!==''){input(s,x.stock);sc++}});status('autopaster',`${ec} EAN · ${sc} stock`,ec||sc?'success':'error',3500)}catch(e){status('autopaster',e.message,'error',4000)}finally{busy=false;paint()}}
-  function fix(autoSave){let n=0;stocks().forEach(i=>{if(i.value.trim()==='1'){input(i,0);n++}});status('stockfixer',`${n} aangepast`,'success',3000);if(autoSave&&n)save();paint()}
-  const pruneNorm=v=>String(v||'').normalize('NFKC').replace(/[\s\u00a0]+/g,'').replace(/[^0-9A-Z]/gi,'').toUpperCase().trim();
-  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  async function loadPruneTab(selector,ready,timeout=5000){if(ready())return true;document.querySelector(`a[href="${selector}"],#tabs a[href="${selector}"]`)?.click();const start=Date.now();while(Date.now()-start<timeout){if(ready())return true;await pause(100)}return false}
-  function optionSizeSet(){const set=new Set();document.querySelectorAll(`${TABLE} tr`).forEach(row=>{const cell=row.children[0],field=cell?.querySelector('input.product_option_small,input,select'),value=pruneNorm(field?.value||field?.textContent||'');if(value)set.add(value)});return set}
-  function optionsExplicitlyEmpty(){const tab=$('#tabs-3');return !!tab&&(!!$('.empty_set',tab)||/no options,?\s*please add colors and sizes first/i.test(tab.textContent||''))}
-  function sizeRows(){return [...document.querySelectorAll('#tabs-2 tr[id^="sizedelete_"]')].map(row=>({row,key:pruneNorm(row.querySelector('td.control')?.textContent||row.textContent)})).filter(x=>x.key)}
-  function refreshPruneState(){const edit=new URLSearchParams(location.search).get('action')==='edit',optionsLoaded=!!$(`${TABLE} tr`)||optionsExplicitlyEmpty(),sizesLoaded=!!$('#tabs-2 tr[id^="sizedelete_"],#tabs-2 .empty_set');if(!edit||!optionsLoaded||!sizesLoaded){pruneState.known=false;pruneState.count=0;return pruneState}const options=optionSizeSet();pruneState.known=true;pruneState.count=sizeRows().filter(x=>!options.has(x.key)).length;return pruneState}
-  function pruneAvailability(){const edit=new URLSearchParams(location.search).get('action')==='edit'&&!!$('#tabs-2')&&!!$('#tabs-3');if(!edit)return{ok:false,label:'Prune',why:'Open een product-editpagina'};const state=refreshPruneState();if(!state.known)return{ok:true,label:'Prune',why:'Klik om Sizes te controleren'};return{ok:state.count>0,label:state.count?`Prune · ${state.count}`:'Prune',why:state.count?`${state.count} overtollige maten`:'Niets te prunen'}}
-  async function deleteAjaxRow(row,timeout=1600){const id=row.id,control=row.querySelector('a.ajax_row_delete')||row.querySelector('img[src*="/img/icon/delete"],img[alt="delete"]')?.closest('a')||row.querySelector('img[src*="/img/icon/delete"],img[alt="delete"]');if(!control)return false;control.click();const start=Date.now();while(Date.now()-start<timeout){if(!document.getElementById(id))return true;await pause(60)}return !document.getElementById(id)}
-  async function removePruneTag(){await loadPruneTab('#tabs-7',()=>!!$('#tabs-7 tr[id^="tagdelete_"],#tabs-7 .empty_set')).catch(()=>false);const row=[...document.querySelectorAll('#tabs-7 tr[id^="tagdelete_"]')].find(r=>pruneNorm(r.querySelector('td.control')?.textContent)==='SYSTPRUNEME');return row?deleteAjaxRow(row):false}
-  async function pruneCurrentProduct(){if(busy||!available().prune.ok)return;busy=true;status('prune','Maten laden…','busy');paint(false);const active=$('#tabs .ui-tabs-active a[href^="#"]')?.getAttribute('href');try{const optionsReady=await loadPruneTab('#tabs-3',()=>!!$(`${TABLE} tr`)||optionsExplicitlyEmpty()),sizesReady=await loadPruneTab('#tabs-2',()=>!!$('#tabs-2 tr[id^="sizedelete_"],#tabs-2 .empty_set'));if(!optionsReady)throw Error('Options konden niet worden geladen');if(!sizesReady)throw Error('Sizes konden niet worden geladen');const options=optionSizeSet(),all=sizeRows(),emptyOptions=optionsExplicitlyEmpty();if(!options.size&&!emptyOptions)throw Error('Options-status is onbekend; niets verwijderd');const remove=all.filter(x=>!options.has(x.key));pruneState.known=true;pruneState.count=remove.length;if(!remove.length){await removePruneTag();status('prune','Alles was al schoon','success',3500);return}const explanation=emptyOptions?'Options is leeg; alle Sizes worden verwijderd.':`${remove.length} van ${all.length} Sizes worden verwijderd.`;if(!confirm(`Prune dit product?\n\n${explanation}\n${remove.map(x=>x.key).join(', ')}`)){status('prune','Geannuleerd','info',2500);return}let deleted=0;for(const item of remove){status('prune',`${deleted}/${remove.length} verwijderen…`,'busy');if(await deleteAjaxRow(item.row))deleted++}const remaining=sizeRows().filter(x=>!options.has(x.key));pruneState.count=remaining.length;if(remaining.length)throw Error(`${remaining.length} maten konden niet worden verwijderd`);await removePruneTag();status('prune',`${deleted} maten verwijderd`,'success',4000)}catch(error){console.error('[DDO Toolbox / Prune]',error);status('prune',error.message||'Prune mislukt','error',5000)}finally{if(active)document.querySelector(`a[href="${active}"]`)?.click();busy=false;paint()}}
-
-  // Shared passive enhancement helpers (CAP, Sizes Helper and Unlock Stock).
-  function findLabelInput(label){for(const cell of document.querySelectorAll('#tabs-1 td.control')){const text=cell.textContent.replace(/\s+/g,' ').trim().replace(/:$/,'').trim();if(text.toLowerCase()===label.toLowerCase())return cell.nextElementSibling?.querySelector('input,select,textarea')||cell.closest('tr')?.querySelector('input,select,textarea')||null}return null}
-  function fillAll(selector,value){const fields=[...document.querySelectorAll(selector)];fields.forEach(field=>input(field,value));return fields.length}
-  function smallInlineButton(id,text,title,action){const b=document.createElement('button');b.type='button';b.id=id;b.textContent=text;b.title=title;b.className='ddo-inline-tool';b.onclick=e=>{e.preventDefault();e.stopPropagation();action(b)};return b}
-  function enhancePriceHeaders(){const h=[...document.querySelectorAll('#tabs-3 th.product_option_small')];if(h.length<5)return;const specs=[
-    [2,'ddo-cap-price','Price',()=>$('#tabs-1 input.control.price[name="price"],#tabs-1 input[name="price"]')||findLabelInput('Price'),'#tabs-3 input[name^="options"][name$="[price]"]'],
-    [3,'ddo-cap-advice','Advice',()=>$('#tabs-1 input[name="price_advice"]')||findLabelInput('Advice price'),'#tabs-3 input[name^="options"][name$="[price_advice]"]'],
-    [4,'ddo-cap-vip','VIP',()=>$('#tabs-1 input[name="price_vip"]')||findLabelInput('Price (VIP)'),'#tabs-3 input[name^="options"][name$="[price_vip]"]']];
-    specs.forEach(([i,id,label,source,target])=>{if(!$('#'+id))h[i].appendChild(smallInlineButton(id,'€',`Kopieer ${label} naar alle maten`,()=>{const s=source();if(!s)return alert(`${label} niet gevonden op tab 1.`);fillAll(target,s.value)}))});
-    h[2].style.minWidth='90px';h[3].style.minWidth='110px';h[4].style.minWidth='105px';document.querySelectorAll('#tabs-3 input.product_option_small').forEach(i=>i.style.minWidth='90px')
+  function eanTSV(entries, supplierId) {
+    if (/[\t\r\n]/.test(supplierId)) throw Error('Ongeldig Supplier ID');
+    return [...variantMap(entries).values()].map(e => `${e.size}\t${e.ean}\t${supplierId}`).join('\n');
   }
-  function enhanceStockUnlock(){const headers=[...document.querySelectorAll('#tabs-3 th,.options th')],h=headers.find(x=>x.textContent.trim().toLowerCase()==='stock')||headers[4];if(!h||$('#ddo-unlock-stock'))return;h.appendChild(smallInlineButton('ddo-unlock-stock','🔓','Ontgrendel alle stockvelden',()=>{let n=0;document.querySelectorAll('input[type="text"][name^="options"][name$="[stock]"]').forEach(i=>{if(i.disabled||i.hasAttribute('disabled')){i.disabled=false;i.removeAttribute('disabled');n++}if(i.readOnly||i.hasAttribute('readonly')){i.readOnly=false;i.removeAttribute('readonly');n++}i.style.outline='1px solid #28a745'});console.info(`[DDO Toolbox / Unlock] ${n} wijzigingen`)}))}
-  const unique=a=>[...new Set(a.map(x=>String(x||'').trim()).filter(Boolean))], optionNorm=v=>{const x=String(v||'').trim().toUpperCase().replace(/\s+/g,'');return /^(ONESIZE|ONE-SIZE|NO-SIZE)$/.test(x)?'NOSIZE':x};
-  function parseSizes(raw){const text=String(raw||'').trim();if(!text)return{sizes:[]};try{const p=JSON.parse(text);if(Array.isArray(p?.sizes))return{sizes:unique(p.sizes),orderId:p.orderId===false?'':String(p.orderId||p.warehouseId||'').trim(),supplierId:p.supplierId===false?'':String(p.supplierId||p.productId||'').trim(),source:String(p.source||'').trim()}}catch{}const page=new URLSearchParams(location.search).get('id')||'',lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),batch=lines.map(line=>line.match(/^([^;\t]+)[;\t](.+)$/)).filter(Boolean).map(m=>({orderId:m[1].trim(),supplierId:'',sizes:unique(m[2].split(/[,|\s]+/))}));if(batch.length){const hit=batch.find(x=>x.orderId===page);return hit?{...hit,batch:true}:{sizes:[],notFound:true}}return{sizes:unique(text.split(/[\n\t,;|]+/)),orderId:'',supplierId:'',unidentified:true}}
-  const supplierNorm=v=>String(v||'').trim().toUpperCase().replace(/\s+/g,'');
-  async function pasteSizes(select,statusEl){const payload=parseSizes(await navigator.clipboard.readText()),page=new URLSearchParams(location.search).get('id')||'',localSupplier=supplierNorm($(PID)?.value);if(payload.notFound){statusEl.textContent=`Geen regel voor Order ID ${page}.`;return}if(payload.orderId){if(!page||payload.orderId!==page){statusEl.textContent=`Order ID klopt niet: ${payload.orderId} ≠ ${page||'onbekend'}.`;return}}else if(payload.supplierId){const supplied=supplierNorm(payload.supplierId),matches=!!localSupplier&&(localSupplier.startsWith(supplied)||supplied.startsWith(localSupplier));if(!matches){statusEl.textContent=`Supplier ID klopt niet: ${payload.supplierId} ≠ ${localSupplier||'onbekend'}.`;return}}else{statusEl.textContent='Geen Order ID of Supplier ID in klemborddata.';return}if(!payload.sizes.length){statusEl.textContent='Geen maten gevonden in klemborddata.';return}const byLabel=new Map([...select.options].map(o=>[optionNorm(o.textContent),o])),missing=[];let n=0;payload.sizes.forEach(size=>{const o=byLabel.get(optionNorm(size));if(o){o.selected=true;n++}else missing.push(size)});notify(select);const via=payload.orderId?`Order ID ${payload.orderId}`:`Supplier ID ${payload.supplierId}`;statusEl.textContent=missing.length?`${n}/${payload.sizes.length} via ${via}; mist: ${missing.join(', ')}`:`${n} maten geselecteerd via ${via}`}
-  function enhanceSizeHelpers(){document.querySelectorAll('select[name="sizes[]"][multiple],select[name="sizes"][multiple]').forEach(select=>{if(select.dataset.ddoSizesHelper)return;const c=select.nextElementSibling?.matches('.select2-container')?select.nextElementSibling:select.parentElement?.querySelector('.select2-container');if(!c)return;const wrap=document.createElement('span');wrap.className='ddo-sizes-helper';const st=document.createElement('small');st.className='ddo-sizes-status';const b=smallInlineButton('','Plak ontbrekende maten','Selecteer maten vanaf het klembord',async()=>{try{await pasteSizes(select,st)}catch{st.textContent='Klembord lezen mislukt'}});b.classList.add('ddo-comfort-action');b.style.marginLeft='0';wrap.append(b,st);c.insertAdjacentElement('afterend',wrap);select.dataset.ddoSizesHelper='1'})}
-  const discountPcts=[0,10,12.5,15,20,25,30,35,40,50,60,70];
-  const numberPrice=v=>{let s=String(v??'').replace(/[^0-9.,-]/g,'');if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');else if((s.match(/\./g)||[]).length>1)s=s.replace(/\./g,'');const n=Number(s);return Number.isFinite(n)?n:NaN},formatPrice=n=>(Math.round(n*100)/100).toFixed(2);
-  function enhancePriceHelper(){const priceInput=$('input[name="price"]'),adviceInput=$('input[name="price_advice"]');if(!priceInput||!adviceInput||$('.ddo-price-actions'))return;const wrap=document.createElement('span');wrap.className='ddo-price-actions';discountPcts.forEach(pct=>{const b=smallInlineButton('',`${pct}%`,'',()=>{const advice=numberPrice(adviceInput.value);if(!(advice>0))return alert('Geen geldige Advice price gevonden.');const target=advice*(1-pct/100);input(priceInput,formatPrice(target));document.querySelectorAll('input[name^="options["][name$="[price]"]').forEach(i=>input(i,formatPrice(target)));highlight()});b.classList.add('ddo-price-btn');b.dataset.pct=pct;wrap.appendChild(b)});const highlight=()=>{const advice=numberPrice(adviceInput.value),current=numberPrice(priceInput.value);wrap.querySelectorAll('.ddo-price-btn').forEach(b=>{const target=advice*(1-Number(b.dataset.pct)/100);b.title=advice>0?`= € ${formatPrice(target)} van € ${formatPrice(advice)}`:'Vul eerst Advice price in';b.classList.toggle('active',advice>0&&Math.abs(current-target)<=.01)})};priceInput.closest('td')?.appendChild(wrap);priceInput.addEventListener('input',highlight);adviceInput.addEventListener('input',highlight);highlight()}
-  function fileList(file){const d=new DataTransfer();if(file)d.items.add(file);return d.files}
-  function enhancePhotos(){const inputs=[...document.querySelectorAll('input[type="file"][name^="image["]')],cell=inputs[0]?.closest('td');if(!cell||$('.ddo-photo-helper',cell))return;const wrap=document.createElement('div');wrap.className='ddo-photo-helper';const pick=document.createElement('input');pick.type='file';pick.multiple=true;pick.accept='image/*';pick.hidden=true;const statusBox=document.createElement('div');statusBox.className='ddo-photo-status';const show=()=>statusBox.textContent=inputs.map((i,n)=>`image[${n}]: ${i.files?.[0]?.name||'—'}`).join(' · '),order=f=>Number(f.name.replace(/\.[^.]+$/,'').match(/(?:_|-)(\d+)$/)?.[1]??Number.MAX_SAFE_INTEGER);const choose=smallInlineButton('','Kies meerdere afbeeldingen','Afbeeldingen op volgnummer verdelen',()=>pick.click()),clear=smallInlineButton('','Leegmaken','Alle gekozen afbeeldingen verwijderen',()=>{inputs.forEach(i=>{i.value='';try{i.files=fileList()}catch{}notify(i)});pick.value='';show()});choose.classList.add('ddo-comfort-action');clear.classList.add('ddo-comfort-action');pick.onchange=()=>{const files=[...(pick.files||[])].sort((a,b)=>order(a)-order(b)||a.name.localeCompare(b.name,undefined,{numeric:true}));if(files.length>inputs.length)alert(`Alleen de eerste ${inputs.length} afbeeldingen worden gebruikt.`);inputs.forEach((i,n)=>{try{i.files=fileList(files[n]);notify(i)}catch(e){console.warn(`[DDO Photo] image[${n}] niet gevuld`,e)}});show()};inputs.forEach(i=>i.addEventListener('change',show));wrap.append(choose,clear,pick,statusBox);cell.prepend(wrap);show()}
-  function enhanceNis(){const headers=[...document.querySelectorAll('#tabs-3 th,.options th')],h=headers.find(x=>x.childNodes[0]?.textContent?.trim()==='EAN'||x.textContent.trim()==='EAN');if(!h||$('#ddo-copy-ean-stock'))return;h.appendChild(smallInlineButton('ddo-copy-ean-stock','⧉','Kopieer EAN + Stock',async()=>{const lines=[];document.querySelectorAll(`${TABLE} tbody tr`).forEach(row=>{const e=$('input[name$="[barcode]"]',row)?.value.trim(),s=$('input[name$="[stock]"]',row)?.value.trim();if(e)lines.push(`${e}\t${s||''}`)});try{await navigator.clipboard.writeText(lines.join('\n'))}catch{console.warn('[DDO NIS] Kopiëren mislukt')}}))}
-  function enhanceEditPage(){const pid=$('input[name="supplier_pid"]');if(pid&&!$('.ddo-copy-pid',pid.parentElement)){const b=smallInlineButton('','📋','Kopieer Supplier PID',async()=>{try{await navigator.clipboard.writeText(pid.value.trim())}catch{pid.select();document.execCommand('copy')}});b.classList.add('ddo-copy-pid');pid.insertAdjacentElement('afterend',b)}const comp=$('input[name="composition"]');if(comp&&!$('.ddo-open-composition',comp.parentElement)){const a=document.createElement('a');a.className='ddo-inline-tool ddo-open-composition';a.textContent='🔗';a.title='Open composition link';a.target='_blank';a.rel='noopener noreferrer';a.href=comp.value.trim()||'#';if(!comp.value.trim())a.classList.add('disabled');comp.insertAdjacentElement('afterend',a)}const h=[...document.querySelectorAll('h2')].find(x=>x.textContent.includes('Add colors & sizes'));if(h&&!h.dataset.ddoEnhanced){const active=$('.header_item_element a.active');if(active){h.innerHTML=`<img src="img/icon/color_wheel_add.png" alt=""> Add colors & sizes for ${active.textContent.trim()}`;h.dataset.ddoEnhanced='1'}}}
-  function enhanceRowEdits(){document.querySelectorAll('tr.highlight').forEach(row=>{if(row.dataset.editIconAdded)return;const m=(row.getAttribute('onmousedown')||'').match(/Goto\((['"])(.*?)\1\)/);const cell=row.querySelector('td.control');if(!m||!cell)return;const a=document.createElement('a');a.href=m[2];a.title='Naar bewerkpagina';a.textContent='⚙️';a.className='ddo-row-edit';a.onclick=e=>e.stopPropagation();cell.appendChild(a);row.dataset.editIconAdded='1'})}
-  function enhanceDiscountPills(){document.querySelectorAll('tr.highlight').forEach(row=>{if($('.ddo-discount-pill',row))return;const euro=[...row.querySelectorAll('td')].filter(td=>td.textContent.includes('€'));if(euro.length<2)return;const price=numberPrice(euro[0].textContent),advice=numberPrice(euro[1].textContent);if(!Number.isFinite(price)||!Number.isFinite(advice))return;const discount=advice>0&&price<advice?Math.max(0,Math.round((1-price/advice)*100)):0,pill=document.createElement('span');pill.className='ddo-discount-pill';pill.textContent=`${discount}%`;Object.assign(pill.style,{display:'inline-block',marginTop:'2px',padding:'1px 6px',borderRadius:'999px',fontSize:'11px',lineHeight:'1.4',color:'#fff',background:discount>0?'#ff8800':'#000'});const wrap=document.createElement('div');wrap.appendChild(pill);euro[0].appendChild(wrap)})}
-  const compCache=new Map(),compQueue=[];let compActive=0;
-  function compositionId(href){try{return new URL(href,location.origin).searchParams.get('id')}catch{return''}}
-  function addCompositionIcon(anchor,url){if(!url||anchor.parentElement?.querySelector('.ddo-compo-link'))return;const a=document.createElement('a');a.className='ddo-compo-link';a.textContent='🔗';a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.title='Open composition';a.onclick=e=>e.stopPropagation();anchor.insertAdjacentElement('afterend',a)}
-  function nextComposition(){while(compActive<4&&compQueue.length){const job=compQueue.shift();compActive++;job().finally(()=>{compActive--;nextComposition()})}}
-  function enhanceProductList(){document.querySelectorAll('tr.highlight').forEach(row=>{const cell=row.querySelector('td.control'),a=cell?.querySelector('a[href*="section=products"][href*="action=edit"][href*="id="]')||cell?.querySelector('a[href*="action=edit"][href*="id="]');if(!a||row.dataset.compositionQueued)return;row.dataset.compositionQueued='1';const id=compositionId(a.href);if(!id)return;if(compCache.has(id)){addCompositionIcon(a,compCache.get(id));return}compQueue.push(async()=>{try{const res=await fetch(a.href,{credentials:'same-origin'});if(!res.ok)throw Error(String(res.status));const doc=new DOMParser().parseFromString(await res.text(),'text/html'),url=doc.querySelector('input[name="composition"]')?.value.trim()||null;compCache.set(id,url);addCompositionIcon(a,url)}catch{compCache.set(id,null)}});nextComposition()})}
-  function parseProductIds(raw){const text=String(raw||'').trim();if(!text)return[];try{const p=JSON.parse(text),ids=Array.isArray(p)?p:Array.isArray(p.productIds)?p.productIds:Array.isArray(p.orderIds)?p.orderIds:p.productId?[p.productId]:p.orderId?[p.orderId]:[];if(ids.length)return unique(ids.map(x=>String(x).trim().toUpperCase()))}catch{}return unique(text.split(/[\s,;|]+/).map(x=>x.toUpperCase()))}
-  const parseOrderIds=raw=>unique(String(raw||'').split(/[\s,;|]+/).map(value=>value.trim()).filter(value=>/^\d+$/.test(value)));
-  const orderCheckboxes=()=>[...document.querySelectorAll('input[type="checkbox"][name="orders[]"]')];
-  function orderStatusPage(){const params=new URLSearchParams(location.search);return params.get('section')==='orders'&&params.get('action')==='viewstatus'&&['3','10','11'].includes(params.get('id'))}
-  function orderToolButton(text,title,action){const button=smallInlineButton('',text,title,action);Object.assign(button.style,{margin:'0',minHeight:'25px',padding:'4px 8px',background:'#0877b9',color:'#fff',border:'0',borderRadius:'4px',font:'600 11px/1.2 system-ui',cursor:'pointer'});return button}
-  function enhanceOrderClipboardTools(){if(!orderStatusPage()||$('#ddo-order-clipboard-tools'))return;const boxes=orderCheckboxes(),table=boxes[0]?.closest('table')||[...document.querySelectorAll('table.control')].find(item=>item.querySelector('input[name="orders[]"]'));if(!table)return;const wrapper=document.createElement('div'),statusBox=document.createElement('small');wrapper.id='ddo-order-clipboard-tools';Object.assign(wrapper.style,{display:'flex',alignItems:'center',gap:'8px',margin:'0 0 10px'});Object.assign(statusBox.style,{color:'#56616a',font:'11px/1.25 system-ui'});const select=orderToolButton('✅ Selecteer Externe orders','Selecteer order-ID’s vanaf het klembord',async button=>{try{const wanted=parseOrderIds(await navigator.clipboard.readText());if(!wanted.length){button.textContent='⚠️ Geen ordernummers gevonden';return}const ids=new Set(wanted);let added=0,found=0;orderCheckboxes().forEach(box=>{if(!ids.has(String(box.value||'').trim()))return;found++;if(!box.checked)added++;box.checked=true;box.dispatchEvent(new Event('change',{bubbles:true}))});button.textContent=`✅ ${added} Externe orders geselecteerd`;statusBox.textContent=found<wanted.length?`${found}/${wanted.length} ordernummers op deze pagina gevonden`:''}catch{button.textContent='❌ Klembord lezen mislukt'}}),copy=orderToolButton('📋 Kopieer geselecteerde orders','Kopieer geselecteerde order-ID’s naar het klembord',async button=>{const ids=orderCheckboxes().filter(box=>box.checked).map(box=>String(box.value||'').trim()).filter(Boolean);if(!ids.length){button.textContent='⚠️ Geen orders geselecteerd';return}try{await navigator.clipboard.writeText(ids.join('\n'));button.textContent=`📋 ${ids.length} orders gekopieerd`}catch{button.textContent='❌ Kopiëren mislukt'}});wrapper.append(select,copy,statusBox);table.parentNode.insertBefore(wrapper,table)}
-  let paste2OrderWorkerStarted=false;
-  function paste2OrderRequest(){const hash=location.hash.replace(/^#/,'');if(!hash)return null;const params=new URLSearchParams(hash),status=String(params.get('paste2order-cms-status')||'').trim(),orders=parseOrderIds(params.get('orders')||''),sourceStatusId=String(params.get('sourceStatusId')||'3').trim();if(!/^\d+$/.test(status)||!orders.length||!/^\d+$/.test(sourceStatusId))return null;return{status,orders,label:String(params.get('label')||`status ${status}`).trim(),notify:params.get('notify')==='1',sourceStatusId}}
-  function paste2OrderStatus(message,state='info'){let box=$('#paste2order-cms-status-worker');if(!box){box=document.createElement('div');box.id='paste2order-cms-status-worker';Object.assign(box.style,{position:'fixed',right:'14px',bottom:'14px',zIndex:'999999',maxWidth:'420px',padding:'9px 11px',borderRadius:'6px',font:'13px/1.35 system-ui',boxShadow:'0 8px 24px #0003',background:'#fff',color:'#1f2933',border:'1px solid #d1d5db',whiteSpace:'pre-wrap'});document.body.appendChild(box)}box.textContent=message;box.style.borderColor=state==='error'?'#dc2626':state==='ok'?'#16a34a':'#d1d5db'}
-  async function runPaste2OrderWorker(){if(paste2OrderWorkerStarted)return;const request=paste2OrderRequest();if(!request)return;paste2OrderWorkerStarted=true;try{paste2OrderStatus(`Paste2Order: ${request.orders.length} CMS order(s) naar ${request.label} zetten ${request.notify?'met':'zonder'} notificatie...`);const form=document.querySelector('form[action*="section=orders"][action*="viewstatus"],form.ajax_form'),action=form?.getAttribute('action')||`/admin.php?section=orders&action=viewstatus&id=${encodeURIComponent(request.sourceStatusId)}`,body=new URLSearchParams();request.orders.forEach(id=>body.append('orders[]',id));body.set('status',request.status);if(request.notify)body.set('mail','1');body.set('updatemulti','Update status');body.set('redirect',`/admin.php?section=orders&action=viewstatus&id=${encodeURIComponent(request.sourceStatusId)}`);const response=await fetch(new URL(action,location.origin).href,{method:'POST',credentials:'same-origin',headers:{Accept:'*/*','Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:body.toString()}),text=await response.text();if(!response.ok)throw Error(`CMS statusupdate mislukt (${response.status}): ${text.slice(0,180)}`);history.replaceState(null,document.title,location.pathname+location.search);paste2OrderStatus(`Paste2Order: ${request.orders.length} CMS order(s) bijgewerkt naar ${request.label}. Tabblad sluit zo.`,'ok');await pause(700);window.close();paste2OrderStatus('Paste2Order: klaar. Dit CMS-tabblad mag dicht.','ok')}catch(error){console.error('[DDO Toolbox / Paste2Order Status Worker]',error);paste2OrderStatus(`Paste2Order: CMS statusupdate mislukt.\n${error?.message||error}`,'error')}}
-  function transientToast(id,message){$('#'+id)?.remove();const toast=document.createElement('div');toast.id=id;toast.textContent=message;Object.assign(toast.style,{position:'fixed',right:'20px',bottom:'80px',zIndex:'999999',background:'#222',color:'#fff',padding:'10px 14px',borderRadius:'8px',font:'13px/1.3 system-ui',boxShadow:'0 4px 16px #0004'});document.body.appendChild(toast);setTimeout(()=>toast.remove(),2500)}
-  function sizeChartPage(){const params=new URLSearchParams(location.search);return params.get('section')==='brands'&&params.get('action')==='edit'&&!!params.get('id')}
-  function sizeChartHtml(lang,brandName){const brand=safeText(brandName),texts={nl:`<p>Omdat geen enkel merk hetzelfde valt, kunnen pasvorm en maat per model verschillen. Met onze tips, de&nbsp;<a href="/klantenservice/maattabel/bh-maat-berekentool">bh-maat berekentool</a>&nbsp;en een duidelijk overzicht met&nbsp;<a href="/klantenservice/maattabel">alle maattabellen</a>&nbsp;helpen we je de juiste maat te kiezen. Zo bestel je met vertrouwen wat bij je past.</p><p>Voor het merk <span>${brand}</span> hebben we geen specifieke maattabel. Je kunt uitgaan van een standaard maatvoering.</p>`,en:`<p>Because not every brand fits the same, the fit and size may vary per model. With our tips, the&nbsp;<a href="/klantenservice/maattabel/bh-maat-berekentool">bra size calculator</a>&nbsp;and a clear overview with&nbsp;<a href="/klantenservice/maattabel">all size charts</a>&nbsp;we help you choose the right size. This way you can order with confidence what suits you best.</p><p>For the brand <span>${brand}</span> we do not have a specific size chart. You can rely on standard sizing.</p>`,de:`<p>Da nicht jede Marke gleich ausfällt, können Passform und Größe je nach Modell variieren. Mit unseren Tipps, dem&nbsp;<a href="/klantenservice/maattabel/bh-maat-berekentool">BH-Größenrechner</a>&nbsp;und einer klaren Übersicht mit&nbsp;<a href="/klantenservice/maattabel">allen Größentabellen</a>&nbsp;helfen wir dir, die richtige Größe zu wählen. So bestellst du mit Vertrauen das, was zu dir passt.</p><p>Für die Marke <span>${brand}</span> haben wir keine spezifische Größentabelle. Du kannst von einer Standardgrößenführung ausgehen.</p>`,fr:`<p>Comme chaque marque taille différemment, la coupe et la taille peuvent varier selon le modèle. Grâce à nos conseils, au&nbsp;<a href="/klantenservice/maattabel/bh-maat-berekentool">calculateur de taille de soutien-gorge</a>&nbsp;et à un aperçu clair de&nbsp;<a href="/klantenservice/maattabel">tous les tableaux de tailles</a>&nbsp;nous vous aidons à choisir la bonne taille. Vous pouvez ainsi commander en toute confiance ce qui vous convient le mieux.</p><p>Pour la marque <span>${brand}</span> nous ne disposons pas d’un tableau de tailles spécifique. Vous pouvez vous baser sur une taille standard.</p>`};return texts[lang]||''}
-  function injectSizeChart(){if(!enabled('sizeChart')||!sizeChartPage())return;const fields={nl:$('textarea[name="sizechart"]'),en:$('textarea[name="lang[en][sizechart]"]'),de:$('textarea[name="lang[de][sizechart]"]'),fr:$('textarea[name="lang[fr][sizechart]"]')},brand=$('input[name="name"],input[name="title"]')?.value.trim()||'';let done=0;Object.entries(fields).forEach(([lang,field])=>{if(field&&setEditorHtml(field,sizeChartHtml(lang,brand)))done++});transientToast('ddo-sizechart-toast',done?`Size chart ingevuld (${done} velden)`:'Geen sizechart velden gevonden')}
-  const RETURN_CORRECTION_KEY='ddo_3h2p_correction',RETURN_DESCRIPTION_KEY='ddo_3h2p_description';let returnCorrectionHandled=false;
-  function threeForTwoDiscount(items){const sorted=[...items].sort((a,b)=>b.price-a.price),freeItems=[];let discount=0;for(let i=0;i+2<sorted.length;i+=3){freeItems.push(sorted[i+2]);discount+=sorted[i+2].price}return{discount,freeItems}}
-  function enhanceThreeForTwoReturns(){if(returnCorrectionHandled)return;const params=new URLSearchParams(location.search);if(params.get('section')!=='returns')return;const action=params.get('action');if(action==='line_add'){const correction=sessionStorage.getItem(RETURN_CORRECTION_KEY);if(correction===null)return;const description=sessionStorage.getItem(RETURN_DESCRIPTION_KEY)||'Correctie 3 halen 2 betalen',descriptionInput=$('input[name="description"]'),priceInput=$('input[name="price"]'),submit=$('input[name="lineadd"]');if(!descriptionInput||!priceInput||!submit)return;returnCorrectionHandled=true;input(descriptionInput,description);input(priceInput,correction);sessionStorage.removeItem(RETURN_CORRECTION_KEY);sessionStorage.removeItem(RETURN_DESCRIPTION_KEY);setTimeout(()=>submit.click(),250);return}if(action!=='view'||$('#ddo-3h2p-correction'))return;const heading=[...document.querySelectorAll('h2')].find(item=>item.textContent.includes('Return content')),table=heading?.nextElementSibling?.querySelector('td:nth-child(2) table');if(!heading||!table)return;returnCorrectionHandled=true;const items=[...table.querySelectorAll('tr')].filter(row=>row.querySelector('img[src="img/icon/money_dollar.png"][title="Promo"]')).map(row=>{const cells=row.querySelectorAll('td');return{row,count:parseInt(cells[1]?.textContent.trim(),10)||0,price:numberPrice(cells[2]?.textContent||'')}}).filter(item=>item.price>0),original=[],remaining=[];items.forEach(item=>{const originalQty=item.count>0?item.count:1,remainingQty=item.count>0?0:1;for(let i=0;i<originalQty;i++)original.push(item);for(let i=0;i<remainingQty;i++)remaining.push(item)});const oldCalc=threeForTwoDiscount(original),newCalc=threeForTwoDiscount(remaining),correction=oldCalc.discount-newCalc.discount,box=document.createElement('div');box.id='ddo-3h2p-correction';Object.assign(box.style,{margin:'15px 0',padding:'12px',border:'2px solid #f0ad4e',background:'#fff8e5',font:'14px Arial, sans-serif'});const money=value=>`€ ${formatPrice(value).replace('.',',')}`;box.innerHTML=original.length?`<strong>3 halen 2 betalen retourcorrectie</strong><br><br>Promo-items oorspronkelijk: ${original.length}<br>Gratis items: ${oldCalc.freeItems.length}<br>Korting: <strong>${money(oldCalc.discount)}</strong><br><br>Promo-items na retour: ${remaining.length}<br>Gratis items na herberekening: ${newCalc.freeItems.length}<br>Korting: <strong>${money(newCalc.discount)}</strong><br><br>Te corrigeren: <strong>${money(correction)}</strong><br><br>`:'<strong>3 halen 2 betalen retourcorrectie</strong><br><br>Geen promo-items gevonden.';const addLine=[...document.querySelectorAll('a[href*="action=line_add"]')][0];if(addLine&&correction>.009){const button=document.createElement('input');button.type='button';button.value='Correctie Toepassen';button.className='controlbutton';const native=$('.controlbutton');if(native)button.style.fontSize=getComputedStyle(native).fontSize;button.onclick=()=>{sessionStorage.setItem(RETURN_CORRECTION_KEY,formatPrice(-Math.abs(correction)));sessionStorage.setItem(RETURN_DESCRIPTION_KEY,'Correctie 3 halen 2 betalen');location.href=addLine.href};box.appendChild(button)}oldCalc.freeItems.forEach(item=>item.row.style.background='#fff3cd');heading.parentElement.prepend(box)}
-  function installShiftRange(container,selector,marker,onChange=()=>{},stopEvents=false){if(!container||container.dataset[marker])return;container.dataset[marker]='1';const boxes=()=>[...container.querySelectorAll(selector)];let last=null,shift=false;const stop=event=>{if(!stopEvents)return;event.stopPropagation();if(event.type==='mousedown')event.preventDefault()};container.addEventListener('mousedown',event=>{const box=event.target.closest?.(selector);if(!box||!container.contains(box))return;stop(event);shift=event.shiftKey},true);container.addEventListener('change',event=>{const box=event.target.closest?.(selector);if(!box||!container.contains(box))return;const all=boxes(),index=all.indexOf(box);if(last!==null&&(shift||event.shiftKey)&&index>=0){const start=Math.min(last,index),end=Math.max(last,index);for(let i=start;i<=end;i++)all[i].checked=box.checked}last=index;shift=false;onChange()},true);if(stopEvents)container.addEventListener('click',event=>{if(event.target.closest?.(selector))stop(event)},true)}
-  function enhanceOptionShiftSelect(){document.querySelectorAll('#tabs-3 table').forEach(table=>{if(table.querySelector('input[type="checkbox"][name="options_delete[]"]'))installShiftRange(table,'input[type="checkbox"][name="options_delete[]"]','ddoOptionShift')})}
-  const TAB3_ACTIONS=[{key:'update',label:'Update Product',match:/^update product$/i},{key:'delete',label:'Delete Selected',match:/^delete selected$/i},{key:'wms',label:'Add product to WMS',match:/^add product to wms$/i}];
-  const controlText=element=>String(element?.value||element?.textContent||element?.getAttribute?.('aria-label')||'').replace(/\s+/g,' ').trim();
-  function originalTab3Action(spec){return[...document.querySelectorAll('input[type="submit"],input[type="button"],button,a')].find(element=>!element.closest('#ddo-tab3-actions')&&spec.match.test(controlText(element)))||null}
-  function tab3DeleteCount(){const boxes=[...document.querySelectorAll('#tabs-3 input[type="checkbox"][name="options_delete[]"]')];return{selected:boxes.filter(box=>box.checked).length,total:boxes.length,blocked:boxes.filter(box=>box.disabled).length}}
-  function refreshTab3ActionLabels(){const button=$('#ddo-tab3-actions [data-action="delete"]');if(!button)return;const count=tab3DeleteCount();button.textContent=`Delete Selected · ${count.selected}/${count.total}`;button.title=`${count.selected} van ${count.total} rijen geselecteerd${count.blocked?` · ${count.blocked} geblokkeerd`:''}; voer de originele DDO-actie “Delete Selected” uit`}
-  function positionTab3Actions(){const toolbox=$('#ddo-toolbox'),bar=$('#ddo-tab3-actions');if(!toolbox||!bar)return;const rect=toolbox.getBoundingClientRect();bar.style.left=`${Math.max(0,Math.min(innerWidth-rect.width,rect.left))}px`;bar.style.top=`${Math.min(innerHeight-bar.offsetHeight,rect.bottom+4)}px`;bar.style.width=`${rect.width}px`}
-  function enhanceTab3Actions(){const edit=productEditPage(),active=productTabActive('tabs-3'),sources=new Map(TAB3_ACTIONS.map(spec=>[spec.key,originalTab3Action(spec)]));let bar=$('#ddo-tab3-actions');if(!edit||!active||![...sources.values()].some(Boolean)){bar?.remove();return}if(!bar){bar=document.createElement('aside');bar.id='ddo-tab3-actions';bar.setAttribute('aria-label','DDO acties tab 3');document.body.appendChild(bar);for(const spec of TAB3_ACTIONS){const button=document.createElement('button');button.type='button';button.dataset.action=spec.key;button.textContent=spec.label;button.title=`Voer originele DDO-actie “${spec.label}” uit`;button.addEventListener('click',event=>{event.preventDefault();const original=originalTab3Action(spec);if(original&&!original.disabled)original.click()});bar.appendChild(button)}window.addEventListener('resize',positionTab3Actions)}const tab=$('#tabs-3');if(tab&&!tab.dataset.ddoActionCounter){tab.dataset.ddoActionCounter='1';tab.addEventListener('change',event=>{if(event.target.matches?.('input[type="checkbox"][name="options_delete[]"]'))queueMicrotask(refreshTab3ActionLabels)},true)}for(const spec of TAB3_ACTIONS){const button=bar.querySelector(`[data-action="${spec.key}"]`),original=sources.get(spec.key);button.disabled=!original||!!original.disabled;button.hidden=!original}refreshTab3ActionLabels();positionTab3Actions()}
-  function enhanceMultiTabber(){const table=[...document.querySelectorAll('table.control')].find(t=>t.querySelector('input[type="checkbox"][name="products[]"]'));if(!table||table.dataset.ddoMultiTabber)return;table.dataset.ddoMultiTabber='1';if(!$('#ddo-multitabber-style')){const style=document.createElement('style');style.id='ddo-multitabber-style';style.textContent='.ddo-multitabber-toolbar,.ddo-tag-filter-box{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.ddo-tag-filter-box{align-items:flex-start;padding:8px;border:1px solid #ddd;background:#fafafa;border-radius:6px}.ddo-tag-filter-title{width:100%;font-weight:700}.ddo-tag-filter-group label{display:block;font-weight:700;margin-bottom:3px}.ddo-tag-filter-group select{min-width:250px;min-height:130px}.ddo-tag-pill{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:999px;background:#111;color:#fff;font-size:11px}.ddo-filter-match{background:#e9ffe9!important}.ddo-filter-no-match{opacity:.55}.ddo-clipboard-match{outline:2px solid #7c3aed;outline-offset:-2px}.ddo-multitabber-status{font-weight:600;color:#4b5563}.ddo-multitabber-status.warn{color:#9a5b10}';document.head.appendChild(style)}const boxes=()=>[...table.querySelectorAll('tbody input[type="checkbox"][name="products[]"]')],rows=()=>[...table.querySelectorAll('tbody tr')].filter(r=>r.querySelector('input[name="products[]"]')),toolbar=document.createElement('div');toolbar.className='ddo-multitabber-toolbar';const open=smallInlineButton('','Open selectie','Open geselecteerde producten',()=>openSelected(false)),options=smallInlineButton('','Open Options','Open Options van geselecteerde producten',()=>openSelected(true)),clipboard=smallInlineButton('','Selecteer vanaf klembord','Selecteer Product IDs vanaf klembord',selectClipboard),count=document.createElement('b'),state=document.createElement('span'),tip=document.createElement('span');state.className='ddo-multitabber-status';tip.textContent='Shift = meervoudige selectie';tip.style.opacity='.7';toolbar.append(open,options,clipboard,count,state,tip);table.parentElement.insertBefore(toolbar,table);
-    const update=()=>{const n=boxes().filter(b=>b.checked).length;count.textContent=`${n} geselecteerd`;open.disabled=options.disabled=n===0},stop=e=>{e.stopPropagation();if(e.type==='mousedown')e.preventDefault()},url=(box,tab3)=>{const u=new URL(location.href);u.search='';u.hash='';u.searchParams.set('section','products');u.searchParams.set('action','edit');u.searchParams.set('id',box.value.trim());if(tab3)u.hash='tabs-3';return u.href};function openSelected(tab3){boxes().filter(b=>b.checked).forEach(box=>window.open(url(box,tab3),'_blank','noopener'))}async function selectClipboard(){const wantedIds=parseProductIds(await navigator.clipboard.readText()),wanted=new Set(wantedIds),found=new Set();table.querySelectorAll('.ddo-clipboard-match').forEach(r=>r.classList.remove('ddo-clipboard-match'));boxes().forEach(box=>{const id=box.value.trim().toUpperCase(),yes=wanted.has(id);box.checked=yes;box.closest('tr')?.classList.toggle('ddo-clipboard-match',yes);if(yes)found.add(id)});const missing=wantedIds.filter(id=>!found.has(id));state.textContent=missing.length?`${found.size} geselecteerd; mist: ${missing.slice(0,8).join(', ')}`:`${found.size} geselecteerd vanaf klembord`;state.classList.toggle('warn',!!missing.length);update()}
-    const tagIndex=9,tagRows=rows().filter(r=>r.children[tagIndex]);tagRows.forEach(row=>{const cell=row.children[tagIndex],tags=cell.textContent.split('|').map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);row.dataset.ddoTags=JSON.stringify(tags);cell.innerHTML='';tags.forEach(tag=>{const pill=document.createElement('span');pill.className='ddo-tag-pill';pill.textContent=tag;cell.appendChild(pill)})});const tags=[...new Set(tagRows.flatMap(r=>JSON.parse(r.dataset.ddoTags||'[]')))].sort((a,b)=>a.localeCompare(b,'nl'));if(tags.length){const box=document.createElement('div');box.className='ddo-tag-filter-box';const title=document.createElement('div');title.className='ddo-tag-filter-title';title.textContent='Tag filter';const makeSelect=()=>{const s=document.createElement('select');s.multiple=true;tags.forEach(tag=>{const o=document.createElement('option');o.value=o.textContent=tag;s.appendChild(o)});return s},include=makeSelect(),exclude=makeSelect(),wrap=(label,select)=>{const d=document.createElement('div');d.className='ddo-tag-filter-group';const l=document.createElement('label');l.textContent=label;d.append(l,select);return d},actions=document.createElement('div'),apply=smallInlineButton('','Filter toepassen','Selecteer producten via tags',filter),reset=smallInlineButton('','Reset','Wis tagfilter',()=>{include.selectedIndex=exclude.selectedIndex=-1;tagRows.forEach(r=>{r.querySelector('input[name="products[]"]').checked=false;r.classList.remove('ddo-filter-match','ddo-filter-no-match')});update()});actions.className='ddo-tag-filter-group';actions.append(apply,reset);box.append(title,wrap('Bevat',include),wrap('Bevat niet',exclude),actions);table.parentElement.insertBefore(box,table);function filter(){const yes=[...include.selectedOptions].map(o=>o.value.toLowerCase()),no=[...exclude.selectedOptions].map(o=>o.value.toLowerCase());tagRows.forEach(row=>{const own=JSON.parse(row.dataset.ddoTags||'[]').map(x=>x.toLowerCase()),match=yes.every(x=>own.includes(x))&&no.every(x=>!own.includes(x));row.querySelector('input[name="products[]"]').checked=match;row.classList.toggle('ddo-filter-match',match);row.classList.toggle('ddo-filter-no-match',!match)});update()}include.onchange=exclude.onchange=filter}
-    const toggle=table.querySelector('thead #toggle');if(toggle){toggle.addEventListener('mousedown',stop,true);toggle.addEventListener('click',stop,true);toggle.addEventListener('change',()=>{boxes().forEach(b=>b.checked=toggle.checked);update()})}if(enabled('shiftSelect'))installShiftRange(table,'input[name="products[]"]','ddoProductShift',update,true);document.addEventListener('keydown',e=>{if(!(e.ctrlKey||e.metaKey)||e.key.toLowerCase()!=='o')return;e.preventDefault();e.shiftKey?options.click():open.click()},true);update()}
-  const FLOW_KEY='ddo_toolbox_update_flow_v1',FLOW_TTL=120000;
-  const COLOR_SHEET='1am0xI0pVpawv2urglPRQKVQBS7K_3O7kq6ymXZLNzE0',COLOR_CACHE_KEY='ddo_toolbox_color_map_v1',COLOR_CACHE_TTL=86400000;
-  function flowEnabled(){try{const saved=localStorage.getItem(FLOW_ENABLED_KEY);return saved===null?SETTINGS.updateFlowDefault:saved==='true'}catch{return SETTINGS.updateFlowDefault}}
-  function setFlowEnabled(enabled){try{localStorage.setItem(FLOW_ENABLED_KEY,String(!!enabled))}catch{}if(!enabled)try{sessionStorage.removeItem(FLOW_KEY)}catch{}const toggle=$('#ddo-flow-toggle');if(toggle)toggle.checked=!!enabled}
-  function activeTabId(){const li=$('.ui-tabs-nav li[aria-selected="true"],.ui-tabs-nav li.ui-tabs-active.ui-state-active,#tabs li.ui-tabs-active');const fromNav=li?.getAttribute('aria-controls')||li?.querySelector('a[href^="#"]')?.getAttribute('href')?.replace(/^#/,'');if(fromNav)return fromNav;for(let i=1;i<=9;i++){const panel=$(`#tabs-${i}`);if(panel&&panel.getAttribute('aria-hidden')!=='true'&&getComputedStyle(panel).display!=='none'&&panel.getClientRects().length)return`tabs-${i}`}return null}
-  function flowPlan(){const active=activeTabId();return active==='tabs-2'?{target:'tabs-3'}:active==='tabs-3'?{target:'tabs-3',scroll:'bottom',autoCheck:true}:{target:'tabs-2',scroll:'bottom',autoColor:active==='tabs-1'}}
-  function writeFlowPlan(){if(!flowEnabled())return;const plan={...flowPlan(),createdAt:Date.now()};try{sessionStorage.setItem(FLOW_KEY,JSON.stringify(plan));console.info('[DDO Toolbox / Update Flow] Plan opgeslagen:',plan)}catch(error){console.error('[DDO Toolbox / Update Flow] Plan opslaan mislukt:',error)}}
-  function readFlowPlan(){try{const plan=JSON.parse(sessionStorage.getItem(FLOW_KEY)||'null');if(!plan?.createdAt||Date.now()-plan.createdAt>FLOW_TTL){sessionStorage.removeItem(FLOW_KEY);return null}return plan}catch{return null}}
-  async function waitUntil(test,tries=160,delay=100){for(let i=0;i<tries;i++){try{if(test())return true}catch{}await pause(delay)}throw Error('Update Flow timeout')}
-  async function activateFlowTab(id){const panel=document.getElementById(id);if(activeTabId()===id&&panel&&getComputedStyle(panel).display!=='none')return;const selector=`.ui-tabs-nav a[href="#${id}"],#tabs a[href="#${id}"]`;await waitUntil(()=>!!document.querySelector(selector),100,50);document.querySelector(selector).click();await waitUntil(()=>{const target=document.getElementById(id);return activeTabId()===id&&!!target&&target.getAttribute('aria-hidden')!=='true'&&getComputedStyle(target).display!=='none'},100,50)}
-  function csvRows(text){const rows=[];let row=[],field='',quoted=false;for(let i=0;i<text.length;i++){const char=text[i];if(quoted){if(char==='"'&&text[i+1]==='"'){field+='"';i++}else if(char==='"')quoted=false;else field+=char}else if(char==='"')quoted=true;else if(char===','){row.push(field);field=''}else if(char==='\n'){row.push(field.replace(/\r$/,''));if(row.some(value=>value.trim()))rows.push(row);row=[];field=''}else field+=char}row.push(field.replace(/\r$/,''));if(row.some(value=>value.trim()))rows.push(row);return rows}
-  function colorSheetRequest(){const source=`https://docs.google.com/spreadsheets/d/${COLOR_SHEET}/export?format=csv`;return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url:source,timeout:30000,onload:response=>response.status===200&&response.responseText?.trim()&&!/^\s*</.test(response.responseText)?resolve(response.responseText):reject(Error(`Kleurendatabase HTTP ${response.status}`)),onerror:()=>reject(Error('Kleurendatabase netwerkfout')),ontimeout:()=>reject(Error('Kleurendatabase timeout'))}))}
-  async function colorMappings(){try{const cached=JSON.parse(localStorage.getItem(COLOR_CACHE_KEY)||'null');if(cached?.time&&Date.now()-cached.time<COLOR_CACHE_TTL&&Array.isArray(cached.rows))return cached.rows}catch{}const table=csvRows(await colorSheetRequest()),headers=(table.shift()||[]).map(value=>normalizeName(value)),indexes={supplier:headers.indexOf('leverancier'),code:headers.indexOf('kleurcode leverancier'),colorId:headers.indexOf('intern colorid'),name:headers.indexOf('interne kleur')};if(Object.values(indexes).some(index=>index<0))throw Error('Kleurendatabase heeft onverwachte kolommen');const rows=table.map(columns=>({supplier:String(columns[indexes.supplier]||'').trim(),code:String(columns[indexes.code]||'').trim(),colorId:String(columns[indexes.colorId]||'').trim(),name:String(columns[indexes.name]||'').trim()})).filter(row=>row.supplier&&row.code);try{localStorage.setItem(COLOR_CACHE_KEY,JSON.stringify({time:Date.now(),rows}))}catch(error){console.warn('[DDO Toolbox / Kleurselectie] Cache niet opgeslagen',error)}return rows}
-  function supplierFamily(value){const brand=normalizeName(value);if(/wacoal|freya|fantasie|elomi/.test(brand))return'Wacoal';if(/anita|rosa\s*faia/.test(brand))return'Anita';if(/triumph|sloggi/.test(brand))return'Triumph';if(/lisca/.test(brand))return'Lisca';if(/\bmey\b/.test(brand))return'Mey';if(/after\s*eden|my\s*basic|elbrina/.test(brand))return'After Eden';if(/chantelle|femilet/.test(brand))return'Chantelle';if(/sugar\s*candy/.test(brand))return'Sugar Candy';if(/linga\s*dore/.test(brand))return'LingaDore';return''}
-  function supplierColorKey(value){const code=String(value||'').trim().toUpperCase();return /^\d+$/.test(code)?String(Number(code)):code}
-  function supplierColorCode(pid,family,rows){const clean=String(pid||'').trim(),parts=clean.split('-').map(value=>value.trim()).filter(Boolean);if(parts.length>1)return parts.at(-1);if(family!=='Wacoal')return'';const compact=clean.toUpperCase().replace(/\s+/g,''),codes=[...new Set(rows.filter(row=>row.supplier===family).map(row=>row.code.toUpperCase()))].filter(code=>compact.endsWith(code)).sort((a,b)=>b.length-a.length);if(!codes.length)return'';const longest=codes.filter(code=>code.length===codes[0].length);return longest.length===1?longest[0]:''}
-  function colorFlowStatus(select,text,kind){let status=$('.ddo-flow-color-status',select.parentElement);if(!status){status=document.createElement('div');status.className='ddo-flow-color-status';status.style.cssText='margin-top:4px;font:600 10px/1.3 system-ui';select.parentElement.append(status)}status.textContent=text;status.style.color=kind==='ok'?'#18864b':'#b42318'}
-  async function autoSelectFlowColor(){const select=$('#tabs-2 select#colors-in,#tabs-2 select[name="colors[]"]');if(!select)throw Error('Kleurselectie ontbreekt op tab 2');const pid=$(PID)?.value?.trim()||'',family=supplierFamily(brand());if(!pid){colorFlowStatus(select,'Automatische kleur: Supplier ID ontbreekt','error');return false}if(!family){colorFlowStatus(select,`Automatische kleur: merk “${brand()||'onbekend'}” wordt niet ondersteund`,'error');return false}try{const rows=await colorMappings(),rawCode=supplierColorCode(pid,family,rows),code=supplierColorKey(rawCode);if(!code)throw Error(`kleurcode niet exact herleid uit ${pid}`);const matches=rows.filter(row=>row.supplier===family&&supplierColorKey(row.code)===code);if(matches.length!==1)throw Error(`${matches.length} exacte regels voor ${family} ${rawCode}`);const match=matches[0];if(!/^\d+$/.test(match.colorId))throw Error(`${family} ${rawCode} heeft geen Intern ColorID`);const options=[...select.options].filter(option=>String(option.value)===match.colorId);if(options.length!==1)throw Error(`ColorID ${match.colorId} staat ${options.length}× in de selectbox`);const selected=[...select.selectedOptions];if(selected.length&&selected.some(option=>option!==options[0]))throw Error('er is al een andere kleur geselecteerd');options[0].selected=true;notify(select);colorFlowStatus(select,`Automatisch geselecteerd: ${match.name||options[0].textContent.trim()} · ${family} ${rawCode}`,'ok');console.info('[DDO Toolbox / Kleurselectie]',{supplierId:pid,family,code:rawCode,colorId:match.colorId,color:match.name});return true}catch(error){colorFlowStatus(select,`Automatische kleur niet toegepast: ${error.message}`,'error');console.warn('[DDO Toolbox / Kleurselectie]',error);return false}}
-  function flowScroll(where){const run=()=>scrollTo({top:where==='top'?0:Math.max(0,document.documentElement.scrollHeight-innerHeight),behavior:'auto'});run();[120,360,800].forEach(ms=>setTimeout(run,ms))}
-  let flowRunning=false;
-  async function performFlowPlan(){if(!flowEnabled()){try{sessionStorage.removeItem(FLOW_KEY)}catch{}return}if(flowRunning)return;const plan=readFlowPlan();if(!plan)return;flowRunning=true;console.info('[DDO Toolbox / Update Flow] Plan gevonden:',plan);try{if(plan.target)await activateFlowTab(plan.target);if(plan.autoColor&&plan.target==='tabs-2'){await waitUntil(()=>!!$('#tabs-2 select#colors-in,#tabs-2 select[name="colors[]"]'),100,100);await autoSelectFlowColor()}if(plan.autoCheck&&plan.target==='tabs-3'){await waitUntil(()=>{const tab=$('#tabs-3');return !!tab&&(!!tab.querySelector('input[name="options_delete[]"],table.options,.empty_set')||/no options/i.test(tab.textContent||''))},60,100);document.querySelectorAll('#tabs-3 input[type="checkbox"][name="options_delete[]"]:not(:disabled)').forEach(box=>{if(!box.checked){box.checked=true;notify(box)}})}if(plan.scroll)flowScroll(plan.scroll);sessionStorage.removeItem(FLOW_KEY);console.info('[DDO Toolbox / Update Flow] Plan uitgevoerd')}catch(error){console.warn('[DDO Toolbox / Update Flow] Uitvoering uitgesteld:',error.message)}finally{flowRunning=false}}
-  let globalFlowWired=false;
-  function enhanceUpdateFlow(){const selector='input.controlbutton[type="submit"][name="edit"],input[type="submit"][name="edit"],button[name="edit"]',isUpdate=element=>!!element?.closest?.(selector);if(!globalFlowWired){globalFlowWired=true;document.addEventListener('click',event=>{if(isUpdate(event.target))writeFlowPlan()},{capture:true});document.addEventListener('submit',event=>{if(isUpdate(event.submitter)||event.target?.querySelector?.(selector))writeFlowPlan()},{capture:true})}document.querySelectorAll(selector).forEach(button=>{if(button.dataset.ddoFlowDirect)return;button.dataset.ddoFlowDirect='1';button.addEventListener('click',writeFlowPlan,{capture:true});const form=button.form||button.closest('form');if(form&&!form.dataset.ddoFlowDirect){form.dataset.ddoFlowDirect='1';form.addEventListener('submit',writeFlowPlan,{capture:true})}})}
-  function enhancePassiveTools(){if(enabled('cap'))enhancePriceHeaders();if(enabled('unlockStock'))enhanceStockUnlock();if(enabled('sizeHelper'))enhanceSizeHelpers();if(enabled('priceHelper'))enhancePriceHelper();if(enabled('photoLoco'))enhancePhotos();if(enabled('nis'))enhanceNis();if(enabled('productFinetuner')){enhanceEditPage();enhanceProductList()}if(enabled('rowEdit'))enhanceRowEdits();if(enabled('discountPill'))enhanceDiscountPills();if(enabled('multiTabber'))enhanceMultiTabber();if(enabled('shiftSelect'))enhanceOptionShiftSelect();if(enabled('productActions'))enhanceTab3Actions();if(enabled('orderClipboard'))enhanceOrderClipboardTools();if(enabled('statusWorker'))runPaste2OrderWorker();if(enabled('threeForTwo'))enhanceThreeForTwoReturns();if(enabled('updateFlow'))enhanceUpdateFlow()}
-
-  // Product enrichment from a structured clipboard payload.
-  const IMPORT_DEFAULTS={tags:'SYST - Promo, SYST - Extern, SYST - Prune Me, SYST - Webwinkelkeur, SYST - To Do',delivery:'6d',publicValue:'0',vip:'0.00'};
-  const price=v=>String(v??'').replace(/[^\d,.]/g,'').trim().replace(',','.'), safeText=v=>String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  function sanitize(html){const doc=new DOMParser().parseFromString(String(html||''),'text/html'),allowed=new Set(['P','BR','B','STRONG','I','EM','U','UL','OL','LI','H1','H2','H3','H4','A','SPAN','BLOCKQUOTE']);doc.querySelectorAll('script,style,iframe,object,embed,link,meta').forEach(n=>n.remove());[...doc.body.querySelectorAll('*')].forEach(el=>{[...el.attributes].forEach(a=>{if(/^on/i.test(a.name)||a.name==='style'||((a.name==='href'||a.name==='src')&&/^javascript:/i.test(a.value)))el.removeAttribute(a.name)});if(!allowed.has(el.tagName))el.replaceWith(...el.childNodes)});doc.body.querySelectorAll('p').forEach(p=>{if(!p.textContent.replace(/\u00a0/g,' ').trim()&&!p.querySelector('ul,ol,blockquote'))p.remove()});return doc.body.innerHTML.trim()}
-  function productPayload(raw){const m=raw.match(/<!--\s*SPARKLE:(\{[\s\S]*?\})\s*-->/i);if(!m)return null;try{return JSON.parse(m[1])}catch{return null}}
-  function selectByText(selector,name){const s=$(selector);if(!s||!name)return;const o=[...s.options].find(x=>x.textContent.trim().toLowerCase()===name.trim().toLowerCase());if(o)input(s,o.value)}
-  function selectModel(name){const raw=String(name||'').trim();if(!raw){pendingModelSelection=null;return Promise.resolve(true)}const normalize=value=>String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(),wanted=normalize(raw);pendingModelSelection=new Promise(resolve=>{const started=Date.now(),check=()=>{const select=$('select[name="model_id"]');if(select&&select.options.length>1){let best=null,bestScore=0;for(const option of select.options){if(!option.value)continue;const text=normalize(option.textContent);if(!text)continue;let score=0;if(text===wanted)score=1000;else if(wanted.includes(text)||text.includes(wanted))score=500+Math.min(text.length,wanted.length);else{const wantedWords=new Set(wanted.split(' ').filter(word=>word.length>1)),optionWords=text.split(' ').filter(word=>word.length>1),matches=optionWords.filter(word=>wantedWords.has(word)).length;score=matches?matches/Math.max(wantedWords.size,optionWords.length)*100:0}if(score>bestScore){bestScore=score;best=option}}if(best&&(bestScore>=50||bestScore>=500)){input(select,best.value);console.info('[DDO Toolbox / Model] Geselecteerd:',best.textContent.trim());return resolve(true)}}if(Date.now()-started>=7000){console.warn('[DDO Toolbox / Model] Geen match voor:',raw);return resolve(false)}setTimeout(check,100)};setTimeout(check,250)});return pendingModelSelection}
-  function setEditorHtml(ta,html){if(!ta)return false;const manager=window.tinymce||window.tinyMCE,api=manager?.get?.(ta.id)||[...(manager?.editors||[])].find(editor=>editor?.targetElm===ta||editor?.getElement?.()===ta||editor?.targetElm?.name===ta.name);if(api?.setContent){api.setContent(html,{format:'html'});api.fire?.('change');api.save?.()}else{const body=document.getElementById(`${ta.id}_ifr`)?.contentDocument?.body;if(body)body.innerHTML=html}input(ta,html);ta.dispatchEvent(new Event('blur',{bubbles:true}));return true}
-  async function editorHtml(name,html){return setEditorHtml($(`textarea[name="${name}"]`),html)}
-  async function productImport(autoSave){if(busy)return;busy=true;status('importer','Klembord lezen…','busy');paint(false);try{const data=productPayload(await navigator.clipboard.readText());if(!data)throw Error('Geen productgegevens gevonden in het klembord');const missing=[['name','Name'],['rrp','RRP'],['productCode','Product Code']].filter(([k])=>!String(data[k]??'').trim()).map(x=>x[1]);if(missing.length)throw Error(`Mist: ${missing.join(', ')}`);const name=$('input[name="name"]')?.value.trim()||'',brandSelect=$('select[name="brand_id"]');let brandName=[...brandSelect?.options||[]].find(o=>o.text.trim().toLowerCase()===name.toLowerCase())?.text.trim()||(/^rj(\s|$)/i.test(name)?'RJ Bodywear':name),supplierTitle=String(data.title||data.name).trim(),newName=name.toLowerCase().includes(supplierTitle.toLowerCase())?name:[brandName,supplierTitle].filter(Boolean).join(' ').trim();const pub=$('input[name="public"][value="0"]');if(pub){pub.checked=true;notify(pub)}selectByText('select[name="brand_id"]',brandName);if(newName)input($('input[name="name"]'),newName);input($('input[name="title"]'),[brandName,supplierTitle].filter(Boolean).join(' ').trim());input($('input[name="price"]'),price(data.rrp));input($('input[name="price_advice"]'),price(data.rrp));input($('input[name="supplier_pid"]'),String(data.productCode).trim());input($('input[name="reference"]'),String(data.reference||'').trim());input($('input[name="price_vip"]'),IMPORT_DEFAULTS.vip);input($('input[name="tags_csv"]'),IMPORT_DEFAULTS.tags);input($('select[name="delivery"]'),IMPORT_DEFAULTS.delivery);if(data.compositionUrl)input($('input[name="composition"]'),String(data.compositionUrl));selectModel(data.modelName);const raw=String(data.descriptionHtml||'').trim(),plain=String(data.descriptionText||'').trim(),html=raw?sanitize(raw):plain?sanitize(`<p>${safeText(plain).replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>')}</p>`):'';if(html)await editorHtml('description',html);status('importer','Productgegevens ingevuld','success',3500);if(autoSave)save();return true}catch(e){console.error('[DDO Toolbox / Product Verrijken]',e);status('importer',e.message||'Verrijken mislukt','error',4500);return false}finally{busy=false;paint()}}
-  function drag(box,handle){let active=null;handle.onpointerdown=event=>{if(event.button!==0||event.target.closest('button'))return;const rect=box.getBoundingClientRect();active={x:event.clientX-rect.left,y:event.clientY-rect.top};handle.setPointerCapture(event.pointerId);event.preventDefault()};handle.onpointermove=event=>{if(!active)return;box.style.left=`${Math.max(0,Math.min(innerWidth-box.offsetWidth,event.clientX-active.x))}px`;box.style.top=`${Math.max(0,Math.min(innerHeight-28,event.clientY-active.y))}px`;box.style.right='auto';positionTab3Actions()};const stop=()=>{if(!active)return;active=null;const rect=box.getBoundingClientRect();localStorage.setItem('ddoToolboxPosition',JSON.stringify({left:rect.left,top:rect.top}));positionTab3Actions()};handle.onpointerup=stop;handle.onpointercancel=stop;handle.onlostpointercapture=stop}
-  const newer=(remote,local)=>{const a=String(remote||'').split('.').map(Number),b=String(local||'').split('.').map(Number);for(let i=0;i<Math.max(a.length,b.length);i++){if((a[i]||0)!==(b[i]||0))return(a[i]||0)>(b[i]||0)}return false};
-  function remoteVersion(url){return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url:`${url}${url.includes('?')?'&':'?'}_=${Date.now()}`,onload:response=>{if(response.status<200||response.status>=300)return reject(Error(`HTTP ${response.status}`));const version=response.responseText.match(/^\/\/\s*@version\s+([^\s]+)/m)?.[1];version?resolve(version):reject(Error('Versie ontbreekt'))},onerror:()=>reject(Error('Netwerkfout')),ontimeout:()=>reject(Error('Timeout'))}))}
-  function updateTargets(){return[{id:'core',label:'Core',version:VERSION,updateUrl:UPDATE,installed:true},...ADAPTER_CATALOG.map(item=>{const installed=adapters.get(item.id);return{...item,version:installed?.version||'',installed:!!installed}})]}
-  const updateSignature=targets=>targets.map(item=>`${item.updateUrl}@${item.installed?item.version:'ontbreekt'}`).sort().join('|');
-  function readUpdateCache(){try{return JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY)||'null')}catch{return null}}
-  function writeUpdateCache(cache){try{localStorage.setItem(UPDATE_CACHE_KEY,JSON.stringify(cache))}catch(error){console.warn('[DDO Toolbox / Updates] Cache kon niet worden opgeslagen.',error)}}
-  function updateLink(item,text,title){const link=document.createElement('a');link.href=item.updateUrl;link.target='_blank';link.rel='noopener noreferrer';link.textContent=text;link.title=title;Object.assign(link.style,{color:'#0877b9',textDecoration:'underline',cursor:'pointer'});return link}
-  function appendUpdateLinks(label,prefix,items,text,title){if(!items.length)return;if(label.childNodes.length)label.append(document.createElement('br'));label.append(`${prefix}: `);items.forEach((item,index)=>{if(index)label.append(' · ');label.append(updateLink(item,text(item),title(item)))})}
-  function renderUpdateState(cache){const label=$('#ddo-update-state'),button=$('#ddo-update');if(!label||!button)return;const targets=updateTargets(),local=new Map(targets.map(item=>[item.updateUrl,item])),checked=cache?.updates||[],outdated=checked.filter(item=>{const current=local.get(item.updateUrl);return current?.installed&&newer(item.remoteVersion,current.version)}),missing=targets.filter(item=>item.id!=='core'&&!item.installed),failures=cache?.failures||[];label.replaceChildren();appendUpdateLinks(label,'Installeren',missing,item=>item.label,item=>`Installeer ${item.label}`);appendUpdateLinks(label,'Updates',outdated,item=>`${item.label} v${item.remoteVersion}`,item=>`Download update voor ${item.label}`);if(!missing.length&&!outdated.length){if(cache?.checkedAt){const time=new Date(cache.checkedAt).toLocaleString('nl-NL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});label.append(`Core + ${ADAPTER_CATALOG.length} adapters actueel · ${time}`)}else label.append('Nog niet gecontroleerd')}if(failures.length){label.append(document.createElement('br'),`Mislukt: ${failures.map(item=>`${item.label} (${item.error})`).join(' · ')}`)}else if(cache?.failed)label.append(` · ${cache.failed} eerdere fout(en)`);button.disabled=false;button.textContent='Check op Updates';button.onclick=updates}
-  async function updates(){const label=$('#ddo-update-state'),button=$('#ddo-update'),targets=updateTargets();label.textContent=`Controleren… 0/${targets.length}`;button.disabled=true;let finished=0;const results=await Promise.all(targets.map(async target=>{try{return{ok:true,target:{...target,remoteVersion:await remoteVersion(target.updateUrl)}}}catch(error){console.error(`[DDO Toolbox / Updates] ${target.label}:`,error);return{ok:false,target,error:error?.message||String(error)}}finally{finished++;label.textContent=`Controleren… ${finished}/${targets.length}`}})),checked=results.filter(result=>result.ok).map(result=>result.target),failures=results.filter(result=>!result.ok).map(result=>({label:result.target.label,error:result.error,updateUrl:result.target.updateUrl})),cache={checkedAt:Date.now(),signature:updateSignature(targets),failed:failures.length,failures,total:targets.length,updates:checked.map(({id,label,version,installed,remoteVersion,updateUrl})=>({id,label,version,installed,remoteVersion,updateUrl}))};writeUpdateCache(cache);renderUpdateState(cache)}
-  function dailyUpdates(){const cache=readUpdateCache(),signature=updateSignature(updateTargets());renderUpdateState(cache);if(!cache?.checkedAt||cache.signature!==signature||Date.now()-cache.checkedAt>=UPDATE_INTERVAL)updates()}
-  function installHotkeysPanel(link){const box=$('#ddo-toolbox');if(!box||$('#ddo-hotkeys-panel'))return;const panel=document.createElement('section');panel.id='ddo-hotkeys-panel';panel.setAttribute('aria-hidden','true');Object.assign(panel.style,{position:'absolute',inset:'28px 0 0',zIndex:'5',padding:'6px',background:'#fff',transform:'translateY(105%)',transition:'transform 180ms ease-out',boxSizing:'border-box'});panel.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><strong>Hotkeys</strong><button type="button" id="ddo-hotkeys-close" style="padding:1px 5px;background:#e7edf1;color:#34424d">Sluiten</button></div><div class="ddo-hotkey-row"><b>Ctrl+Shift+S</b><span>Scrapen + opslaan</span></div><div class="ddo-hotkey-row"><b>Ctrl+Shift+E</b><span>Manueel plakken</span></div><div class="ddo-hotkey-row"><b>Ctrl+Shift+Q</b><span>Manueel plakken · stock standaard 1</span></div><div class="ddo-hotkey-row"><b>Ctrl+Shift+F</b><span>Stock 1 → 0 + opslaan</span></div><div class="ddo-hotkey-row"><b>Ctrl+Shift+V</b><span>Verrijken + opslaan</span></div><div class="ddo-hotkey-row"><b>—</b><span>Prune heeft geen hotkey</span></div>`;panel.querySelectorAll('.ddo-hotkey-row').forEach(row=>Object.assign(row.style,{display:'grid',gridTemplateColumns:'82px 1fr',gap:'5px',alignItems:'center',minHeight:'28px',padding:'1px 3px',borderTop:'1px solid #edf1f4',fontSize:'10px'}));box.appendChild(panel);const show=visible=>{panel.style.transform=visible?'translateY(0)':'translateY(105%)';panel.setAttribute('aria-hidden',String(!visible))};link.addEventListener('click',e=>{e.preventDefault();show(panel.getAttribute('aria-hidden')==='true')});$('#ddo-hotkeys-close').addEventListener('click',()=>show(false))}
-  function keepToolboxOnScreen(){const box=$('#ddo-toolbox');if(!box)return;const rect=box.getBoundingClientRect(),width=box.offsetWidth||215,height=box.offsetHeight||28;if(rect.right<40||rect.left>innerWidth-40||rect.bottom<28||rect.top>innerHeight-28){box.style.left='auto';box.style.right='10px';box.style.top='10px';localStorage.removeItem('ddoToolboxPosition');return}if(box.style.left&&box.style.left!=='auto'){box.style.left=`${Math.max(0,Math.min(innerWidth-width,rect.left))}px`;box.style.top=`${Math.max(0,Math.min(innerHeight-Math.min(height,28),rect.top))}px`}}
-  function installFlowToggle(){const footer=$('#ddo-toolbox footer');if(!footer||$('#ddo-flow-toggle'))return;Object.assign(footer.style,{display:'grid',gridTemplateColumns:'1fr',gap:'1px',padding:'3px 7px'});const update=$('#ddo-update'),state=$('#ddo-update-state');update.textContent='Check op Updates';Object.assign(update.style,{justifySelf:'start',padding:'0',fontSize:'10px',lineHeight:'1.25'});Object.assign(state.style,{display:'block',lineHeight:'1.25'});const updateLine=document.createElement('div'),separator=document.createElement('span'),hotkeys=document.createElement('a'),showHotkeys=productEditPage();Object.assign(updateLine.style,{display:'flex',alignItems:'center',gap:'5px',fontSize:'10px',lineHeight:'1.25'});separator.textContent='|';separator.hidden=!showHotkeys;hotkeys.href='#';hotkeys.textContent='Hotkeys';hotkeys.title='Toon beschikbare hotkeys';hotkeys.hidden=!showHotkeys;Object.assign(hotkeys.style,{padding:'0',fontSize:'10px',lineHeight:'1.25',color:'#0877b9',textDecoration:'none',cursor:'pointer'});update.parentElement.insertBefore(updateLine,state);updateLine.append(update,separator,hotkeys);const label=document.createElement('label'),toggle=document.createElement('input'),text=document.createElement('span');toggle.id='ddo-flow-toggle';toggle.type='checkbox';toggle.checked=flowEnabled();toggle.disabled=!enabled('updateFlow');Object.assign(toggle.style,{margin:'0',width:'12px',height:'12px'});Object.assign(label.style,{display:'inline-flex',alignItems:'center',gap:'4px',fontSize:'10px',lineHeight:'1.25',cursor:toggle.disabled?'default':'pointer',opacity:toggle.disabled?'.55':'1'});const render=()=>text.textContent=toggle.checked?'Update Flow Actief':'Update Flow Inactief';render();label.title=toggle.disabled?'Geen toegang':'Update Flow na opslaan in- of uitschakelen';label.append(toggle,text);footer.prepend(label);toggle.addEventListener('change',()=>{setFlowEnabled(toggle.checked);render()});if(showHotkeys)installHotkeysPanel(hotkeys);requestAnimationFrame(keepToolboxOnScreen)}
-  function ui(){
-    if($('#ddo-toolbox'))return;
-    const style=document.createElement('style');
-    style.textContent=`#ddo-toolbox{position:fixed;right:10px;top:10px;width:215px;max-width:calc(100vw - 8px);z-index:99999999;background:#fff;color:#25313b;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0002;font:12px/1.25 system-ui;overflow:hidden}#ddo-toolbox *{box-sizing:border-box}#ddo-toolbox header{height:28px;padding:0 8px;display:flex;align-items:center;justify-content:space-between;background:#263746;color:#fff;cursor:move;font-weight:650;touch-action:none}.ddo-header-controls{display:flex;align-items:center;gap:7px}.ddo-version,#ddo-update-state{font-size:9px}.ddo-collapse{border:0;background:transparent;color:#fff;width:22px;height:22px;padding:0;display:grid;place-items:center}.ddo-collapse svg{width:14px;height:14px}.ddo-user{padding:7px 8px;border-bottom:1px solid #edf1f4;font-size:10px;overflow-wrap:anywhere}.ddo-role{color:#6d7880;margin-top:3px}.ddo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;padding:8px}.ddo-feature{aspect-ratio:1;border:0;border-radius:4px;background:#d6dce1;color:#56616a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:3px;font:9px/1.12 system-ui;min-width:0;overflow-wrap:anywhere}.ddo-feature:disabled{cursor:default;opacity:1}.ddo-feature[data-status=installed]{background:#18864b;color:#fff}.ddo-feature[data-status=usable]{background:#0877b9;color:#fff}.ddo-feature[data-status=busy]{background:#e6a400;color:#111}.ddo-feature[data-status=error]{background:#c83939;color:#fff}.ddo-icon{display:block;width:23px;height:23px;flex-shrink:0}.ddo-icon svg{display:block;width:100%;height:100%}.ddo-tile-label{text-align:center}.ddo-tile-status{display:none}.ddo-edi-panel,.ddo-module-panel{padding:6px;border-top:1px solid #dfe5e9}.ddo-edi-title{font-size:10px;margin-bottom:4px}.ddo-edi-row{display:grid;grid-template-columns:132px 1fr;gap:5px;align-items:center;padding:2px}.ddo-edi-action{min-height:27px;padding:3px 6px;border:0;border-radius:4px;background:#0877b9;color:#fff;font:600 11px/1.15 system-ui;text-align:left;white-space:nowrap}.ddo-edi-action:disabled{background:#d6dce1;color:#7b858d;cursor:not-allowed}#ddo-color-panel .ddo-edi-row{display:block;padding:2px}#ddo-color-panel .ddo-edi-action{display:block;width:100%}.ddo-edi-status{font-size:9px;color:#6d7880;overflow-wrap:anywhere}#ddo-toolbox footer{padding:4px 7px;background:#f4f7f9;border-top:1px solid #dfe5e9}#ddo-update{background:transparent;color:#0877b9;border:0}.ddo-collapsed>.ddo-user,.ddo-collapsed>.ddo-grid,.ddo-collapsed>.ddo-edi-panel,.ddo-collapsed>.ddo-module-panel,.ddo-collapsed>footer,.ddo-collapsed>#ddo-hotkeys-panel{display:none!important}[hidden]{display:none!important}#ddo-tab3-actions{position:fixed;z-index:99999998;display:grid;grid-template-columns:1fr;gap:3px;padding:4px;box-sizing:border-box;background:#f4f7f9;border:1px solid #cbd5df;border-radius:6px;box-shadow:0 4px 12px #0002;font:11px/1.2 system-ui}#ddo-tab3-actions button{min-height:25px;padding:4px 7px;border:0;border-radius:4px;background:#0877b9;color:#fff;font:inherit;font-weight:600;text-align:left;cursor:pointer}#ddo-tab3-actions button:disabled{background:#d6dce1;color:#7b858d;cursor:not-allowed}.ddo-inline-tool{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;margin-left:5px;min-height:20px;padding:2px 6px;border:0;border-radius:4px;background:#0877b9;color:#fff;cursor:pointer;font-size:10px;line-height:1;text-decoration:none;box-sizing:border-box}.ddo-inline-tool:hover{background:#18864b}.ddo-comfort-action{min-height:25px;padding:4px 9px;font-size:11px}.ddo-sizes-helper{display:inline-flex;gap:7px;align-items:center}.ddo-sizes-status{color:#6b617d;max-width:480px}.ddo-price-actions{display:inline-flex;white-space:nowrap}.ddo-price-btn{margin:1px;padding:3px 6px;background:#eee;color:#333;border:1px solid #d0d0d0}.ddo-price-btn.active{background:#22c55e;color:#fff}.ddo-photo-helper{margin:8px 0;padding:8px;border:1px solid #ccd3d8;background:#f8fafb}.ddo-photo-helper .ddo-inline-tool:first-child{margin-left:0}.ddo-photo-status{margin-top:6px;font-size:11px;color:#56616a}.ddo-copy-pid,.ddo-open-composition,.ddo-compo-link,.ddo-row-edit{margin-left:.5em;text-decoration:none;cursor:pointer}.ddo-open-composition.disabled{opacity:.3;pointer-events:none}`;
-    document.head.appendChild(style);
-    const box=document.createElement('section');box.id='ddo-toolbox';box.setAttribute('role','region');box.setAttribute('aria-label','DDO Toolbox');
-    const tiles=Object.entries(FEATURES).map(([id,feature])=>`<button type="button" class="ddo-feature" data-feature="${id}" disabled><span class="ddo-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[feature.icon]||ICONS.product}</svg></span><span class="ddo-tile-label">${feature.label}</span><span class="ddo-tile-status"></span></button>`).join('');
-    const edi=Object.entries(EDI_ACTIONS).map(([id,feature])=>`<div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-edi-action="${id}">${feature.label}</button><small class="ddo-edi-status">Controleren…</small></div>`).join('');
-    box.innerHTML=`<header><span>DDO Toolbox</span><span class="ddo-header-controls"><span class="ddo-version">v${VERSION}</span><button type="button" class="ddo-collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="ddo-user"><div id="ddo-user-name"></div><div id="ddo-user-role" class="ddo-role"></div></div><div class="ddo-grid">${tiles}</div><section id="ddo-edi-panel" class="ddo-edi-panel"><div class="ddo-edi-title">EDI</div>${edi}</section><section id="ddo-color-panel" class="ddo-module-panel" hidden><div class="ddo-edi-title">Kleurbeheer</div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="add">Nieuwe kleuren toevoegen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="change">Productkleuren wijzigen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="titlecheck">Kleur-titels aanvullen</button></div></section><footer><button id="ddo-update">Updates</button><span id="ddo-update-state">Niet gecontroleerd</span></footer>`;
-    document.body.appendChild(box);
-    $('[data-edi-action="scraper"]').onclick=()=>runAdapter(false,true);$('[data-edi-action="autopaster"]').onclick=()=>autopaste();$('[data-edi-action="stockfixer"]').onclick=()=>fix(false);$('[data-edi-action="importer"]').onclick=()=>productImport(false);$('[data-edi-action="prune"]').onclick=pruneCurrentProduct;$('[data-feature="sizeChart"]').onclick=injectSizeChart;$('[data-color-action="add"]').onclick=()=>send('color-management',{mode:'add'});$('[data-color-action="change"]').onclick=()=>send('color-management',{mode:'change'});$('[data-color-action="titlecheck"]').onclick=()=>send('color-management',{mode:'titlecheck'});Object.entries(FEATURES).filter(([,feature])=>feature.adapter).forEach(([id])=>{$(`[data-feature="${id}"]`).onclick=()=>{if(enabled(id)&&adapters.get(id)?.ready)send('run-feature',{id})}});$('#ddo-update').onclick=updates;
-    const collapse=$('.ddo-collapse',box),renderCollapse=collapsed=>{box.classList.toggle('ddo-collapsed',collapsed);collapse.setAttribute('aria-expanded',String(!collapsed));collapse.title=collapsed?'Maximaliseren':'Minimaliseren';collapse.setAttribute('aria-label',collapsed?'Toolbox maximaliseren':'Toolbox minimaliseren');collapse.innerHTML=`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${collapsed?'<rect x="3" y="3" width="10" height="10" rx="1"/>':'<path d="M3 11h10"/>'}</svg>`;positionTab3Actions()};let collapsed=false;try{collapsed=localStorage.getItem('ddoToolboxCollapsed')==='true'}catch{}renderCollapse(collapsed);collapse.onclick=()=>{collapsed=!collapsed;try{localStorage.setItem('ddoToolboxCollapsed',String(collapsed))}catch{}renderCollapse(collapsed)};
-    drag(box,$('header',box));try{const position=JSON.parse(localStorage.getItem('ddoToolboxPosition'));if(position){box.style.left=`${position.left}px`;box.style.top=`${position.top}px`;box.style.right='auto'}}catch{}
-  }
-  function boot(){const params=new URLSearchParams(location.search),products=params.get('section')==='products',edit=products&&params.get('action')==='edit';ui();installFlowToggle();document.addEventListener('keydown',e=>{if(!e.ctrlKey&&!e.metaKey||!e.shiftKey||e.altKey)return;const key=e.key.toLowerCase();if(key==='v'&&available().importer.ok){e.preventDefault();e.stopPropagation();productImport(true);return}if(['INPUT','TEXTAREA','SELECT'].includes(e.target?.tagName)||e.target?.isContentEditable)return;if(key==='s'&&available().scraper.ok){e.preventDefault();runAdapter(true,false)}if(key==='e'&&available().autopaster.ok){e.preventDefault();autopaste()}if(key==='q'&&available().autopaster.ok){e.preventDefault();autopaste('1')}if(key==='f'&&available().stockfixer.ok){e.preventDefault();fix(true)}},true);paint();setTimeout(dailyUpdates,1500);enhancePassiveTools();if(edit&&enabled('updateFlow')){performFlowPlan();window.addEventListener('pageshow',performFlowPlan);window.addEventListener('load',performFlowPlan);document.addEventListener('visibilitychange',()=>{if(!document.hidden)performFlowPlan()});setTimeout(performFlowPlan,1000);setTimeout(performFlowPlan,3000)}setInterval(()=>{paint();enhancePassiveTools()},1500)}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+  const productClipboard = payload => `<!--SPARKLE:${JSON.stringify(payload)}-->`;
+  const sizesClipboard = (source, supplierId, sizes) => JSON.stringify({source, orderId:false, supplierId, sizes:[...new Set(sizes.map(normalizeSize))]}, null, 2);
+  const theme = `
+    #edi-lingadore{background:#fff;color:#25313b;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0002;font:12px/1.25 system-ui}
+    #edi-lingadore .edi-head{min-height:28px;padding:0 8px;background:#263746;color:#fff;border:0;touch-action:none}
+    #edi-lingadore .edi-version{font-size:9px;color:#fff}
+    #edi-lingadore .edi-icon-btn{color:#fff;border-radius:4px}
+    #edi-lingadore .edi-icon-btn:hover{background:#ffffff22}
+    #edi-lingadore .edi-btn,#edi-lingadore .edi-action{border:0;border-radius:4px;background:#0877b9;color:#fff;font:600 11px/1.15 system-ui;min-height:27px;padding:4px 7px}
+    #edi-lingadore .edi-btn:hover:not(:disabled),#edi-lingadore .edi-action:hover:not(:disabled){background:#18864b;color:#fff}
+    #edi-lingadore .edi-danger{background:#c83939}
+    #edi-lingadore button:disabled{background:#d6dce1;color:#7b858d;opacity:1;cursor:not-allowed}
+    #edi-lingadore .edi-status{background:#f4f7f9;color:#56616a;border-radius:4px;font-size:10px}
+    #edi-lingadore .edi-match-ok{color:#18864b}
+    #edi-lingadore .edi-match-miss{color:#c83939}
+    #edi-lingadore .edi-body{max-height:calc(100vh - 65px);overflow:auto}
+  `;
+  return {normalizeSize, sizeCandidates, parseEAN, variantMap, eanTSV, productClipboard, sizesClipboard, theme};
 })();
 
-// DDO Core module: Kleurbeheer
+// END SHARED EDI
 (() => {
   'use strict';
-  if (window.__ddoToolbox?.identity?.().role !== 'Beheerder') return;
-  const norm = s => String(s ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
-  const url = value => { const u = new URL(value, location.origin); if (u.origin !== location.origin || u.pathname !== '/admin.php' || u.searchParams.get('section') !== 'products') throw Error('Alleen productbeheer-URLs op deze website zijn toegestaan.'); return u; };
-  const parse = text => {
-    const rows=[]; let row=[],field='',quoted=false;
-    for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){field+='"';i++;}else if(quoted||!field)quoted=!quoted;else field+=c;}else if(!quoted&&(c==='\t'||c==='\n')){row.push(field.replace(/\r$/,''));field='';if(c==='\n'){if(row.some(x=>x.trim()))rows.push(row);row=[];}}else field+=c;}
-    if(quoted)throw Error('Niet afgesloten aanhalingsteken in plakgegevens.');row.push(field.replace(/\r$/,''));if(row.some(x=>x.trim()))rows.push(row);
-    if(rows.length<2)throw Error('Plak kolomkoppen en minstens één gegevensregel.');const heads=rows.shift().map(norm);if(new Set(heads).size!==heads.length)throw Error('Dubbele kolomkoppen.');return rows.map((r,i)=>{if(r.length!==heads.length)throw Error(`Regel ${i+2}: aantal kolommen wijkt af.`);return Object.fromEntries(heads.map((h,j)=>[h,r[j].trim()]));});
-  };
-  if(typeof module!=='undefined'&&module.exports){module.exports={parse,norm,prepare};return;}
-  if(new URL(location.href).searchParams.get('section')!=='products')return;
-  const host=document.querySelector('#tabs-7');
-  if(!host||!document.querySelector('#product_coloradd_dialog form'))return;
-  function button(label,parent,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.style.cssText=label==='🗑'?'border:0;background:transparent;box-shadow:none;padding:6px;cursor:pointer;font-size:20px;line-height:1':'padding:7px 10px;border:0;border-radius:4px;background:#0877b9;color:#fff;font:600 11px/1.2 system-ui;cursor:pointer';b.onclick=fn;parent.append(b);return b;}
-  let opened=false;
-  document.addEventListener('ddo-toolbox:color-management',event=>{let data={};try{data=JSON.parse(event.detail||'{}')}catch{}if(['add','change'].includes(data.mode))open(data.mode);else if(data.mode==='titlecheck')runTitleCheck();});
-  async function get(value){const u=url(value);const response=await fetch(u,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error(`Ophalen mislukt: HTTP ${response.status}`);url(response.url);const doc=new DOMParser().parseFromString(await response.text(),'text/html');if(doc.querySelector('input[type=password]'))throw Error('Inlogsessie verlopen.');return doc;}
-  const titleStyle=document.createElement('style');titleStyle.textContent='tr.ddo-title-missing>td{background:#ffd6d6!important}tr.ddo-title-missing>td:first-child{box-shadow:inset 5px 0 0 #c62828}tr.ddo-title-error>td{background:#fff3cd!important}tr.ddo-title-error>td:first-child{box-shadow:inset 5px 0 0 #e0a800}.ddo-title-warning,.ddo-title-request-error{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:700}.ddo-title-warning{background:#c62828;color:#fff}.ddo-title-request-error{background:#e0a800;color:#222}';document.head.appendChild(titleStyle);
-  function colorTitleRows(){const results=[],seen=new Set();for(const row of host.querySelectorAll('tr')){let id='',href='';const link=row.querySelector('a[href*="action=coloredit"][href*="id="]');if(link){const parsed=new URL(link.href,location.href);id=parsed.searchParams.get('id')||'';href=parsed.href}if(!id){const match=(row.getAttribute('onmousedown')||'').match(/action=coloredit(?:&|&amp;)id=(\d+)/i);if(match){id=match[1];href=`${location.origin}/admin.php?section=products&action=coloredit&id=${id}`}}if(id&&href&&!seen.has(id)){seen.add(id);results.push({row,id,href})}}return results}
-  function clearTitleResults(){host.querySelectorAll('tr.ddo-title-missing,tr.ddo-title-error').forEach(row=>row.classList.remove('ddo-title-missing','ddo-title-error'));host.querySelectorAll('.ddo-title-warning,.ddo-title-request-error').forEach(el=>el.remove())}
-  function titleBadge(row,text,className){const cell=row.querySelector('td');if(!cell)return;const badge=document.createElement('span');badge.className=className;badge.textContent=text;cell.appendChild(badge)}
-  function colorEditForm(doc,item){const form=[...doc.querySelectorAll('form')].find(candidate=>candidate.querySelector('input[name="coloredit"]'));if(!form)throw Error('Kleurbewerkingsformulier ontbreekt.');const action=url(form.getAttribute('action')||item.href),id=form.querySelector('input[name="id"]')?.value?.trim();if(action.searchParams.get('action')!=='coloredit'||action.searchParams.get('id')!==item.id||id!==item.id)throw Error('Kleur-ID of formulieractie komt niet overeen.');if(form.method.toLowerCase()!=='post')throw Error('Onverwachte formuliermethode.');const name=form.querySelector('input[name="name"]')?.value?.trim(),title=form.querySelector('input[name="title"]');if(!name||!title)throw Error('Name- of Title-veld ontbreekt.');return {form,name,title:title.value.trim()}}
-  async function saveColorTitle(item,form,name){await post(form,{id:item.id,title:name,coloredit:'Edit color'},'coloredit');const verified=colorEditForm(await get(item.href),item);if(verified.title!==name)throw Error('Titelwijziging niet bevestigd; controleer CMS.');}
-  async function runTitleCheck(){const control=document.querySelector('[data-color-action="titlecheck"]');if(!control||control.disabled)return;clearTitleResults();const rows=colorTitleRows();if(!rows.length){control.textContent='Geen kleurregels gevonden';setTimeout(()=>control.textContent='Kleur-titels aanvullen',3000);return}control.disabled=true;let ok=0,filled=0,errors=0,stopped=false;const execute=async()=>{for(let i=0;i<rows.length;i++){const item=rows[i];control.textContent=`Verwerken ${i+1}/${rows.length}`;try{const edit=colorEditForm(await get(item.href),item);if(edit.title)ok++;else{await saveColorTitle(item,edit.form,edit.name);filled++;}}catch(error){errors++;stopped=true;item.row.classList.add('ddo-title-error');titleBadge(item.row,'AANVULLEN MISLUKT','ddo-title-request-error');console.error(`[DDO Kleurbeheer] Titel aanvullen ID ${item.id}`,error);break}await new Promise(resolve=>setTimeout(resolve,100))}};try{if(!navigator.locks)throw Error('Browser ondersteunt geen batchvergrendeling.');await navigator.locks.request('ddo-color-title-batch',{ifAvailable:true},async lock=>{if(!lock)throw Error('Er loopt al een kleur-titelbatch in een ander tabblad.');await execute();});control.textContent=`${ok} goed · ${filled} aangevuld${errors?` · ${errors} mislukt`:''}`;console.info('[DDO Kleurbeheer / Titels]',{gecontroleerd:ok+filled+errors,goed:ok,aangevuld:filled,mislukt:errors,gestopt:stopped})}catch(error){control.textContent=error.message;console.error('[DDO Kleurbeheer / Titels]',error)}finally{control.disabled=false}}
-  function catalog(doc){const form=doc.querySelector('#product_coloradd_dialog form');const tab=doc.querySelector('#tabs-7');if(!form||!tab)throw Error('Kleurenlijst of aanmaakformulier ontbreekt.');const colors=[];for(const tr of tab.querySelectorAll('tr')){const raw=tr.getAttribute('onmousedown')||tr.querySelector('a[href*="action=coloredit"]')?.getAttribute('href')||'';const id=raw.match(/action=coloredit(?:&amp;|&)id=(\d+)/)?.[1];if(!id)continue;const cells=tr.querySelectorAll('td');const cell=cells[0].cloneNode(true);cell.querySelectorAll('a').forEach(a=>a.remove());colors.push({id,name:cell.textContent.trim(),family:cells[1].textContent.trim()});}if(!colors.length)throw Error('Geen kleuren gevonden.');return {form,colors,groups:[...form.querySelectorAll('[name=group_id] option')].filter(o=>o.value).map(o=>({id:o.value,name:o.textContent.trim()}))};}
-  function one(list,predicate,message){const hits=list.filter(predicate);if(hits.length!==1)throw Error(message+` (${hits.length} gevonden)`);return hits[0];}
-  async function changeForm(link){const doc=await get(link);const form=[...doc.querySelectorAll('form')].find(f=>f.querySelector('[name=productcolorchange]'));if(!form)throw Error('Change color-formulier ontbreekt.');const action=url(form.getAttribute('action'));const id=form.querySelector('input[name=id]')?.value;if(!id||id!==url(link).searchParams.get('id')||action.searchParams.get('action')!=='productcoloredit'||action.searchParams.get('id')!==id)throw Error('Koppelings-ID komt niet overeen.');const current=form.querySelector('input[disabled]')?.value;if(!current)throw Error('Huidige kleur ontbreekt.');return {form,id,current};}
-  async function prepare(r,mode,cat){if(mode==='add'){const name=r.kleur||r['voorgestelde kleur'];const family=r.kleurfamilie||r['voorgestelde familie'];if(!name||!family||name==='#')throw Error('Kleur en kleurfamilie verplicht; # is beschermd.');const group=one(cat.groups,g=>norm(g.name)===norm(family),'Kleurfamilie niet eenduidig');const matches=cat.colors.filter(c=>norm(c.name)===norm(name));if(matches.length>1)throw Error('Meerdere kleuren met dezelfde naam.');if(matches.length&&norm(matches[0].family)!==norm(family))throw Error('Bestaande kleur heeft een andere familie.');return {name,family:group.name,groupId:group.id,existing:matches[0]?.id,form:cat.form,label:name,action:matches.length?'Bestaat al — overgeslagen':'Aanmaken'};}
-    const current=r['huidige kleur'];const targetName=r['nieuwe kleur']||r['voorgestelde kleur'];if(!current||!targetName||current==='#'||targetName==='#')throw Error('Huidige en nieuwe kleur verplicht; # is beschermd.');const target=one(cat.colors,c=>norm(c.name)===norm(targetName),'Nieuwe kleur niet eenduidig; maak deze eerst aan');const productId=r['intern product-id'];if(!r['product url']&&!/^\d+$/.test(productId||''))throw Error('Intern product-ID ontbreekt of is ongeldig.');const product=url(r['product url']||('/admin.php?section=products&action=edit&id='+productId));if(product.searchParams.get('action')!=='edit')throw Error('Product URL moet action=edit bevatten.');if(['productcoloredit','coloredit'].includes(product.searchParams.get('action')))throw Error('Product URL moet naar het product wijzen, niet naar een kleur.');const expected=r['intern product-id'];if(expected&&product.searchParams.get('id')!==expected)throw Error('Product URL en intern product-ID verschillen.');const doc=await get(product);const links=[...doc.querySelectorAll('a[href*="action=productcoloredit"]')];const unique=[...new Map(links.map(a=>[url(a.getAttribute('href')).href,a])).values()];const oldLinks=unique.filter(a=>norm(a.textContent)===norm(current));const already=!oldLinks.length;const link=one(unique,a=>norm(a.textContent)===norm(already?target.name:current),'Huidige of reeds gewijzigde productkleur niet eenduidig');const href=url(link.getAttribute('href')).href;const label=`${expected||product.searchParams.get('id')||''}: ${current} → ${target.name}`;if(already||norm(current)===norm(target.name))return {id:url(href).searchParams.get('id'),current:target.name,href,product:product.href,target,label,action:'Heeft al de juiste kleur',skip:true};const result=await changeForm(href);if(norm(result.current)!==norm(already?target.name:current))throw Error('Huidige kleur wijkt af op wijzigingspagina.');one([...result.form.querySelectorAll('[name=color_id] option')],o=>o.value===target.id&&norm(o.textContent)===norm(target.name),'Doelkleur niet beschikbaar');return {...result,href,product:product.href,target,label:`${expected||product.searchParams.get('id')||''}: ${current} → ${target.name}`,action:already||norm(current)===norm(target.name)?'Ongewijzigd':'Wijzigen'};
+  if (location.hostname !== 'www.dutchdesignersoutlet.com' || window.top !== window.self) return;
+  const ID = 'lingadore', VERSION = '1.0.1';
+  const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js';
+  const $ = (s, root = document) => root.querySelector(s);
+  const send = (name, data) => document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`, {detail:JSON.stringify(data)}));
+  const pidValue = () => $('#tabs-1 input[name="supplier_pid"]')?.value?.trim() || '';
+  const brand = () => /\blingadore\b/i.test($('#tabs-1 #select2-brand-container')?.textContent || $('#tabs-1 select[name="brand"] option:checked')?.textContent || '');
+  let busy = false;
+  const cache = new Map();
+  function parsePid(value) {
+    const match = String(value).trim().toUpperCase().match(/^(.+)-([^-]+?)(?:-([A-Z]{1,3}))?$/);
+    // Numeric colour + cup suffix must not be swallowed by the model.
+    const cupMatch = String(value).trim().toUpperCase().match(/^(.+)-(\d+)-([A-Z]{1,3})$/);
+    if (cupMatch) return {model:cupMatch[1], color:cupMatch[2], cup:cupMatch[3]};
+    if (!match) throw Error('Supplier PID vereist MODEL-KLEUR, eventueel met -CUP');
+    return {model:match[1], color:match[2], cup:match[3] || ''};
   }
-  async function post(form,fields,expectedAction){const action=url(form.getAttribute('action'));if((action.searchParams.get('action')||'')!==expectedAction||form.method.toLowerCase()!=='post')throw Error('Onverwachte formulieractie.');const body=new URLSearchParams();for(const e of form.elements){if(e.name&&!e.disabled&&!['submit','button','reset','file'].includes(e.type)&&(!['checkbox','radio'].includes(e.type)||e.checked))body.append(e.name,e.value);}for(const [k,v] of Object.entries(fields))body.set(k,v);const res=await fetch(action,{method:'POST',body,credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'},signal:AbortSignal.timeout(30000)});if(!res.ok)throw Error(`Opslagantwoord HTTP ${res.status}; controleer CMS vóór hervatten.`);await res.text();}
-  function open(mode) {
-    if(opened)return; opened=true;
-    const d=document.createElement('dialog');
-    d.style.cssText='position:relative;width:1200px;max-width:95vw;max-height:90vh;padding:0 12px 12px;font:12px/1.25 system-ui;color:#25313b;background:#fff;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0003';
-    document.body.append(d);
-    const title=document.createElement('h2');title.textContent=mode==='add'?'Nieuwe kleuren toevoegen':'Productkleuren wijzigen';title.style.cssText='margin:0 -12px 8px;padding:8px 38px 8px 10px;background:#263746;color:#fff;border-radius:6px 6px 0 0;font:650 13px/1.2 system-ui';d.append(title);
-    const close=button('×',d,()=>d.close());close.title='Sluiten';close.setAttribute('aria-label','Sluiten');close.style.cssText='position:absolute;right:7px;top:4px;width:25px;height:25px;padding:0;border:0;background:transparent;color:#fff;font:20px/1 system-ui;cursor:pointer';
-    const columns=mode==='add'?['Kleur','Kleurfamilie']:['Intern product-ID','Huidige kleur','Nieuwe kleur'];
-    const controls=document.createElement('div');controls.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin:8px 0';d.append(controls);
-    const status=document.createElement('p');status.setAttribute('role','status');status.textContent='';status.style.cssText='min-height:15px;margin:5px 0;color:#56616a';d.append(status);
-    const wrapper=document.createElement('div');wrapper.tabIndex=0;wrapper.setAttribute('aria-label','Plak hier de Excel-tabel');wrapper.style.cssText='overflow:auto;max-height:55vh;min-height:120px;border:1px solid #cbd5df;border-radius:6px';d.append(wrapper);
-    const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse;table-layout:auto';wrapper.append(table);
-    const head=table.createTHead(),body=table.createTBody();
-    let headers=[...columns],items=[],busy=false,stop=false;
-    const paintHead=()=>{head.replaceChildren();const tr=head.insertRow();for(const name of ['Controle',...headers,'Status','Verwijderen']){const th=document.createElement('th');th.textContent=name;th.style.cssText='text-align:left;padding:10px;background:#edf2f7;position:sticky;top:0;z-index:1;white-space:nowrap';tr.append(th);}};
-    const refresh=()=>{const unchecked=items.some(item=>!item.valid),pending=items.some(item=>!item.done);check.disabled=busy||!items.length;run.disabled=busy||!items.length||unchecked||!pending;run.title=!items.length?'Plak eerst regels':unchecked?'Controleer eerst alle regels':!pending?'Niets meer uit te voeren':'Voer de gecontroleerde wijzigingen uit';close.disabled=busy;paste.disabled=busy;stopButton.disabled=!busy;for(const el of body.querySelectorAll('input,button'))el.disabled=busy;for(const el of [check,run,paste,stopButton]){el.style.opacity=el.disabled?'.5':'1';el.style.cursor=el.disabled?'not-allowed':'pointer'}};
-    function outcome(item,message,kind='pending'){item.message=message;item.kind=kind;item.status.textContent=message;item.icon.textContent=kind==='error'?'✕':kind==='ok'?'✓':kind==='working'?'…':'—';item.icon.style.color=kind==='error'?'#b91c1c':kind==='ok'?'#15803d':'#64748b';item.icon.setAttribute('aria-label',kind==='error'?'Controle mislukt':kind==='ok'?'In orde':'Nog niet afgerond');}
-    function append(data){const item={data,valid:false,done:false,message:'Nog niet gecontroleerd'};items.push(item);const tr=body.insertRow();item.tr=tr;item.icon=tr.insertCell();item.icon.style.cssText='padding:10px;text-align:center;font-size:20px';for(const h of headers){const td=tr.insertCell();td.style.cssText='padding:5px;border-bottom:1px solid #e2e8f0';const input=document.createElement('input');input.type='text';input.value=data[norm(h)]||'';input.setAttribute('aria-label',h);input.style.cssText='box-sizing:border-box;width:100%;min-width:140px;padding:8px;border:1px solid #cbd5e1;border-radius:4px';input.oninput=()=>{data[norm(h)]=input.value.trim();item.valid=false;item.done=false;outcome(item,'Aangepast — opnieuw controleren');refresh();};td.append(input);}item.status=tr.insertCell();item.status.style.cssText='padding:10px;min-width:230px;max-width:350px;white-space:normal';const cell=tr.insertCell();const del=button('🗑',cell,()=>{items=items.filter(x=>x!==item);tr.remove();status.textContent=`${items.length} regels in de tabel.`;refresh();});del.title='Regel verwijderen uit deze batch';del.setAttribute('aria-label','Regel verwijderen uit deze batch');outcome(item,'Nog niet gecontroleerd');return item;}
-    function ingest(text){if(busy)return;const rows=parse(text);const keys=Object.keys(rows[0]);const needed=mode==='add'?[['kleur','voorgestelde kleur'],['kleurfamilie','voorgestelde familie']]:[['intern product-id','product url'],['huidige kleur'],['nieuwe kleur','voorgestelde kleur']];if(needed.some(choices=>!choices.some(k=>keys.includes(k))))throw Error('Kolomkoppen ontbreken. Verwacht: '+columns.join(', ')+'.');
-      // Replace the list, retaining checked state only for identical input records.
-      const signature=data=>JSON.stringify(Object.entries(data).filter(([,v])=>String(v).trim()!=='').sort(([a],[b])=>a.localeCompare(b)));
-      const previous=new Map();for(const item of items){const key=signature(item.data);if(!previous.has(key))previous.set(key,[]);previous.get(key).push(item);}
-      const merged=[...new Set([...columns.map(norm),...keys])];headers=merged.map(k=>columns.find(h=>norm(h)===k)||k);items=[];body.replaceChildren();paintHead();let retained=0;for(const row of rows){const old=previous.get(signature(row))?.shift();const item=append(row);if(old){item.valid=old.valid;item.done=old.done;item.details=old.details;outcome(item,old.message,old.kind);if(old.valid)retained++;}}status.textContent=`${rows.length} regels geplakt; ${retained} gecontroleerde regels behouden; ${rows.length-retained} nog te controleren.`;refresh();}
-    wrapper.addEventListener('paste',e=>{const text=e.clipboardData.getData('text/plain');if(busy){e.preventDefault();return;}if(text.includes('\t')||text.includes('\n')){e.preventDefault();try{ingest(text);}catch(err){status.textContent=err.message;}}});
-    const paste=button('Plakken uit klembord',controls,async()=>{try{ingest(await navigator.clipboard.readText());}catch(e){status.textContent='Plakken via de knop lukte niet. Klik in de tabel en gebruik Ctrl+V. '+e.message;wrapper.focus();}});
-    const check=button('Controleren',controls,async()=>{busy=true;stop=false;refresh();let checked=items.filter(item=>item.valid).length;const progress=()=>status.textContent=`${checked}/${items.length} gecontroleerd · ${items.length-checked} te controleren`;progress();try{const cat=catalog(await get('/admin.php?section=products'));for(const item of items){if(stop)break;if(item.valid)continue;outcome(item,'Controleren…','working');try{const p=await prepare(item.data,mode,cat);item.valid=true;item.done=!!p.existing||!!p.skip;outcome(item,item.done?(mode==='add'?'Bestaat al — overgeslagen':'Heeft al de juiste kleur — overgeslagen'):(mode==='add'?'Klaar om toe te voegen':'Klaar om te wijzigen'),'ok');}catch(e){item.valid=false;outcome(item,e.message,'error');}checked++;progress();}status.textContent=stop?'Controle gestopt.':items.some(x=>!x.valid)?`${checked}/${items.length} gecontroleerd · pas regels met een kruisje aan of verwijder ze.`:'Controle afgerond.';}catch(e){status.textContent=e.message;}finally{busy=false;refresh();}});
-    const run=button('Uitvoeren',controls,async()=>{if(items.some(item=>!item.valid)||!items.some(item=>!item.done))return;busy=true;stop=false;refresh();let processed=items.filter(item=>item.done).length;const progress=()=>status.textContent=`${processed}/${items.length} verwerkt · ${items.length-processed} resterend`;progress();const execute=async()=>{let cat=catalog(await get('/admin.php?section=products'));for(const item of items){if(stop)break;if(item.done)continue;outcome(item,'Verwerken…','working');try{let p=await prepare(item.data,mode,cat);if(mode==='add'){if(!p.existing){cat=catalog(await get('/admin.php?section=products'));p=await prepare(item.data,mode,cat);}if(p.existing){item.details={color_id:p.existing};outcome(item,'Bestaat al — overgeslagen','ok');}else{await post(p.form,{name:p.name,group_id:p.groupId,supplier_id:p.name,code:'',coloradd:'Add color'},'');cat=catalog(await get('/admin.php?section=products'));const color=one(cat.colors,c=>norm(c.name)===norm(p.name)&&norm(c.family)===norm(p.family),'Toevoeging niet bevestigd');item.details={color_id:color.id};outcome(item,'Aangemaakt en gecontroleerd','ok');}}else{if(!p.skip){await post(p.form,{id:p.id,color_id:p.target.id,productcolorchange:'Change color'},'productcoloredit');const verified=await changeForm(p.href);if(norm(verified.current)!==norm(p.target.name))throw Error('Wijziging niet bevestigd; controleer CMS.');}item.details={link_id:p.id,old_color:p.current,new_color:p.target.name,color_id:p.target.id};outcome(item,p.skip?'Heeft al de juiste kleur — overgeslagen':'Gewijzigd en gecontroleerd','ok');}item.done=true;item.valid=true;processed++;progress();}catch(e){item.valid=false;outcome(item,'Gestopt: '+e.message,'error');stop=true;}}status.textContent=stop?`${processed}/${items.length} verwerkt · gestopt bij de gemarkeerde regel.`:`${processed}/${items.length} verwerkt · batch afgerond.`;};try{if(!navigator.locks)throw Error('Browser ondersteunt geen batchvergrendeling.');await navigator.locks.request('ddo-color-batch',{ifAvailable:true},async lock=>{if(!lock)throw Error('Er loopt al een batch in een ander tabblad.');await execute();});}catch(e){status.textContent=e.message;}finally{busy=false;refresh();}});
-    const stopButton=button('Stop na huidige regel',controls,()=>{stop=true;});
-    button('Verslag downloaden',controls,()=>{const blob=new Blob([JSON.stringify({date:new Date().toISOString(),mode,rows:items.map(x=>({input:x.data,status:x.message,...x.details}))},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='ddo-kleurverslag.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
-    d.addEventListener('cancel',e=>{if(busy)e.preventDefault();});d.addEventListener('close',()=>{opened=false;d.remove();});paintHead();refresh();d.showModal();wrapper.focus();
+  function variantKeys(pid, rawSize) {
+    const size = DDO_EDI.normalizeSize(rawSize), bra = size.match(/^(\d{2,3})([A-Z]{1,3})$/);
+    if (bra) {
+      if (pid.cup && pid.cup !== bra[2]) throw Error(`Cup ${bra[2]} wijkt af van Supplier PID (${pid.cup})`);
+      return [{color:`${pid.color}-${bra[2]}`, size:bra[1]}];
+    }
+    if (pid.cup) {
+      if (!/^\d{2,3}$/.test(size)) throw Error(`Geen bandmaat voor ${size}`);
+      return [{color:`${pid.color}-${pid.cup}`, size}];
+    }
+    return DDO_EDI.sizeCandidates(size).map(size => ({color:pid.color, size}));
+  }
+  const encode = value => encodeURIComponent(btoa(value).replace(/=+$/, ''));
+  function get(url) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({method:'GET',url,withCredentials:true,timeout:15000,
+      onload:r => {
+        if (r.status === 401 || r.status === 403 || /\/(login|sign-in)(?:[/?]|$)/i.test(r.finalUrl || '')) return reject(Error('Log eerst in bij LingaDore B2B'));
+        if (r.status === 404) return resolve('');
+        if (r.status !== 200) return reject(Error(`LingaDore HTTP ${r.status}`));
+        resolve(r.responseText || '');
+      },onerror:() => reject(Error('Netwerkfout bij LingaDore')),ontimeout:() => reject(Error('Timeout bij LingaDore'))}));
+  }
+  async function fetchVariant(model, key, force) {
+    const url = `https://b2b.lingadore.com/catalog/variant-modal/${[model,key.color,key.size].map(encode).join('/')}`;
+    const cached = cache.get(url);
+    if (!force && cached && Date.now() - cached.time < 120000) return cached.ean;
+    const html = await get(url), ean = html ? DDO_EDI.parseEAN(html) : '';
+    if (ean) cache.set(url, {ean,time:Date.now()});
+    return ean;
+  }
+  function readRows(table) {
+    return [...table.querySelectorAll('tr')].flatMap(row => {
+      const cell = $('td:first-child',row), input = $('input[name$="[barcode]"]',row);
+      if (!cell || !input) return [];
+      const field = $('input,select',cell), size = DDO_EDI.normalizeSize(field?.value ?? cell.textContent);
+      return size ? [{size,input}] : [];
+    });
+  }
+  function announce() { send('adapter-state',{id:ID,label:'LingaDore',version:VERSION,updateUrl:UPDATE,priority:70,available:brand(),capabilities:['ean','edi']}); }
+  async function run(request) {
+    const status = (text,kind='busy',done=false,changed=0) => send('adapter-status',{requestId:request.requestId,text,kind,done,changed,autoSave:done && kind==='success' && !!request.autoSave});
+    if (busy) return status('LingaDore is al bezig','error',true);
+    busy = true;
+    try {
+      const table = $('#tabs-3 table.options'), originalPid = pidValue();
+      if (!brand() || !table) throw Error('Open LingaDore producttab 3');
+      const pid = parsePid(originalPid), rows = readRows(table), sizes = [...new Set(rows.map(r => r.size))];
+      if (!sizes.length) throw Error('Geen maten gevonden');
+      // Validate every cup before fetching or changing fields.
+      const jobs = sizes.map(size => ({size,keys:variantKeys(pid,size)})), entries = [], missing = [];
+      const started = Date.now();
+      for (const [index, job] of jobs.entries()) {
+        let ean = '';
+        for (const key of job.keys) {
+          if (Date.now() - started > 85000) throw Error('LingaDore duurt te lang; probeer opnieuw (cache blijft beschikbaar)');
+          ean = await fetchVariant(pid.model,key,!!request.forceRefresh);
+          if (ean) break;
+        }
+        if (ean) entries.push({size:job.size,ean}); else missing.push(job.size);
+        status(`LingaDore EAN ${index + 1}/${jobs.length}`);
+      }
+      // Never save a partial scrape or write into a different product/table after navigation.
+      if (missing.length) throw Error(`Geen EAN voor ${missing.join(', ')}; controleer B2B-login en varianten`);
+      const map = DDO_EDI.variantMap(entries), current = readRows(table);
+      if (!table.isConnected || table !== $('#tabs-3 table.options') || pidValue() !== originalPid || !brand() || current.length !== rows.length || rows.some((r,i) => r.input !== current[i].input || r.size !== current[i].size)) throw Error('Product of maten gewijzigd tijdens ophalen; start opnieuw');
+      let changed = 0;
+      for (const row of rows) {
+        const ean = map.get(row.size).ean;
+        if (row.input.value === ean) continue;
+        row.input.value = ean;
+        row.input.dispatchEvent(new Event('input',{bubbles:true}));
+        row.input.dispatchEvent(new Event('change',{bubbles:true}));
+        changed++;
+      }
+      status(`${changed} EAN-rijen gevuld · voorraad ongewijzigd`,'success',true,changed);
+    } catch (error) { status(error.message || 'LingaDore ophalen mislukt','error',true); }
+    finally { busy = false; }
+  }
+  document.addEventListener('ddo-toolbox:discover',announce);
+  document.addEventListener('ddo-toolbox:run-adapter',event => {
+    let request; try { request = JSON.parse(event.detail || '{}'); } catch { return; }
+    if (request.id === ID) void run(request);
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',announce,{once:true}); else announce();
+})();
+
+(function () {
+  'use strict';
+  if (location.hostname !== 'b2b.lingadore.com' || window.top !== window.self) return;
+
+  // ============================================================
+  // CONFIG
+  // ============================================================
+
+  const APP = 'DDO Toolbox | LingaDore';
+  const VERSION = '1.0.1';
+  const SUPPLIER = 'LingaDore';
+
+  const DDO_BRAND_IDS = [2, 58, 61, 146];
+
+  const EXPORT_PAYLOAD = {
+    format: 'excel',
+    export: 'Export products'
+  };
+
+  const CACHE_PREFIX = 'edi:lingadore:ddo:v1';
+  const UI_KEY = 'edi:lingadore:ui:v1';
+  const CACHE_TTL_MS = 15 * 60 * 1000;
+
+  const IMAGE_PREFIX =
+    'https://www.dutchdesignersoutlet.com/img/product/';
+
+  const SHEET_PREFERRED = 'Parent';
+  const COL_IMAGE = 1;
+  const COL_PRODUCT_ID = 3;
+  const HEADER_ROW_INDEX = 0;
+
+  const state = {
+    ddoMap: null,
+    modelCheckStarted: false,
+    loading: false,
+    observer: null,
+    renderTimer: null,
+    drag: null,
+    eanCache: new Map()
+  };
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+
+  const $ = (selector, root = document) =>
+    root.querySelector(selector);
+
+  const $$ = (selector, root = document) =>
+    Array.from(root.querySelectorAll(selector));
+
+  function text(selector, root = document) {
+    return (
+      $(selector, root)
+        ?.textContent
+        ?.replace(/\s+/g, ' ')
+        .trim() || ''
+    );
   }
 
+  function normalizeModel(value) {
+    const s =
+      String(value ?? '')
+        .trim()
+        .toUpperCase();
+
+    return s || null;
+  }
+
+  function normalizeColor(value) {
+    const s =
+      String(value ?? '')
+        .trim()
+        .toUpperCase();
+
+    return s
+      ? s.split('-')[0].trim()
+      : null;
+  }
+
+  function buildCode(model, color) {
+    model = normalizeModel(model);
+    color = normalizeColor(color);
+
+    return model && color
+      ? `${model}-${color}`
+      : null;
+  }
+
+  function normalizeDDOProductCode(value) {
+    const s =
+      String(value ?? '')
+        .trim()
+        .toUpperCase();
+
+    if (!s) return null;
+
+    const parts = s.split('-');
+
+    return (
+      parts.length >= 2 &&
+      parts[0] &&
+      parts[1]
+    )
+      ? `${parts[0].trim()}-${parts[1].trim()}`
+      : s;
+  }
+
+  function parsePriceText(value) {
+    const s =
+      String(value ?? '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[^\d,.-]/g, '')
+        .trim();
+
+    if (!s) return NaN;
+
+    let normalized = s;
+
+    if (
+      s.includes(',') &&
+      s.includes('.')
+    ) {
+      normalized =
+        s.lastIndexOf(',') >
+        s.lastIndexOf('.')
+          ? s
+              .replace(/\./g, '')
+              .replace(',', '.')
+          : s.replace(/,/g, '');
+
+    } else if (s.includes(',')) {
+      normalized =
+        s.replace(',', '.');
+    }
+
+    const n = Number(normalized);
+
+    return Number.isFinite(n)
+      ? n
+      : NaN;
+  }
+
+  function fmtMoney(value) {
+    return Number.isFinite(value)
+      ? value
+          .toFixed(2)
+          .replace('.', ',')
+      : '';
+  }
+
+  function toTitleCase(value) {
+    return String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(
+        /(^|[\s\-/'’])\p{L}/gu,
+        m => m.toUpperCase()
+      );
+  }
+
+  function unique(values) {
+    return [
+      ...new Set(
+        values.filter(Boolean)
+      )
+    ];
+  }
+
+  function decodeBase64(value) {
+    try {
+      return decodeURIComponent(
+        Array.prototype.map
+          .call(
+            atob(String(value || '')),
+            c =>
+              '%' +
+              (
+                '00' +
+                c
+                  .charCodeAt(0)
+                  .toString(16)
+              ).slice(-2)
+          )
+          .join('')
+      );
+
+    } catch {
+      try {
+        return atob(
+          String(value || '')
+        );
+      } catch {
+        return '';
+      }
+    }
+  }
+
+  function writeClipboard(value) {
+    if (
+      typeof GM_setClipboard ===
+      'function'
+    ) {
+      GM_setClipboard(
+        value,
+        'text'
+      );
+
+      return Promise.resolve();
+    }
+
+    return navigator.clipboard
+      .writeText(value);
+  }
+
+  function isPDP() {
+    return (
+      /^\/nl\/catalog\/item\/[^/]+\/?/
+        .test(location.pathname)
+    );
+  }
+
+  function getModelNo() {
+    return (
+      normalizeModel(
+        $('.product[data-modelno]')
+          ?.dataset.modelno
+      ) ||
+
+      normalizeModel(
+        text(
+          '.product-header-block h3'
+        )
+      ) ||
+
+      normalizeModel(
+        location.pathname.match(
+          /\/catalog\/item\/([^/]+)/
+        )?.[1]
+      ) ||
+
+      ''
+    );
+  }
+
+  function getProductTitle() {
+    return text(
+      '.product-header-block h1'
+    );
+  }
+
+  function getInfoBlock(label) {
+    const wanted =
+      label.toLowerCase();
+
+    for (
+      const block
+      of $$('.info-block--item')
+    ) {
+      const cells =
+        Array.from(
+          block.children
+        );
+
+      if (cells.length < 2) {
+        continue;
+      }
+
+      const key =
+        (
+          cells[0].textContent ||
+          ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+
+      if (
+        key.includes(wanted)
+      ) {
+        return {
+          label:
+            cells[0]
+              .textContent
+              .trim(),
+
+          text:
+            (
+              cells[1]
+                .textContent ||
+              ''
+            )
+              .replace(/\s+/g, ' ')
+              .trim(),
+
+          html:
+            (
+              cells[1]
+                .innerHTML ||
+              ''
+            ).trim()
+        };
+      }
+    }
+
+    return {
+      label: '',
+      text: '',
+      html: ''
+    };
+  }
+
+  function getRRP() {
+    return parsePriceText(
+      getInfoBlock(
+        'adviesverkoopprijs'
+      ).text
+    );
+  }
+
+  function getDescription() {
+    const info =
+      getInfoBlock(
+        'omschrijving'
+      );
+
+    if (info.html) {
+      return {
+        descriptionHtml:
+          info.html,
+
+        descriptionText:
+          ''
+      };
+    }
+
+    return {
+      descriptionHtml: '',
+      descriptionText:
+        info.text || ''
+    };
+  }
+
+  function getColorSelect() {
+    return $(
+      '.matrix-filters ' +
+      'select[data-filter-attribute="color"]'
+    );
+  }
+
+  function getActiveBaseColor() {
+    return normalizeColor(
+      getColorSelect()?.value
+    );
+  }
+
+  function getSupplierColorMap() {
+    const map =
+      new Map();
+
+    $$('.item-colors .color[data-color]')
+      .forEach(el => {
+
+        const color =
+          normalizeColor(
+            el.dataset.color
+          );
+
+        if (
+          !color ||
+          map.has(color)
+        ) {
+          return;
+        }
+
+        const swatch =
+          $('span', el);
+
+        map.set(
+          color,
+          {
+            background:
+              swatch
+                ?.style
+                .background ||
+
+              swatch
+                ?.style
+                .backgroundColor ||
+
+              '#e5e7eb',
+
+            title:
+              el.getAttribute(
+                'title'
+              ) || '',
+
+            description:
+              el.dataset
+                .description ||
+              ''
+          }
+        );
+      });
+
+    return map;
+  }
+
+  // ============================================================
+  // CSS
+  // ============================================================
+
+  function injectCSS() {
+
+    if (
+      $('#edi-lingadore-css')
+    ) {
+      return;
+    }
+
+    const style =
+      document.createElement(
+        'style'
+      );
+
+    style.id =
+      'edi-lingadore-css';
+
+    style.textContent = `
+
+      #edi-lingadore {
+        position: fixed;
+        top: 18px;
+        right: 18px;
+        z-index: 2147483000;
+
+        width: 430px;
+        max-width: calc(100vw - 24px);
+
+        background:
+          rgba(255,255,255,.98);
+
+        color: #202124;
+
+        border:
+          1px solid #dfe1e5;
+
+        border-radius: 10px;
+
+        box-shadow:
+          0 8px 28px
+          rgba(60,64,67,.20);
+
+        font:
+          12px/1.35
+          Arial,
+          sans-serif;
+
+        overflow: hidden;
+      }
+
+      #edi-lingadore * {
+        box-sizing: border-box;
+        font: inherit;
+      }
+
+      #edi-lingadore .edi-head {
+        display: flex;
+        align-items: center;
+
+        min-height: 38px;
+
+        padding:
+          7px 8px
+          7px 11px;
+
+        border-bottom:
+          1px solid #eceff1;
+
+        cursor: move;
+        user-select: none;
+
+        background: #fff;
+      }
+
+      #edi-lingadore
+      .edi-title {
+        flex: 1;
+        font-weight: 700;
+        letter-spacing: .01em;
+      }
+
+      #edi-lingadore
+      .edi-version {
+        margin-left: 6px;
+
+        color: #9aa0a6;
+
+        font-size: 10px;
+        font-weight: 400;
+      }
+
+      #edi-lingadore
+      .edi-icon-btn {
+        width: 26px;
+        height: 26px;
+
+        padding: 0;
+
+        border: 0;
+        border-radius: 6px;
+
+        background: transparent;
+        color: #5f6368;
+
+        cursor: pointer;
+      }
+
+      #edi-lingadore
+      .edi-icon-btn:hover {
+        background: #f1f3f4;
+        color: #202124;
+      }
+
+      #edi-lingadore
+      .edi-body {
+        padding: 10px;
+      }
+
+      #edi-lingadore.edi-minimized {
+        width: 190px;
+      }
+
+      #edi-lingadore.edi-minimized
+      .edi-body {
+        display: none;
+      }
+
+      #edi-lingadore.edi-minimized
+      .edi-head {
+        border-bottom: 0;
+      }
+
+      .edi-toolbar {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        flex-wrap: wrap;
+
+        margin-bottom: 8px;
+      }
+
+      .edi-btn {
+        appearance: none;
+
+        border:
+          1px solid #dadce0;
+
+        background: #fff;
+        color: #3c4043;
+
+        border-radius: 6px;
+
+        min-height: 27px;
+
+        padding: 4px 8px;
+
+        cursor: pointer;
+        white-space: nowrap;
+
+        transition:
+          background .12s ease,
+          border-color .12s ease;
+      }
+
+      .edi-btn:hover:not(:disabled) {
+        background: #f8f9fa;
+        border-color: #bdc1c6;
+      }
+
+      .edi-btn:disabled {
+        opacity: .38;
+        cursor: default;
+      }
+
+      .edi-btn.edi-primary {
+        border-color: #1a73e8;
+        color: #1967d2;
+      }
+
+      .edi-btn.edi-danger {
+        color: #b3261e;
+      }
+
+      .edi-status {
+        min-height: 24px;
+
+        padding: 5px 7px;
+        margin-bottom: 8px;
+
+        border-radius: 6px;
+
+        background: #f8f9fa;
+        color: #5f6368;
+
+        font-size: 11px;
+      }
+
+      .edi-summary {
+        color: #5f6368;
+        font-size: 11px;
+
+        margin:
+          -2px 0 8px;
+      }
+
+      .edi-pdp-meta {
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+
+        margin-bottom: 8px;
+
+        color: #5f6368;
+      }
+
+      .edi-pdp-meta strong {
+        color: #202124;
+      }
+
+      .edi-colors {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .edi-color-row {
+        display: grid;
+
+        grid-template-columns:
+          minmax(128px, 1fr)
+          auto;
+
+        align-items: center;
+        gap: 7px;
+
+        min-height: 34px;
+
+        padding: 3px 4px;
+
+        border:
+          1px solid transparent;
+
+        border-radius: 7px;
+      }
+
+      .edi-color-row.edi-active {
+        background: #f8f9fa;
+
+        border-color:
+          #e3e6e8;
+      }
+
+      .edi-color-main {
+        min-width: 0;
+
+        display: flex;
+        align-items: center;
+
+        gap: 7px;
+      }
+
+      .edi-color-select {
+        display: flex;
+
+        min-width: 0;
+
+        align-items: center;
+        gap: 7px;
+
+        border: 0;
+        background: transparent;
+
+        padding: 2px 0;
+
+        color: #202124;
+
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .edi-swatch {
+        width: 17px;
+        height: 17px;
+
+        flex:
+          0 0 17px;
+
+        border-radius: 50%;
+
+        border:
+          1px solid
+          rgba(0,0,0,.18);
+      }
+
+      .edi-color-label {
+        min-width: 0;
+
+        overflow: hidden;
+
+        text-overflow:
+          ellipsis;
+
+        white-space:
+          nowrap;
+
+        font-weight: 600;
+      }
+
+      .edi-match {
+        margin-left: auto;
+
+        font-size: 10px;
+
+        color: #9aa0a6;
+
+        white-space:
+          nowrap;
+      }
+
+      .edi-match.edi-match-ok {
+        color: #188038;
+      }
+
+      .edi-match.edi-match-miss {
+        color: #b3261e;
+      }
+
+      .edi-match a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .edi-actions {
+        display: flex;
+        gap: 3px;
+      }
+
+      .edi-action {
+        border: 0;
+
+        background:
+          transparent;
+
+        color: #5f6368;
+
+        padding: 4px 5px;
+
+        border-radius: 5px;
+
+        cursor: pointer;
+
+        font-size: 11px;
+      }
+
+      .edi-action:hover:not(:disabled) {
+        background: #eef3f8;
+        color: #1967d2;
+      }
+
+      .edi-action:disabled {
+        opacity: .25;
+        cursor: default;
+      }
+
+      .matrix-filters
+      .edi-original-color-select {
+        position:
+          absolute !important;
+
+        width: 1px !important;
+        height: 1px !important;
+
+        padding: 0 !important;
+
+        margin:
+          -1px !important;
+
+        overflow:
+          hidden !important;
+
+        clip:
+          rect(
+            0,
+            0,
+            0,
+            0
+          ) !important;
+
+        white-space:
+          nowrap !important;
+
+        border:
+          0 !important;
+      }
+
+      /*
+       * Oude Model Checker-pills
+       * verbergen als het oude script
+       * nog actief staat.
+       */
+
+      .matrix-filters
+      .ddo-color-pill-wrapper {
+        display:
+          none !important;
+      }
+
+      /* ==========================
+         GRID
+         ========================== */
+
+      .edi-card-checked {
+        outline:
+          2px solid
+          transparent !important;
+
+        outline-offset:
+          2px !important;
+
+        position:
+          relative !important;
+      }
+
+      .edi-card-all {
+        outline-color:
+          #188038 !important;
+      }
+
+      .edi-card-partial {
+        outline-color:
+          #f9ab00 !important;
+      }
+
+      .edi-card-miss {
+        outline-color:
+          #d93025 !important;
+      }
+
+      .edi-card-all
+      .item-main-img {
+        opacity:
+          .48 !important;
+      }
+
+      .edi-grid-badge {
+        position: absolute;
+
+        z-index: 100;
+
+        top: 7px;
+        left: 7px;
+
+        padding: 4px 7px;
+
+        border-radius:
+          999px;
+
+        color: #fff;
+        background: #5f6368;
+
+        font:
+          700 10px/1.2
+          Arial,
+          sans-serif;
+
+        pointer-events:
+          none;
+      }
+
+      .edi-card-all
+      .edi-grid-badge {
+        background: #188038;
+      }
+
+      .edi-card-partial
+      .edi-grid-badge {
+        background: #f9ab00;
+        color: #202124;
+      }
+
+      .edi-card-miss
+      .edi-grid-badge {
+        background: #d93025;
+      }
+
+      .edi-grid-results {
+        position: absolute;
+
+        left: 7px;
+        bottom: 7px;
+
+        z-index: 101;
+
+        display: flex;
+        flex-direction: column;
+
+        gap: 3px;
+
+        max-width:
+          calc(100% - 14px);
+      }
+
+      .edi-grid-pill {
+        width: fit-content;
+        max-width: 100%;
+
+        padding: 3px 6px;
+
+        border-radius:
+          999px;
+
+        color: #fff;
+        background: #d93025;
+
+        font:
+          700 10px/1.2
+          Arial,
+          sans-serif;
+
+        text-decoration:
+          none !important;
+
+        overflow: hidden;
+
+        text-overflow:
+          ellipsis;
+
+        white-space:
+          nowrap;
+      }
+
+      .edi-grid-pill.edi-ok {
+        background: #188038;
+      }
+
+    `;
+
+    style.textContent += DDO_EDI.theme;
+
+    document.head
+      .appendChild(style);
+  }
+
+  // ============================================================
+  // UI
+  // ============================================================
+
+  function createPanel() {
+
+    if (
+      $('#edi-lingadore')
+    ) {
+      return;
+    }
+
+    const panel =
+      document.createElement(
+        'section'
+      );
+
+    panel.id =
+      'edi-lingadore';
+
+    panel.innerHTML = `
+
+      <div class="edi-head">
+
+        <div class="edi-title">
+          Toolbox · LingaDore
+          <span class="edi-version">
+            v${VERSION}
+          </span>
+        </div>
+
+        <button
+          class="edi-icon-btn"
+          id="edi-minimize"
+          type="button"
+          title="Minimaliseer"
+        >
+          −
+        </button>
+
+      </div>
+
+      <div class="edi-body">
+
+        <div class="edi-toolbar">
+
+          <button
+            class="edi-btn edi-primary"
+            id="edi-start-check"
+            type="button"
+          >
+            Start modelcheck
+          </button>
+
+          <button
+            class="edi-btn"
+            id="edi-recheck"
+            type="button"
+            disabled
+          >
+            Opnieuw checken
+          </button>
+
+          <button
+            class="edi-btn edi-danger"
+            id="edi-reset"
+            type="button"
+          >
+            Reset
+          </button>
+
+        </div>
+
+        <div
+          class="edi-status"
+          id="edi-status"
+        >
+          Modelcheck staat stil.
+        </div>
+
+        <div
+          class="edi-summary"
+          id="edi-summary"
+        ></div>
+
+        <div id="edi-pdp"></div>
+
+      </div>
+    `;
+
+    document.body
+      .appendChild(panel);
+
+    restoreUI();
+
+    bindPanelEvents();
+
+    makeDraggable(panel);
+  }
+
+  function bindPanelEvents() {
+
+    $('#edi-minimize')
+      ?.addEventListener(
+        'click',
+        event => {
+
+          event.stopPropagation();
+
+          const panel =
+            $('#edi-lingadore');
+
+          if (!panel) return;
+
+          panel.classList
+            .toggle(
+              'edi-minimized'
+            );
+
+          const minimized =
+            panel.classList
+              .contains(
+                'edi-minimized'
+              );
+
+          $('#edi-minimize')
+            .textContent =
+              minimized
+                ? '+'
+                : '−';
+
+          $('#edi-minimize')
+            .title =
+              minimized
+                ? 'Open'
+                : 'Minimaliseer';
+
+          saveUI();
+        }
+      );
+
+    $('#edi-start-check')
+      ?.addEventListener(
+        'click',
+        () =>
+          startModelCheck(false)
+      );
+
+    $('#edi-recheck')
+      ?.addEventListener(
+        'click',
+        () =>
+          recheckCurrentPage()
+      );
+
+    $('#edi-reset')
+      ?.addEventListener(
+        'click',
+        resetModelCheck
+      );
+  }
+
+  function setStatus(message) {
+
+    const el =
+      $('#edi-status');
+
+    if (el) {
+      el.textContent =
+        message;
+    }
+  }
+
+  function setSummary(
+    message = ''
+  ) {
+
+    const el =
+      $('#edi-summary');
+
+    if (el) {
+      el.textContent =
+        message;
+    }
+  }
+
+  function setLoading(loading) {
+
+    state.loading =
+      loading;
+
+    const start =
+      $('#edi-start-check');
+
+    const recheck =
+      $('#edi-recheck');
+
+    const reset =
+      $('#edi-reset');
+
+    if (start) {
+      start.disabled =
+        loading;
+    }
+
+    if (recheck) {
+      recheck.disabled =
+        loading ||
+        !state.modelCheckStarted;
+    }
+
+    if (reset) {
+      reset.disabled =
+        loading;
+    }
+  }
+
+  function flashButton(
+    button,
+    label = '✓'
+  ) {
+
+    if (!button) return;
+
+    const old =
+      button.textContent;
+
+    button.textContent =
+      label;
+
+    setTimeout(
+      () => {
+
+        if (
+          button.isConnected
+        ) {
+          button.textContent =
+            old;
+        }
+
+      },
+      900
+    );
+  }
+
+  // ============================================================
+  // DRAG + PERSISTENT UI
+  // ============================================================
+
+  function restoreUI() {
+
+    const panel =
+      $('#edi-lingadore');
+
+    if (!panel) return;
+
+    try {
+
+      const saved =
+        JSON.parse(
+          localStorage.getItem(
+            UI_KEY
+          ) || '{}'
+        );
+
+      if (
+        Number.isFinite(
+          saved.left
+        ) &&
+        Number.isFinite(
+          saved.top
+        )
+      ) {
+
+        panel.style.left =
+          `${Math.max(
+            0,
+            Math.min(
+              saved.left,
+              innerWidth - 80
+            )
+          )}px`;
+
+        panel.style.top =
+          `${Math.max(
+            0,
+            Math.min(
+              saved.top,
+              innerHeight - 38
+            )
+          )}px`;
+
+        panel.style.right =
+          'auto';
+      }
+
+      if (
+        saved.minimized
+      ) {
+
+        panel.classList.add(
+          'edi-minimized'
+        );
+
+        $('#edi-minimize')
+          .textContent = '+';
+
+        $('#edi-minimize')
+          .title = 'Open';
+      }
+
+    } catch {}
+  }
+
+  function saveUI() {
+
+    const panel =
+      $('#edi-lingadore');
+
+    if (!panel) return;
+
+    const rect =
+      panel.getBoundingClientRect();
+
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({
+        left:
+          Math.round(
+            rect.left
+          ),
+
+        top:
+          Math.round(
+            rect.top
+          ),
+
+        minimized:
+          panel.classList
+            .contains(
+              'edi-minimized'
+            )
+      })
+    );
+  }
+
+  function makeDraggable(panel) {
+
+    const handle =
+      $('.edi-head', panel);
+
+    if (!handle) return;
+
+    handle.addEventListener(
+      'pointerdown',
+      event => {
+
+        if (
+          event.target.closest(
+            'button'
+          )
+        ) {
+          return;
+        }
+
+        const rect =
+          panel
+            .getBoundingClientRect();
+
+        state.drag = {
+          pointerId:
+            event.pointerId,
+
+          dx:
+            event.clientX -
+            rect.left,
+
+          dy:
+            event.clientY -
+            rect.top
+        };
+
+        handle.setPointerCapture(
+          event.pointerId
+        );
+
+        panel.style.right =
+          'auto';
+
+        event.preventDefault();
+      }
+    );
+
+    handle.addEventListener(
+      'pointermove',
+      event => {
+
+        if (
+          !state.drag ||
+          state.drag.pointerId !==
+            event.pointerId
+        ) {
+          return;
+        }
+
+        const maxX =
+          Math.max(
+            0,
+            innerWidth -
+            panel.offsetWidth
+          );
+
+        const maxY =
+          Math.max(
+            0,
+            innerHeight -
+            panel.offsetHeight
+          );
+
+        const x =
+          Math.max(
+            0,
+            Math.min(
+              event.clientX -
+              state.drag.dx,
+              maxX
+            )
+          );
+
+        const y =
+          Math.max(
+            0,
+            Math.min(
+              event.clientY -
+              state.drag.dy,
+              maxY
+            )
+          );
+
+        panel.style.left =
+          `${x}px`;
+
+        panel.style.top =
+          `${y}px`;
+      }
+    );
+
+    const stop =
+      event => {
+
+        if (
+          !state.drag ||
+          state.drag.pointerId !==
+            event.pointerId
+        ) {
+          return;
+        }
+
+        state.drag =
+          null;
+
+        saveUI();
+      };
+
+    handle.addEventListener(
+      'pointerup',
+      stop
+    );
+
+    handle.addEventListener(
+      'pointercancel',
+      stop
+    );
+  }
+
+  // ============================================================
+  // PDP
+  // ============================================================
+
+  function renderPDP() {
+
+    const host =
+      $('#edi-pdp');
+
+    if (!host) return;
+
+    if (!isPDP()) {
+
+      host.innerHTML = '';
+
+      return;
+    }
+
+    const select =
+      getColorSelect();
+
+    const model =
+      getModelNo();
+
+    const title =
+      getProductTitle();
+
+    if (
+      !select ||
+      !model
+    ) {
+
+      host.innerHTML = `
+
+        <div class="edi-pdp-meta">
+
+          <strong>
+            ${escapeHTML(
+              model ||
+              'Product'
+            )}
+          </strong>
+
+          <span>
+            ${escapeHTML(title)}
+          </span>
+
+        </div>
+
+        <div class="edi-summary">
+          Wacht op kleurmatrix…
+        </div>
+      `;
+
+      return;
+    }
+
+    select.classList.add(
+      'edi-original-color-select'
+    );
+
+    const supplierColors =
+      getSupplierColorMap();
+
+    const active =
+      normalizeColor(
+        select.value
+      );
+
+    const options =
+      Array.from(
+        select.options
+      )
+        .filter(
+          option =>
+            option.value
+        )
+        .map(
+          option => ({
+            optionValue:
+              option.value,
+
+            color:
+              normalizeColor(
+                option.value
+              ),
+
+            name:
+              option
+                .textContent
+                .trim()
+          })
+        )
+        .filter(
+          item =>
+            item.color
+        );
+
+    host.innerHTML = `
+
+      <div class="edi-pdp-meta">
+
+        <strong>
+          ${escapeHTML(model)}
+        </strong>
+
+        <span>
+          ${escapeHTML(title)}
+        </span>
+
+      </div>
+
+      <div class="edi-colors">
+
+        ${options
+          .map(
+            item =>
+              renderColorRow(
+                item,
+                supplierColors.get(
+                  item.color
+                ),
+                active
+              )
+          )
+          .join('')}
+
+      </div>
+    `;
+
+    bindPDPEvents(
+      select
+    );
+  }
+
+  function renderColorRow(
+    item,
+    supplierColor,
+    active
+  ) {
+
+    const isActive =
+      item.color === active;
+
+    const match =
+      getStatusForCode(
+        buildCode(
+          getModelNo(),
+          item.color
+        )
+      );
+
+    const matchHTML =
+      renderMatch(match);
+
+    const bg =
+      supplierColor
+        ?.background ||
+      '#e5e7eb';
+
+    return `
+
+      <div
+        class="
+          edi-color-row
+          ${isActive
+            ? 'edi-active'
+            : ''}
+        "
+        data-color="${escapeAttr(
+          item.color
+        )}"
+      >
+
+        <div class="edi-color-main">
+
+          <button
+            type="button"
+            class="edi-color-select"
+            data-option-value="${escapeAttr(
+              item.optionValue
+            )}"
+            title="Selecteer ${escapeAttr(
+              item.color
+            )} ${escapeAttr(
+              item.name
+            )}"
+          >
+
+            <span
+              class="edi-swatch"
+              style="background:${escapeAttr(
+                bg
+              )}"
+            ></span>
+
+            <span class="edi-color-label">
+              ${escapeHTML(
+                item.color
+              )}
+              ${escapeHTML(
+                item.name
+              )}
+            </span>
+
+          </button>
+
+          ${matchHTML}
+
+        </div>
+
+        <div class="edi-actions">
+
+          <button
+            type="button"
+            class="edi-action"
+            data-action="product"
+            title="Productgegevens kopiëren"
+          >
+            Product
+          </button>
+
+          <button
+            type="button"
+            class="edi-action"
+            data-action="sizes"
+            title="Maten kopiëren"
+            ${isActive
+              ? ''
+              : 'disabled'}
+          >
+            Maten
+          </button>
+
+          <button
+            type="button"
+            class="edi-action"
+            data-action="ean"
+            title="EAN-data kopiëren"
+            ${isActive
+              ? ''
+              : 'disabled'}
+          >
+            EAN
+          </button>
+
+          <button
+            type="button"
+            class="edi-action"
+            data-action="photos"
+            title="Originele foto's downloaden"
+          >
+            Foto's
+          </button>
+
+        </div>
+
+      </div>
+    `;
+  }
+
+  function renderMatch(match) {
+
+    if (
+      !state.modelCheckStarted ||
+      !state.ddoMap
+    ) {
+      return `
+        <span class="edi-match">
+          ·
+        </span>
+      `;
+    }
+
+    if (!match.match) {
+      return `
+        <span
+          class="
+            edi-match
+            edi-match-miss
+          "
+        >
+          —
+        </span>
+      `;
+    }
+
+    const id =
+      match.productId ||
+      match.ddoEditId;
+
+    if (!id) {
+      return `
+        <span
+          class="
+            edi-match
+            edi-match-ok
+          "
+        >
+          ✓
+        </span>
+      `;
+    }
+
+    return `
+
+      <span
+        class="
+          edi-match
+          edi-match-ok
+        "
+      >
+
+        <a
+          href="${escapeAttr(
+            buildDDOEditUrl(id)
+          )}"
+          target="_blank"
+          rel="noopener"
+          title="Open DDO"
+        >
+          ✓ ${escapeHTML(id)}
+        </a>
+
+      </span>
+    `;
+  }
+
+  function bindPDPEvents(
+    select
+  ) {
+
+    $$(
+      '.edi-color-select',
+      $('#edi-pdp')
+    )
+      .forEach(
+        button => {
+
+          button.addEventListener(
+            'click',
+            () => {
+
+              const value =
+                button.dataset
+                  .optionValue;
+
+              if (!value) {
+                return;
+              }
+
+              if (
+                select.value !==
+                value
+              ) {
+
+                select.value =
+                  value;
+
+                select.dispatchEvent(
+                  new Event(
+                    'change',
+                    {
+                      bubbles: true
+                    }
+                  )
+                );
+              }
+
+              setTimeout(
+                renderPDP,
+                50
+              );
+            }
+          );
+        }
+      );
+
+    $$(
+      '.edi-action',
+      $('#edi-pdp')
+    )
+      .forEach(
+        button => {
+
+          button.addEventListener(
+            'click',
+            async () => {
+
+              const row =
+                button.closest(
+                  '.edi-color-row'
+                );
+
+              const color =
+                row?.dataset
+                  .color;
+
+              if (!color) {
+                return;
+              }
+
+              const action =
+                button.dataset
+                  .action;
+
+              try {
+
+                if (
+                  action ===
+                  'product'
+                ) {
+
+                  await copyProduct(
+                    color
+                  );
+
+                  flashButton(
+                    button
+                  );
+
+                } else if (
+                  action ===
+                  'sizes'
+                ) {
+
+                  await copySizes(
+                    color
+                  );
+
+                  flashButton(
+                    button
+                  );
+
+                } else if (
+                  action ===
+                  'ean'
+                ) {
+
+                  button.disabled =
+                    true;
+
+                  button.textContent =
+                    '…';
+
+                  await copyEAN(
+                    color
+                  );
+
+                  button.textContent =
+                    '✓';
+
+                  setTimeout(
+                    renderPDP,
+                    900
+                  );
+
+                } else if (
+                  action ===
+                  'photos'
+                ) {
+
+                  button.disabled =
+                    true;
+
+                  button.textContent =
+                    '…';
+
+                  const count =
+                    await downloadPhotos(
+                      color
+                    );
+
+                  button.textContent =
+                    count
+                      ? `✓ ${count}`
+                      : '0';
+
+                  setTimeout(
+                    renderPDP,
+                    1100
+                  );
+                }
+
+              } catch (error) {
+
+                console.error(
+                  `[${APP}]`,
+                  error
+                );
+
+                setStatus(
+                  `Fout: ${
+                    error.message ||
+                    error
+                  }`
+                );
+
+                button.textContent =
+                  '!';
+
+                setTimeout(
+                  renderPDP,
+                  1200
+                );
+              }
+            }
+          );
+        }
+      );
+
+    if (
+      !select.dataset
+        .ediBound
+    ) {
+
+      select.dataset.ediBound =
+        '1';
+
+      select.addEventListener(
+        'change',
+        () => {
+
+          setStatus(
+            `Kleur ${
+              normalizeColor(
+                select.value
+              ) || ''
+            } geselecteerd.`
+          );
+
+          setTimeout(
+            renderPDP,
+            100
+          );
+
+          setTimeout(
+            renderPDP,
+            500
+          );
+        }
+      );
+    }
+  }
+
+  // ============================================================
+  // PRODUCT / SPARKLE V2
+  // ============================================================
+
+  async function copyProduct(
+    color
+  ) {
+
+    const model =
+      getModelNo();
+
+    const select =
+      getColorSelect();
+
+    const option =
+      Array.from(
+        select?.options ||
+        []
+      )
+        .find(
+          o =>
+            normalizeColor(
+              o.value
+            ) === color
+        );
+
+    const colorName =
+      option
+        ?.textContent
+        ?.trim() ||
+      '';
+
+    const baseTitle =
+      getProductTitle();
+
+    const computedName =
+      `${baseTitle} ${
+        toTitleCase(
+          colorName
+        )
+      }`
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const rrpNumber =
+      getRRP();
+
+    const {
+      descriptionHtml,
+      descriptionText
+    } =
+      getDescription();
+
+    const payload = {
+
+      name:
+        computedName,
+
+      title:
+        computedName,
+
+      rrp:
+        fmtMoney(
+          rrpNumber
+        ),
+
+      /*
+       * Geen inkoopprijs gebruiken.
+       * Price blijft leeg zolang
+       * er geen echte verkoopactieprijs
+       * beschikbaar is.
+       */
+      price: '',
+
+      productCode:
+        buildCode(
+          model,
+          color
+        ),
+
+      modelName:
+        baseTitle,
+
+      descriptionHtml,
+
+      descriptionText,
+
+      compositionUrl:
+        location.href,
+
+      reference:
+        ' - [ext]',
+
+      _sparkle: {
+        source:
+          SUPPLIER,
+
+        v: 2,
+
+        ts:
+          new Date()
+            .toISOString()
+      }
+    };
+
+    await writeClipboard(
+      DDO_EDI.productClipboard(payload)
+    );
+
+    setStatus(
+      `${
+        payload.productCode
+      }: productgegevens gekopieerd.`
+    );
+  }
+
+  // ============================================================
+  // VARIANTS / SIZES
+  // ============================================================
+
+  function getActiveVariants(
+    color
+  ) {
+
+    const active =
+      getActiveBaseColor();
+
+    if (
+      active !== color
+    ) {
+      throw new Error(
+        `Selecteer eerst kleur ${color}.`
+      );
+    }
+
+    const model =
+      getModelNo();
+
+    const result = [];
+    const seen =
+      new Set();
+
+    const rows =
+      $$(
+        '.item-row.style_row[data-color-id], ' +
+        '.style_row[data-color-id], ' +
+        '[data-color-id].item-row'
+      );
+
+    for (
+      const row
+      of rows
+    ) {
+
+      const rawStyle =
+        String(
+          row.dataset
+            .colorId ||
+          ''
+        )
+          .trim()
+          .toUpperCase();
+
+      if (
+        normalizeColor(
+          rawStyle
+        ) !== color
+      ) {
+        continue;
+      }
+
+      const suffix =
+        rawStyle.includes('-')
+          ? rawStyle
+              .split('-')
+              .slice(1)
+              .join('-')
+              .trim()
+          : '';
+
+      const nodes =
+        $$(
+          '.input_variant_qty.matrix_product[data-size], ' +
+          '.variant-info[data-size], ' +
+          '[data-variant-url][data-size]',
+          row
+        );
+
+      for (
+        const node
+        of nodes
+      ) {
+
+        const encodedModel =
+          node.dataset.model ||
+
+          node.dataset
+            .modelNo ||
+
+          node.closest(
+            '[data-model]'
+          )
+            ?.dataset.model ||
+
+          '';
+
+        const encodedColor =
+          node.dataset.color ||
+
+          node.dataset
+            .colorNo ||
+
+          node.closest(
+            '[data-color]'
+          )
+            ?.dataset.color ||
+
+          '';
+
+        const encodedSize =
+          node.dataset.size ||
+          '';
+
+        let visibleSize =
+          findVisibleSize(
+            node
+          );
+
+        if (!visibleSize) {
+
+          visibleSize =
+            decodeBase64(
+              encodedSize
+            ).trim();
+        }
+
+        if (!visibleSize) {
+          continue;
+        }
+
+        const finalSize =
+          combineSizeAndSuffix(
+            visibleSize,
+            suffix
+          );
+
+        const variantUrl =
+          node.dataset
+            .variantUrl ||
+
+          row.querySelector(
+            `[data-size="${
+              cssEscape(
+                encodedSize
+              )
+            }"][data-variant-url]`
+          )
+            ?.dataset
+            .variantUrl ||
+
+          buildVariantURL(
+            encodedModel,
+            encodedColor,
+            encodedSize
+          );
+
+        const key =
+          `${finalSize}|${variantUrl}`;
+
+        if (
+          seen.has(key)
+        ) {
+          continue;
+        }
+
+        seen.add(key);
+
+        result.push({
+          model,
+          color,
+          rawStyle,
+          suffix,
+
+          size:
+            finalSize,
+
+          visibleSize,
+
+          encodedModel,
+          encodedColor,
+          encodedSize,
+          variantUrl
+        });
+      }
+    }
+
+    /*
+     * Fallback voor matrixversies
+     * zonder style_row.
+     */
+
+    if (
+      !result.length
+    ) {
+
+      const nodes =
+        $$(
+          '[data-variant-url][data-size], ' +
+          '.variant-info[data-size]'
+        );
+
+      for (
+        const node
+        of nodes
+      ) {
+
+        const encodedSize =
+          node.dataset.size ||
+          '';
+
+        const visibleSize =
+          findVisibleSize(
+            node
+          ) ||
+
+          decodeBase64(
+            encodedSize
+          ).trim();
+
+        if (!visibleSize) {
+          continue;
+        }
+
+        const variantUrl =
+          node.dataset
+            .variantUrl ||
+          '';
+
+        const key =
+          `${visibleSize}|${variantUrl}`;
+
+        if (
+          seen.has(key)
+        ) {
+          continue;
+        }
+
+        seen.add(key);
+
+        result.push({
+          model,
+          color,
+
+          rawStyle:
+            color,
+
+          suffix:
+            '',
+
+          size:
+            visibleSize,
+
+          visibleSize,
+
+          encodedModel:
+            node.dataset.model ||
+            node.dataset.modelNo ||
+            '',
+
+          encodedColor:
+            node.dataset.color ||
+            node.dataset.colorNo ||
+            '',
+
+          encodedSize,
+
+          variantUrl
+        });
+      }
+    }
+
+    result.sort(
+      (a, b) =>
+        a.size.localeCompare(
+          b.size,
+          undefined,
+          {
+            numeric: true,
+            sensitivity: 'base'
+          }
+        )
+    );
+
+    return result;
+  }
+
+  function findVisibleSize(
+    node
+  ) {
+
+    const cell =
+      node.closest(
+        '.sizes-el.cell.size'
+      ) ||
+
+      node.closest(
+        '.cell.size'
+      ) ||
+
+      node.closest(
+        '.size'
+      );
+
+    const titled =
+      cell?.querySelector(
+        'span[title]'
+      );
+
+    if (
+      titled
+        ?.getAttribute(
+          'title'
+        )
+    ) {
+
+      return titled
+        .getAttribute(
+          'title'
+        )
+        .trim();
+    }
+
+    const top =
+      cell?.querySelector(
+        '.cell-top span, ' +
+        '.top span'
+      );
+
+    if (
+      top?.textContent
+    ) {
+
+      return top
+        .textContent
+        .replace(
+          /\([^)]*\)/g,
+          ''
+        )
+        .trim();
+    }
+
+    return '';
+  }
+
+  function combineSizeAndSuffix(
+    size,
+    suffix
+  ) {
+
+    size =
+      String(
+        size ||
+        ''
+      ).trim();
+
+    suffix =
+      String(
+        suffix ||
+        ''
+      )
+        .trim()
+        .toUpperCase();
+
+    if (
+      !suffix ||
+      !/^[A-Z]{1,3}$/
+        .test(suffix)
+    ) {
+      return size;
+    }
+
+    if (
+      size
+        .toUpperCase()
+        .endsWith(
+          suffix
+        )
+    ) {
+      return size;
+    }
+
+    return (
+      `${size}${suffix}`
+    );
+  }
+
+  function buildVariantURL(
+    encodedModel,
+    encodedColor,
+    encodedSize
+  ) {
+
+    if (
+      !encodedModel ||
+      !encodedColor ||
+      !encodedSize
+    ) {
+      return '';
+    }
+
+    return (
+      `${location.origin}` +
+      `/nl/catalog/variant-modal/` +
+      `${encodeURIComponent(
+        encodedModel
+      )}/` +
+      `${encodeURIComponent(
+        encodedColor
+      )}/` +
+      `${encodeURIComponent(
+        encodedSize
+      )}`
+    );
+  }
+
+  async function copySizes(
+    color
+  ) {
+
+    const variants =
+      getActiveVariants(
+        color
+      );
+
+    const sizes =
+      unique(
+        variants.map(
+          v => v.size
+        )
+      );
+
+    if (!sizes.length) {
+      throw new Error(
+        'Geen maten gevonden in de actieve matrix.'
+      );
+    }
+
+    const supplierId =
+      buildCode(
+        getModelNo(),
+        color
+      );
+
+    const payload = {
+      source:
+        SUPPLIER,
+
+      orderId:
+        false,
+
+      supplierId,
+
+      sizes
+    };
+
+    await writeClipboard(
+      DDO_EDI.sizesClipboard(SUPPLIER, supplierId, sizes)
+    );
+
+    setStatus(
+      `${supplierId}: ${sizes.length} maten gekopieerd.`
+    );
+  }
+
+  // ============================================================
+  // EAN
+  // ============================================================
+
+  async function copyEAN(
+    color
+  ) {
+
+    const variants =
+      getActiveVariants(
+        color
+      );
+
+    if (
+      !variants.length
+    ) {
+      throw new Error(
+        'Geen varianten gevonden in de actieve matrix.'
+      );
+    }
+
+    const supplierId =
+      buildCode(
+        getModelNo(),
+        color
+      );
+
+    const rows = [];
+    const seen =
+      new Set();
+
+    setStatus(
+      `${supplierId}: EAN ophalen (0/${variants.length})…`
+    );
+
+    for (
+      let i = 0;
+      i < variants.length;
+      i++
+    ) {
+
+      const variant =
+        variants[i];
+
+      const ean =
+        await fetchEAN(
+          variant.variantUrl
+        );
+
+      if (ean) {
+
+        const key =
+          `${variant.size}|${ean}`;
+
+        if (
+          !seen.has(key)
+        ) {
+
+          seen.add(key);
+
+          rows.push({size: variant.size, ean});
+        }
+      }
+
+      setStatus(
+        `${supplierId}: EAN ophalen (${i + 1}/${variants.length})…`
+      );
+    }
+
+    if (
+      !rows.length
+    ) {
+      throw new Error(
+        'Geen EAN-codes gevonden.'
+      );
+    }
+
+    await writeClipboard(
+      DDO_EDI.eanTSV(rows, supplierId)
+    );
+
+    setStatus(
+      `${supplierId}: ${rows.length} EAN-regels gekopieerd.`
+    );
+  }
+
+  async function fetchEAN(
+    url
+  ) {
+
+    if (!url) {
+      return '';
+    }
+
+    if (
+      state.eanCache
+        .has(url)
+    ) {
+      return state
+        .eanCache
+        .get(url);
+    }
+
+    const response =
+      await fetch(
+        url,
+        {
+          credentials:
+            'include',
+
+          headers: {
+            'X-Requested-With':
+              'XMLHttpRequest'
+          }
+        }
+      );
+
+    if (
+      !response.ok
+    ) {
+      throw new Error(
+        `EAN endpoint HTTP ${response.status}`
+      );
+    }
+
+    const html =
+      await response.text();
+
+    const ean = DDO_EDI.parseEAN(html);
+
+    state.eanCache
+      .set(
+        url,
+        ean
+      );
+
+    return ean;
+  }
+
+  // ============================================================
+  // PHOTOS
+  // ============================================================
+
+  async function downloadPhotos(
+    color
+  ) {
+
+    const model =
+      getModelNo();
+
+    const urls =
+      await getOriginalImageURLs(
+        model,
+        color
+      );
+
+    if (
+      !urls.length
+    ) {
+
+      throw new Error(
+        `Geen foto's gevonden voor ${model}-${color}.`
+      );
+    }
+
+    setStatus(
+      `${model}-${color}: ${urls.length} originele foto's gevonden.`
+    );
+
+    urls.forEach(
+      (url, index) => {
+
+        const filename =
+          getFilenameFromURL(
+            url
+          ) ||
+
+          `${model}_${color}_${
+            String(
+              index + 1
+            ).padStart(
+              2,
+              '0'
+            )
+          }.jpg`;
+
+        setTimeout(
+          () => {
+
+            if (
+              typeof GM_download ===
+              'function'
+            ) {
+
+              GM_download({
+                url,
+                name:
+                  filename,
+
+                saveAs:
+                  false,
+
+                onerror:
+                  error =>
+                    console.error(
+                      `[${APP}] Download fout`,
+                      url,
+                      error
+                    )
+              });
+
+            } else {
+
+              const a =
+                document.createElement(
+                  'a'
+                );
+
+              a.href =
+                url;
+
+              a.download =
+                filename;
+
+              a.target =
+                '_blank';
+
+              a.rel =
+                'noopener';
+
+              document.body
+                .appendChild(a);
+
+              a.click();
+
+              a.remove();
+            }
+
+          },
+          index * 180
+        );
+      }
+    );
+
+    return urls.length;
+  }
+
+  async function getOriginalImageURLs(
+    model,
+    color
+  ) {
+
+    const urls =
+      new Set();
+
+    /*
+     * 1. Thumbnails op de
+     * huidige productpagina.
+     */
+
+    $$(
+      '.image-thumbs [data-color]'
+    )
+      .forEach(
+        item => {
+
+          if (
+            normalizeColor(
+              item.dataset.color
+            ) !== color
+          ) {
+            return;
+          }
+
+          const candidates = [
+            item.dataset.src,
+
+            $('img', item)
+              ?.dataset.src,
+
+            $('img', item)
+              ?.src
+          ];
+
+          candidates.forEach(
+            url => {
+
+              const original =
+                normalizeOriginalImageURL(
+                  url
+                );
+
+              if (
+                original &&
+                isProductImage(
+                  original,
+                  model
+                )
+              ) {
+
+                urls.add(
+                  original
+                );
+              }
+            }
+          );
+        }
+      );
+
+    /*
+     * 2. Main image indien
+     * actieve kleur.
+     */
+
+    if (
+      getActiveBaseColor() ===
+      color
+    ) {
+
+      const main =
+        normalizeOriginalImageURL(
+          $('.main-detail-image')
+            ?.src
+        );
+
+      if (
+        main &&
+        isProductImage(
+          main,
+          model
+        )
+      ) {
+
+        urls.add(main);
+      }
+    }
+
+    /*
+     * 3. LingaDore zoomImages
+     * endpoint.
+     */
+
+    try {
+
+      const zoomURL =
+        `${location.origin}` +
+        `/nl/catalog/zoomImages/` +
+        `${encodeURIComponent(
+          model
+        )}/` +
+        `${encodeURIComponent(
+          color
+        )}`;
+
+      const response =
+        await fetch(
+          zoomURL,
+          {
+            credentials:
+              'include',
+
+            headers: {
+              'X-Requested-With':
+                'XMLHttpRequest'
+            }
+          }
+        );
+
+      if (
+        response.ok
+      ) {
+
+        const html =
+          await response.text();
+
+        const doc =
+          new DOMParser()
+            .parseFromString(
+              html,
+              'text/html'
+            );
+
+        $$(
+          'img, [data-src], [href]',
+          doc
+        )
+          .forEach(
+            el => {
+
+              [
+                el.getAttribute(
+                  'src'
+                ),
+
+                el.getAttribute(
+                  'data-src'
+                ),
+
+                el.getAttribute(
+                  'href'
+                )
+              ]
+                .forEach(
+                  raw => {
+
+                    const original =
+                      normalizeOriginalImageURL(
+                        raw
+                      );
+
+                    if (
+                      original &&
+                      isProductImage(
+                        original,
+                        model
+                      )
+                    ) {
+
+                      urls.add(
+                        original
+                      );
+                    }
+                  }
+                );
+            }
+          );
+
+        /*
+         * Ook afbeeldingen
+         * uit JSON/JS-fragmenten.
+         */
+
+        const matches =
+          html.match(
+            /https?:\\?\/\\?\/[^"'<>\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'<>\\\s]*)?/gi
+          ) || [];
+
+        matches.forEach(
+          raw => {
+
+            const original =
+              normalizeOriginalImageURL(
+                raw.replace(
+                  /\\\//g,
+                  '/'
+                )
+              );
+
+            if (
+              original &&
+              isProductImage(
+                original,
+                model
+              )
+            ) {
+
+              urls.add(
+                original
+              );
+            }
+          }
+        );
+      }
+
+    } catch (error) {
+
+      console.debug(
+        `[${APP}] zoomImages fallback niet beschikbaar`,
+        error
+      );
+    }
+
+    return [...urls]
+      .sort(
+        (a, b) =>
+          getFilenameFromURL(a)
+            .localeCompare(
+              getFilenameFromURL(b),
+              undefined,
+              {
+                numeric: true,
+                sensitivity:
+                  'base'
+              }
+            )
+      );
+  }
+
+  function normalizeOriginalImageURL(
+    raw
+  ) {
+
+    if (!raw) {
+      return '';
+    }
+
+    try {
+
+      const url =
+        new URL(
+          String(raw)
+            .replace(
+              /&amp;/g,
+              '&'
+            ),
+          location.origin
+        );
+
+      if (
+        !/\.(?:jpe?g|png|webp)$/i
+          .test(
+            url.pathname
+          )
+      ) {
+        return '';
+      }
+
+      /*
+       * width / crop / bgcolor
+       * etc. verwijderen.
+       *
+       * Daarmee vragen we het
+       * originele bestand op.
+       */
+
+      url.search = '';
+
+      return url.href;
+
+    } catch {
+      return '';
+    }
+  }
+
+  function isProductImage(
+    url,
+    model
+  ) {
+
+    try {
+
+      const pathname =
+        new URL(url)
+          .pathname;
+
+      return (
+        pathname.includes(
+          '/media/itemvariants/'
+        ) &&
+
+        pathname
+          .toUpperCase()
+          .includes(
+            String(model)
+              .toUpperCase()
+          )
+      );
+
+    } catch {
+      return false;
+    }
+  }
+
+  function getFilenameFromURL(
+    url
+  ) {
+
+    try {
+
+      return decodeURIComponent(
+        new URL(url)
+          .pathname
+          .split('/')
+          .pop() ||
+        ''
+      );
+
+    } catch {
+      return '';
+    }
+  }
+
+  // ============================================================
+  // MODEL CHECK - HANDMATIGE START
+  // ============================================================
+
+  async function startModelCheck(
+    forceRefresh = false
+  ) {
+
+    if (
+      state.loading
+    ) {
+      return;
+    }
+
+    try {
+
+      setLoading(true);
+
+      setSummary('');
+
+      setStatus(
+        forceRefresh
+          ? 'DDO exports opnieuw ophalen…'
+          : 'DDO modeldata laden…'
+      );
+
+      state.ddoMap =
+        await getArticleMap(
+          forceRefresh
+        );
+
+      state.modelCheckStarted =
+        true;
+
+      recheckCurrentPage();
+
+      setStatus(
+        `Modelcheck actief · ${state.ddoMap.size} DDO producten geladen.`
+      );
+
+    } catch (error) {
+
+      console.error(
+        `[${APP}] Modelcheck`,
+        error
+      );
+
+      state.modelCheckStarted =
+        false;
+
+      state.ddoMap =
+        null;
+
+      clearGridMarkers();
+
+      setStatus(
+        `Modelcheck fout: ${
+          error.message ||
+          error
+        }`
+      );
+
+      setSummary('');
+
+    } finally {
+
+      setLoading(false);
+
+      renderPDP();
+    }
+  }
+
+  function recheckCurrentPage() {
+
+    if (
+      !state.modelCheckStarted ||
+      !state.ddoMap
+    ) {
+
+      setStatus(
+        'Klik eerst op Start modelcheck.'
+      );
+
+      return;
+    }
+
+    if (isPDP()) {
+
+      renderPDP();
+
+      const model =
+        getModelNo();
+
+      const colors =
+        Array.from(
+          getColorSelect()
+            ?.options ||
+          []
+        )
+          .filter(
+            o => o.value
+          )
+          .map(
+            o =>
+              normalizeColor(
+                o.value
+              )
+          )
+          .filter(Boolean);
+
+      const matches =
+        colors.filter(
+          color =>
+            getStatusForCode(
+              buildCode(
+                model,
+                color
+              )
+            ).match
+        ).length;
+
+      setSummary(
+        `${colors.length} kleuren · ` +
+        `${matches} in DDO · ` +
+        `${colors.length - matches} ontbreken`
+      );
+
+      return;
+    }
+
+    runGridCompare();
+  }
+
+  function resetModelCheck() {
+
+    clearDDOCache();
+
+    clearGridMarkers();
+
+    state.ddoMap =
+      null;
+
+    state.modelCheckStarted =
+      false;
+
+    state.eanCache
+      .clear();
+
+    setSummary('');
+
+    setStatus(
+      'Cache geleegd. Modelcheck staat stil.'
+    );
+
+    const recheck =
+      $('#edi-recheck');
+
+    if (recheck) {
+      recheck.disabled =
+        true;
+    }
+
+    renderPDP();
+  }
+
+  function getStatusForCode(
+    code
+  ) {
+
+    if (
+      !state.ddoMap ||
+      !code
+    ) {
+
+      return {
+        match: false,
+        productId: null,
+        ddoEditId: null
+      };
+    }
+
+    const info =
+      state.ddoMap.get(
+        code
+      );
+
+    return info
+      ? {
+          match: true,
+
+          productId:
+            info.productId ||
+            null,
+
+          ddoEditId:
+            info.ddoEditId ||
+            null
+        }
+
+      : {
+          match: false,
+          productId: null,
+          ddoEditId: null
+        };
+  }
+
+  // ============================================================
+  // GRID COMPARE
+  // ============================================================
+
+  function findProductCards() {
+
+    return $$('.item-wrapper');
+  }
+
+  function extractVariantsFromCard(
+    card
+  ) {
+
+    const item =
+      card.matches('.item')
+        ? card
+        : $('.item', card);
+
+    if (!item) {
+      return [];
+    }
+
+    const model =
+      normalizeModel(
+        item.dataset.modelNo ||
+        text(
+          '.model-no',
+          item
+        )
+      );
+
+    if (!model) {
+      return [];
+    }
+
+    const variants = [];
+    const seen =
+      new Set();
+
+    $(
+      '.item-colors',
+      item
+    );
+
+    $$(
+      '.item-colors .color[data-color]',
+      item
+    )
+      .forEach(
+        el => {
+
+          const color =
+            normalizeColor(
+              el.dataset.color
+            );
+
+          const code =
+            buildCode(
+              model,
+              color
+            );
+
+          if (
+            !code ||
+            seen.has(code)
+          ) {
+            return;
+          }
+
+          seen.add(code);
+
+          variants.push({
+            model,
+            color,
+            code,
+
+            colorName:
+              el.getAttribute(
+                'title'
+              ) || ''
+          });
+        }
+      );
+
+    /*
+     * Fallback: thumbnails
+     */
+
+    if (
+      !variants.length
+    ) {
+
+      $$(
+        '.image-thumbs [data-color]',
+        item
+      )
+        .forEach(
+          el => {
+
+            const color =
+              normalizeColor(
+                el.dataset.color
+              );
+
+            const code =
+              buildCode(
+                model,
+                color
+              );
+
+            if (
+              !code ||
+              seen.has(code)
+            ) {
+              return;
+            }
+
+            seen.add(code);
+
+            variants.push({
+              model,
+              color,
+              code,
+              colorName: ''
+            });
+          }
+        );
+    }
+
+    /*
+     * Laatste fallback:
+     * data-style="03-D"
+     */
+
+    if (
+      !variants.length
+    ) {
+
+      const color =
+        normalizeColor(
+          item.dataset.style
+        );
+
+      const code =
+        buildCode(
+          model,
+          color
+        );
+
+      if (code) {
+
+        variants.push({
+          model,
+          color,
+          code,
+          colorName: ''
+        });
+      }
+    }
+
+    return variants;
+  }
+
+  function runGridCompare() {
+
+    clearGridMarkers();
+
+    let cards = 0;
+
+    let complete = 0;
+
+    let partial = 0;
+
+    let missing = 0;
+
+    let variantsTotal = 0;
+
+    let variantsMatch = 0;
+
+    for (
+      const card
+      of findProductCards()
+    ) {
+
+      const variants =
+        extractVariantsFromCard(
+          card
+        );
+
+      if (
+        !variants.length
+      ) {
+        continue;
+      }
+
+      cards++;
+
+      const results =
+        variants.map(
+          variant => ({
+            ...variant,
+
+            ...getStatusForCode(
+              variant.code
+            )
+          })
+        );
+
+      const matchCount =
+        results.filter(
+          r => r.match
+        ).length;
+
+      variantsTotal +=
+        results.length;
+
+      variantsMatch +=
+        matchCount;
+
+      let status;
+
+      if (
+        matchCount ===
+        results.length
+      ) {
+
+        status = 'all';
+
+        complete++;
+
+      } else if (
+        matchCount > 0
+      ) {
+
+        status = 'partial';
+
+        partial++;
+
+      } else {
+
+        status = 'miss';
+
+        missing++;
+      }
+
+      markGridCard(
+        card,
+        status,
+        results
+      );
+    }
+
+    setSummary(
+      `Cards ${cards} · ` +
+      `compleet ${complete} · ` +
+      `deels ${partial} · ` +
+      `geen ${missing} · ` +
+      `kleuren ${variantsMatch}/${variantsTotal}`
+    );
+  }
+
+  function markGridCard(
+    card,
+    status,
+    results
+  ) {
+
+    card.classList.add(
+      'edi-card-checked',
+      `edi-card-${status}`
+    );
+
+    const matches =
+      results.filter(
+        r => r.match
+      ).length;
+
+    const badge =
+      document.createElement(
+        'div'
+      );
+
+    badge.className =
+      'edi-grid-badge';
+
+    badge.textContent =
+      `${matches}/${results.length} in DDO`;
+
+    card.appendChild(
+      badge
+    );
+
+    const box =
+      document.createElement(
+        'div'
+      );
+
+    box.className =
+      'edi-grid-results';
+
+    results.forEach(
+      result => {
+
+        const id =
+          result.productId ||
+          result.ddoEditId;
+
+        const el =
+          result.match &&
+          id
+
+            ? document.createElement(
+                'a'
+              )
+
+            : document.createElement(
+                'span'
+              );
+
+        el.className =
+          `edi-grid-pill ${
+            result.match
+              ? 'edi-ok'
+              : ''
+          }`;
+
+        el.textContent =
+          result.match
+
+            ? `✓ ${result.color}${
+                id
+                  ? ` · ${id}`
+                  : ''
+              }`
+
+            : `× ${result.color}`;
+
+        el.title =
+          `${result.code}${
+            result.colorName
+              ? ` · ${result.colorName}`
+              : ''
+          }`;
+
+        if (
+          el.tagName ===
+          'A'
+        ) {
+
+          el.href =
+            buildDDOEditUrl(
+              id
+            );
+
+          el.target =
+            '_blank';
+
+          el.rel =
+            'noopener';
+        }
+
+        box.appendChild(
+          el
+        );
+      }
+    );
+
+    card.appendChild(
+      box
+    );
+  }
+
+  function clearGridMarkers() {
+
+    $$('.edi-card-checked')
+      .forEach(
+        card => {
+
+          card.classList.remove(
+            'edi-card-checked',
+            'edi-card-all',
+            'edi-card-partial',
+            'edi-card-miss'
+          );
+
+          $$(
+            ':scope > .edi-grid-badge, ' +
+            ':scope > .edi-grid-results',
+            card
+          )
+            .forEach(
+              el =>
+                el.remove()
+            );
+        }
+      );
+  }
+
+  // ============================================================
+  // DDO EXPORT + CACHE
+  // ============================================================
+
+  async function getArticleMap(
+    forceRefresh = false
+  ) {
+
+    if (
+      !forceRefresh
+    ) {
+
+      const cached =
+        readDDOCache();
+
+      if (cached) {
+
+        return new Map(
+          cached
+        );
+      }
+    }
+
+    const maps =
+      await Promise.all(
+
+        DDO_BRAND_IDS.map(
+          async brandId => {
+
+            setStatus(
+              `DDO export merk ${brandId} ophalen…`
+            );
+
+            const buffer =
+              await fetchExport(
+                buildBrandExportURL(
+                  brandId
+                ),
+                EXPORT_PAYLOAD
+              );
+
+            return (
+              parseArticleMapFromWorkbook(
+                buffer
+              )
+            );
+          }
+        )
+      );
+
+    const merged =
+      new Map();
+
+    for (
+      const map
+      of maps
+    ) {
+
+      for (
+        const [code, info]
+        of map.entries()
+      ) {
+
+        if (
+          !merged.has(code)
+        ) {
+
+          merged.set(
+            code,
+            info
+          );
+        }
+      }
+    }
+
+    if (
+      !merged.size
+    ) {
+
+      throw new Error(
+        'Geen bruikbare DDO Product ID koppelingen gevonden.'
+      );
+    }
+
+    writeDDOCache(
+      [...merged.entries()]
+    );
+
+    return merged;
+  }
+
+  function buildBrandExportURL(
+    brandId
+  ) {
+
+    return (
+      'https://www.dutchdesignersoutlet.com/' +
+      'admin.php?section=products' +
+      '&action=list' +
+      '&filter=brand_id' +
+      `&id=${encodeURIComponent(
+        brandId
+      )}`
+    );
+  }
+
+  function fetchExport(
+    url,
+    payload
+  ) {
+
+    return new Promise(
+      (
+        resolve,
+        reject
+      ) => {
+
+        GM_xmlhttpRequest({
+
+          method:
+            'POST',
+
+          url,
+
+          headers: {
+            'Content-Type':
+              'application/x-www-form-urlencoded'
+          },
+
+          data:
+            new URLSearchParams(
+              payload
+            ).toString(),
+
+          responseType:
+            'arraybuffer',
+
+          timeout:
+            60000,
+
+          onload:
+            response => {
+
+              if (
+                response.status !==
+                200
+              ) {
+
+                reject(
+                  new Error(
+                    `DDO export HTTP ${response.status}`
+                  )
+                );
+
+                return;
+              }
+
+              if (
+                !response.response
+                  ?.byteLength
+              ) {
+
+                reject(
+                  new Error(
+                    'Lege DDO export ontvangen.'
+                  )
+                );
+
+                return;
+              }
+
+              resolve(
+                response.response
+              );
+            },
+
+          onerror:
+            () =>
+              reject(
+                new Error(
+                  'Netwerkfout bij DDO export.'
+                )
+              ),
+
+          ontimeout:
+            () =>
+              reject(
+                new Error(
+                  'Timeout bij DDO export.'
+                )
+              )
+
+        });
+      }
+    );
+  }
+
+  function parseArticleMapFromWorkbook(
+    arrayBuffer
+  ) {
+
+    let workbook;
+
+    try {
+
+      workbook =
+        XLSX.read(
+          arrayBuffer,
+          {
+            type: 'array'
+          }
+        );
+
+    } catch {
+
+      throw new Error(
+        'DDO Excel-export kon niet worden gelezen.'
+      );
+    }
+
+    const sheetNames =
+      workbook.SheetNames ||
+      [];
+
+    const ordered = [
+
+      ...(
+        sheetNames.includes(
+          SHEET_PREFERRED
+        )
+          ? [SHEET_PREFERRED]
+          : []
+      ),
+
+      ...sheetNames.filter(
+        name =>
+          name !==
+          SHEET_PREFERRED
+      )
+    ];
+
+    let best =
+      new Map();
+
+    for (
+      const sheetName
+      of ordered
+    ) {
+
+      const sheet =
+        workbook.Sheets[
+          sheetName
+        ];
+
+      if (!sheet) {
+        continue;
+      }
+
+      const rows =
+        XLSX.utils
+          .sheet_to_json(
+            sheet,
+            {
+              header: 1,
+              raw: false,
+              defval: '',
+              blankrows: false
+            }
+          );
+
+      const map =
+        new Map();
+
+      for (
+        let r =
+          HEADER_ROW_INDEX + 1;
+
+        r < rows.length;
+
+        r++
+      ) {
+
+        const row =
+          Array.isArray(
+            rows[r]
+          )
+            ? rows[r]
+            : [];
+
+        const rawImage =
+          row[
+            COL_IMAGE
+          ];
+
+        const rawProductId =
+          row[
+            COL_PRODUCT_ID
+          ];
+
+        if (
+          rawProductId == null ||
+          rawProductId === ''
+        ) {
+          continue;
+        }
+
+        const code =
+          normalizeDDOProductCode(
+            rawProductId
+          );
+
+        if (!code) {
+          continue;
+        }
+
+        map.set(
+          code,
+          {
+
+            ddoEditId:
+              extractDDOEditIdFromImageField(
+                rawImage
+              ),
+
+            productId:
+              extractProductIdFromImageField(
+                rawImage
+              )
+          }
+        );
+      }
+
+      if (
+        map.size >
+        best.size
+      ) {
+
+        best =
+          map;
+      }
+
+      if (
+        sheetName ===
+          SHEET_PREFERRED &&
+        map.size
+      ) {
+
+        break;
+      }
+    }
+
+    if (
+      !best.size
+    ) {
+
+      throw new Error(
+        'Geen bruikbare Product ID koppelingen in DDO export.'
+      );
+    }
+
+    return best;
+  }
+
+  function extractDDOEditIdFromImageField(
+    imageField
+  ) {
+
+    const first =
+      String(
+        imageField ??
+        ''
+      )
+        .trim()
+        .split('|')[0]
+        .trim();
+
+    if (
+      !first.startsWith(
+        IMAGE_PREFIX
+      )
+    ) {
+
+      return null;
+    }
+
+    return (
+      first
+        .slice(
+          IMAGE_PREFIX.length
+        )
+        .match(
+          /^(\d{5,6})/
+        )
+        ?.[1] ||
+
+      null
+    );
+  }
+
+  function extractProductIdFromImageField(
+    imageField
+  ) {
+
+    const first =
+      String(
+        imageField ??
+        ''
+      )
+        .trim()
+        .split('|')[0]
+        .trim();
+
+    if (
+      !first.startsWith(
+        IMAGE_PREFIX
+      )
+    ) {
+
+      return null;
+    }
+
+    return (
+      first
+        .slice(
+          IMAGE_PREFIX.length
+        )
+        .match(
+          /^(\d{5})/
+        )
+        ?.[1] ||
+
+      null
+    );
+  }
+
+  function buildDDOEditUrl(
+    productId
+  ) {
+
+    return (
+      'https://www.dutchdesignersoutlet.com/' +
+      'admin.php?section=products&action=edit' +
+      `&id=${encodeURIComponent(
+        productId
+      )}`
+    );
+  }
+
+  function readDDOCache() {
+
+    try {
+
+      const raw =
+        localStorage.getItem(
+          `${CACHE_PREFIX}:map`
+        );
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed =
+        JSON.parse(raw);
+
+      if (
+        !parsed ||
+        !Array.isArray(
+          parsed.data
+        ) ||
+        !Number.isFinite(
+          parsed.ts
+        ) ||
+        Date.now() -
+          parsed.ts >
+          CACHE_TTL_MS
+      ) {
+
+        localStorage.removeItem(
+          `${CACHE_PREFIX}:map`
+        );
+
+        return null;
+      }
+
+      return parsed.data;
+
+    } catch {
+
+      return null;
+    }
+  }
+
+  function writeDDOCache(
+    data
+  ) {
+
+    try {
+
+      localStorage.setItem(
+        `${CACHE_PREFIX}:map`,
+        JSON.stringify({
+          ts:
+            Date.now(),
+
+          data
+        })
+      );
+
+    } catch (error) {
+
+      console.warn(
+        `[${APP}] Cache schrijven mislukt`,
+        error
+      );
+    }
+  }
+
+  function clearDDOCache() {
+
+    Object.keys(
+      localStorage
+    )
+      .filter(
+        key =>
+          key.startsWith(
+            CACHE_PREFIX
+          )
+      )
+      .forEach(
+        key =>
+          localStorage
+            .removeItem(key)
+      );
+  }
+
+  // ============================================================
+  // OBSERVER
+  // ============================================================
+
+  function startObserver() {
+
+    state.observer
+      ?.disconnect();
+
+    state.observer =
+      new MutationObserver(
+        mutations => {
+
+          const relevant =
+            mutations.some(
+              mutation =>
+
+                [
+                  ...mutation.addedNodes,
+                  ...mutation.removedNodes
+                ]
+                  .some(
+                    node => {
+
+                      if (
+                        node.nodeType !==
+                        Node.ELEMENT_NODE
+                      ) {
+                        return false;
+                      }
+
+                      const el =
+                        node;
+
+                      if (
+                        el.id ===
+                          'edi-lingadore' ||
+
+                        el.closest?.(
+                          '#edi-lingadore'
+                        )
+                      ) {
+
+                        return false;
+                      }
+
+                      return (
+                        el.matches?.(
+                          '.matrix-filters, ' +
+                          '.item-colors, ' +
+                          '.ordermatrix-wrapper, ' +
+                          '.item-wrapper, ' +
+                          '.image-thumbs'
+                        ) ||
+
+                        el.querySelector?.(
+                          '.matrix-filters, ' +
+                          '.item-colors, ' +
+                          '.ordermatrix-wrapper, ' +
+                          '.item-wrapper, ' +
+                          '.image-thumbs'
+                        )
+                      );
+                    }
+                  )
+            );
+
+          if (!relevant) {
+            return;
+          }
+
+          clearTimeout(
+            state.renderTimer
+          );
+
+          state.renderTimer =
+            setTimeout(
+              () => {
+
+                if (isPDP()) {
+
+                  renderPDP();
+
+                } else if (
+                  state.modelCheckStarted &&
+                  state.ddoMap
+                ) {
+
+                  runGridCompare();
+                }
+
+              },
+              180
+            );
+        }
+      );
+
+    state.observer.observe(
+      document.body,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+  }
+
+  // ============================================================
+  // ESCAPING
+  // ============================================================
+
+  function escapeHTML(value) {
+
+    return String(
+      value ??
+      ''
+    )
+      .replace(
+        /&/g,
+        '&amp;'
+      )
+      .replace(
+        /</g,
+        '&lt;'
+      )
+      .replace(
+        />/g,
+        '&gt;'
+      )
+      .replace(
+        /"/g,
+        '&quot;'
+      )
+      .replace(
+        /'/g,
+        '&#039;'
+      );
+  }
+
+  function escapeAttr(value) {
+
+    return escapeHTML(
+      value
+    );
+  }
+
+  function cssEscape(value) {
+
+    if (
+      window.CSS?.escape
+    ) {
+
+      return CSS.escape(
+        String(value)
+      );
+    }
+
+    return String(value)
+      .replace(
+        /["\\]/g,
+        '\\$&'
+      );
+  }
+
+  // ============================================================
+  // INIT
+  // ============================================================
+
+  function init() {
+
+    injectCSS();
+
+    createPanel();
+
+    startObserver();
+
+    renderPDP();
+
+    /*
+     * Modelcheck start
+     * nadrukkelijk NIET
+     * automatisch.
+     */
+
+    console.info(
+      `[${APP}] v${VERSION} klaar. ` +
+      'Modelcheck wacht op startsignaal.'
+    );
+  }
+
+  init();
+
+})();
 })();
