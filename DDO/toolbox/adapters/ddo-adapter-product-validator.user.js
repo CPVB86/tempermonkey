@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         DDO Toolbox | Adapter | Product Validator
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.3.0
-// @description  Controleert en corrigeert geselecteerde producten op kleur-, prijs- en NME-afwijkingen.
+// @version      1.4.0
+// @description  Controleert producten op kleur-, prijs-, NME- en Supplier PID-afwijkingen en beheert Supplier PID-batches.
 // @match        https://www.dutchdesignersoutlet.com/admin.php*
 // @grant        none
 // @run-at       document-end
@@ -13,9 +13,10 @@
 (() => {
   'use strict';
 
-  const ID='productValidator', VERSION='1.3.0';
+  const ID='productValidator', VERSION='1.4.0';
   const UPDATE_URL='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-product-validator.user.js';
   const PANEL_ID='ddo-product-validator-status', BADGE='ddo-product-validator-badge';
+  const BULK_PANEL_ID='ddo-product-validator-supplier-panel';
 const REQUIRED_TAGS = {
   promo: 'SYST - Promo',
   webwinkelkeur: 'SYST - Webwinkelkeur'
@@ -65,6 +66,7 @@ const REQUIRED_TAGS = {
       adviceTab3:false,
       vipTab3:false,
       referenceNme:false,
+      supplierPid:false,
   promoTag:false,
   webwinkelkeurTag:false
     };
@@ -72,6 +74,11 @@ const REQUIRED_TAGS = {
     const mainPrice=cents(value(doc,'price'));
     const mainAdvice=cents(value(doc,'price_advice'));
     const mainVip=cents(value(doc,'price_vip'));
+
+    if(!String(value(doc,'supplier_pid')??'').trim()){
+      checks.supplierPid=true;
+      issues.push('Supplier PID ontbreekt op tab 1');
+    }
 
     if(mainVip===null){
       checks.vipTab1=true;
@@ -153,6 +160,7 @@ if(!assignedTags.includes(REQUIRED_TAGS.webwinkelkeur.toLowerCase())){
   }
 
   function report(){
+    installSupplierBulkButton();
     const ready=applicable();
     send('adapter-state',{
       id:ID,
@@ -258,6 +266,7 @@ function summaryCounts(){
   return {
     vipTab1:results.filter(r=>r.checks?.vipTab1).length,
     referenceNme:results.filter(r=>r.checks?.referenceNme).length,
+    supplierPid:results.filter(r=>r.checks?.supplierPid).length,
 
     colorsTab2:results.filter(r=>r.checks?.colorsTab2).length,
 
@@ -350,6 +359,10 @@ function render(progress){
     NME <strong>${s.referenceNme}</strong>
   </span>
 
+  <span title="Supplier PID ontbreekt op tab 1">
+    Supplier PID <strong>${s.supplierPid}</strong>
+  </span>
+
   <span style="color:#aeb8bf">|</span>
 
   <strong>Tab 2:</strong>
@@ -395,15 +408,6 @@ function render(progress){
   Niet controleerbaar <strong>${s.failed}</strong>
 </span>
 
-  <span style="color:#aeb8bf">|</span>
-
-  <span
-    title="Producten die niet gecontroleerd konden worden"
-    style="${s.failed?'color:#a15c00':''}"
-  >
-    Niet controleerbaar <strong>${s.failed}</strong>
-  </span>
-
 </div>
   `;
 
@@ -444,6 +448,7 @@ function render(progress){
       'Adviesprijs afwijkend tab 3',
       'VIP prijs tab 3',
       'NME in Reference',
+      'Supplier PID ontbreekt',
       'Controle mislukt',
       'Wijzigingslog',
       'Wijziging mislukt'
@@ -458,6 +463,7 @@ function render(progress){
       result.checks?.adviceTab3?'✓':'',
       result.checks?.vipTab3?'✓':'',
       result.checks?.referenceNme?'✓':'',
+      result.checks?.supplierPid?'✓':'',
       result.error||'',
       (result.changes||[]).join(' | '),
       result.applyError||''
@@ -766,6 +772,106 @@ if(tagsSelect){
     }
 
     return doc;
+  }
+
+  const supplierBulkBrand=()=>{
+    const query=params();
+    return query.get('section')==='products'&&query.get('action')==='list'&&query.get('filter')==='brand_id'&&/^\d+$/.test(query.get('id')||'')?query.get('id'):'';
+  };
+
+  function parseSupplierBulk(text){
+    const lines=String(text||'').replace(/^\uFEFF/,'').split(/\r?\n/).filter(line=>line.trim());
+    if(!lines.length)throw new Error('Plak minimaal één regel met Product ID, oude Supplier ID en nieuwe Supplier ID.');
+    const cells=line=>{
+      const parts=[];let field='',quoted=false;
+      for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'){if(quoted&&line[i+1]==='"'){field+='"';i++}else if(quoted||!field)quoted=!quoted;else field+=char}else if(char==='\t'&&!quoted){parts.push(field.trim());field=''}else field+=char}
+      if(quoted)throw new Error('Niet afgesloten aanhalingsteken in plakgegevens.');parts.push(field.trim());return parts;
+    };
+    const first=cells(lines[0]).map(cell=>cell.toLocaleLowerCase('nl').replace(/\s+/g,' '));
+    const header=first[0]==='product id'&&['oude supplier id','oude supplier pid'].includes(first[1])&&['nieuwe supplier id','nieuwe supplier pid'].includes(first[2]);
+    const data=header?lines.slice(1):lines;
+    if(!data.length)throw new Error('De lijst bevat alleen kolomkoppen.');
+    const seen=new Set();
+    return data.map((line,index)=>{
+      const row=cells(line),number=index+1+(header?1:0);
+      if(row.length!==3)throw new Error(`Regel ${number}: precies drie kolommen vereist.`);
+      const [id,oldPid,newPid]=row;
+      if(!/^\d+$/.test(id)||id==='0')throw new Error(`Regel ${number}: ongeldig Product ID.`);
+      if(seen.has(id))throw new Error(`Product ID ${id} staat dubbel in de lijst.`);
+      if(!newPid)throw new Error(`Regel ${number}: nieuwe Supplier ID ontbreekt.`);
+      seen.add(id);
+      return {id,oldPid,newPid,checked:false,done:false,error:'',message:'Nog niet gecontroleerd'};
+    });
+  }
+
+  function inspectSupplierProduct(doc,item,brandId){
+    const brand=doc.querySelector('select[name="brand_id"],input[name="brand_id"]')?.value;
+    if(!brand||brand!==brandId)throw new Error(`Merk-ID wijkt af: ${brand||'onbekend'} ≠ ${brandId}.`);
+    const field=doc.querySelector('input[name="supplier_pid"]');
+    if(!field)throw new Error('Supplier PID-veld ontbreekt.');
+    const current=field.value.trim();
+    if(current!==item.oldPid)throw new Error(`Oude Supplier ID wijkt af: “${current}” ≠ “${item.oldPid}”.`);
+    const form=field.closest('form');
+    if(!form)throw new Error('Productformulier ontbreekt.');
+    const page=`${location.origin}/admin.php?section=products&action=edit&id=${encodeURIComponent(item.id)}`;
+    const action=new URL(form.getAttribute('action')||page,page);
+    if(action.origin!==location.origin||action.pathname!=='/admin.php'||action.searchParams.get('section')!=='products'||action.searchParams.get('action')!=='edit'||action.searchParams.get('id')!==item.id||String(form.getAttribute('method')||'post').toLowerCase()!=='post')throw new Error('Onverwachte formulieractie; niet opslaan.');
+    return {field,form,action:action.href,changed:current!==item.newPid};
+  }
+
+  async function saveSupplierProduct(item,brandId){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+    try{
+      const doc=await fetchProduct(item.id,controller.signal);
+      const prepared=inspectSupplierProduct(doc,item,brandId);
+      if(!prepared.changed)return 'Reeds correct';
+      prepared.field.value=item.newPid;
+      const body=new FormData(prepared.form);
+      body.set('supplier_pid',item.newPid);
+      const submit=prepared.form.querySelector('input[type="submit"][name="edit"],button[type="submit"][name="edit"],input[type="submit"][name]');
+      if(submit?.name)body.set(submit.name,submit.value||'Update product');
+      const response=await fetch(prepared.action,{method:'POST',body,credentials:'same-origin',cache:'no-store',signal:controller.signal});
+      if(!response.ok)throw new Error(`Opslaan gaf HTTP ${response.status}.`);
+      const verified=await fetchProduct(item.id,controller.signal);
+      const current=verified.querySelector('input[name="supplier_pid"]')?.value.trim();
+      if(current!==item.newPid)throw new Error(`Nacontrole mislukt: Supplier PID is “${current??'ontbreekt'}”.`);
+      return 'Gewijzigd en geverifieerd';
+    }finally{clearTimeout(timer)}
+  }
+
+  function installSupplierBulkButton(){
+    const brandId=supplierBulkBrand();
+    if(!brandId||window.__ddoToolbox?.isEnabled?.(ID)!==true)return;
+    const toolbox=document.getElementById('ddo-toolbox');
+    if(!toolbox||document.getElementById(BULK_PANEL_ID))return;
+    const section=document.createElement('section');section.id=BULK_PANEL_ID;section.className='ddo-module-panel';
+    const title=document.createElement('div');title.className='ddo-edi-title';title.textContent='Product Validator';
+    const row=document.createElement('div');row.className='ddo-edi-row';
+    const control=document.createElement('button');control.type='button';control.className='ddo-edi-action';control.textContent='Supplier ID’s wijzigen';control.title='Wijzig Supplier PID’s in bulk na exacte controle van Product ID, merk en oude Supplier ID';control.onclick=()=>openSupplierBulk(brandId);
+    row.append(control);section.append(title,row);toolbox.querySelector('#ddo-edi-panel')?.insertAdjacentElement('afterend',section)||toolbox.append(section);
+  }
+
+  function openSupplierBulk(brandId){
+    if(document.getElementById('ddo-supplier-bulk-dialog'))return;
+    const dialog=document.createElement('dialog');dialog.id='ddo-supplier-bulk-dialog';dialog.style.cssText='width:900px;max-width:95vw;max-height:90vh;padding:0 12px 12px;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0003;background:#fff;color:#25313b;font:12px/1.3 system-ui';document.body.append(dialog);
+    const heading=document.createElement('h2');heading.textContent=`Supplier ID’s wijzigen · merk ${brandId}`;heading.style.cssText='margin:0 -12px 8px;padding:8px 38px 8px 10px;background:#263746;color:#fff;border-radius:6px 6px 0 0;font:650 13px/1.2 system-ui';dialog.append(heading);
+    const makeButton=(label,parent,handler)=>{const control=document.createElement('button');control.type='button';control.textContent=label;control.style.cssText='padding:7px 10px;border:0;border-radius:4px;background:#0877b9;color:#fff;font:600 11px/1.2 system-ui;cursor:pointer';control.onclick=handler;parent.append(control);return control};
+    const close=makeButton('×',dialog,()=>dialog.close());close.title='Sluiten';close.style.cssText='position:absolute;right:7px;top:4px;width:25px;height:25px;padding:0;border:0;background:transparent;color:#fff;font:20px/1 system-ui;cursor:pointer';
+    const intro=document.createElement('p');intro.textContent='Plak drie tabgescheiden kolommen: Product ID, oude Supplier ID, nieuwe Supplier ID. Een lege oude ID is toegestaan en wordt exact vergeleken. Alleen producten van dit merk worden verwerkt.';intro.style.margin='8px 0';dialog.append(intro);
+    const input=document.createElement('textarea');input.placeholder='Product ID\toude Supplier ID\tnieuwe Supplier ID';input.setAttribute('aria-label','Supplier ID-bulklijst');input.style.cssText='box-sizing:border-box;width:100%;height:105px;padding:8px;border:1px solid #cbd5df;border-radius:4px;font:12px/1.35 monospace';dialog.append(input);
+    const controls=document.createElement('div');controls.style.cssText='display:flex;gap:6px;margin:8px 0';dialog.append(controls);
+    const status=document.createElement('p');status.setAttribute('role','status');status.style.cssText='min-height:16px;margin:6px 0';dialog.append(status);
+    const scroller=document.createElement('div');scroller.style.cssText='max-height:45vh;overflow:auto;border:1px solid #cbd5df;border-radius:4px';dialog.append(scroller);
+    const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse';scroller.append(table);
+    const header=table.createTHead().insertRow();for(const label of ['Product ID','Oude Supplier ID','Nieuwe Supplier ID','Status']){const cell=header.insertCell();cell.textContent=label;cell.style.cssText='padding:5px;background:#edf2f7;text-align:left'}
+    const body=table.createTBody();let items=[],busy=false,stop=false;
+    const check=makeButton('Controleren',controls,()=>checkRows());const apply=makeButton('Uitvoeren',controls,()=>applyRows());const halt=makeButton('Stop na huidige regel',controls,()=>{stop=true});
+    const update=()=>{check.disabled=busy||!input.value.trim();apply.disabled=busy||!items.length||items.some(item=>!item.checked)||!items.some(item=>!item.done);halt.disabled=!busy;close.disabled=busy;input.disabled=busy;for(const control of [check,apply,halt])control.style.opacity=control.disabled?'.5':'1'};
+    const draw=()=>{body.replaceChildren();for(const item of items){const row=body.insertRow();for(const value of [item.id,item.oldPid,item.newPid,item.message]){const cell=row.insertCell();cell.textContent=value;cell.style.cssText=`padding:5px;border-bottom:1px solid #e2e8f0;${item.error?'color:#b91c1c':''}`}}};
+    input.oninput=()=>{items=[];body.replaceChildren();status.textContent='Lijst gewijzigd; opnieuw controleren.';update()};
+    async function checkRows(){try{items=parseSupplierBulk(input.value)}catch(error){status.textContent=error.message;update();return}busy=true;stop=false;update();draw();let count=0;for(const item of items){if(stop)break;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);try{const doc=await fetchProduct(item.id,controller.signal),prepared=inspectSupplierProduct(doc,item,brandId);item.checked=true;item.done=!prepared.changed;item.error='';item.message=prepared.changed?'Klaar om te wijzigen':'Reeds correct'}catch(error){item.checked=false;item.error=String(error.message||error);item.message=item.error}finally{clearTimeout(timer)}count++;status.textContent=`${count}/${items.length} gecontroleerd · ${items.length-count} resterend`;draw()}busy=false;status.textContent=items.some(item=>!item.checked)?'Controle niet compleet; corrigeer de gemarkeerde regels.':`${count}/${items.length} gecontroleerd · ${items.filter(item=>!item.done).length} te wijzigen`;update()}
+    async function applyRows(){if(items.some(item=>!item.checked)||!items.some(item=>!item.done))return;if(!confirm(`Wijzig de Supplier PID van ${items.filter(item=>!item.done).length} product(en)? De oude waarde en het merk worden vóór iedere opslag opnieuw exact gecontroleerd.`))return;busy=true;stop=false;update();let count=items.filter(item=>item.done).length;try{if(!navigator.locks)throw new Error('Browser ondersteunt geen batchvergrendeling.');await navigator.locks.request('ddo-supplier-pid-batch',{ifAvailable:true},async lock=>{if(!lock)throw new Error('Er loopt al een Supplier PID-batch in een ander tabblad.');for(const item of items){if(stop)break;if(item.done)continue;try{item.message=await saveSupplierProduct(item,brandId);item.done=true;count++}catch(error){item.error=String(error.message||error);item.message=`Gestopt: ${item.error}`;stop=true}status.textContent=`${count}/${items.length} verwerkt · ${items.length-count} resterend`;draw()}})}catch(error){status.textContent=error.message}finally{busy=false;update()}}
+    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault()});dialog.addEventListener('close',()=>dialog.remove());update();dialog.showModal();input.focus();
   }
 
   async function start(){
