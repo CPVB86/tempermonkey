@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDO Toolbox | Adapter | Product Validator
 // @namespace    https://dutchdesignersoutlet.nl/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Controleert producten op kleur-, prijs-, NME- en Supplier PID-afwijkingen en beheert Supplier PID-batches.
 // @match        https://www.dutchdesignersoutlet.com/admin.php*
 // @grant        none
@@ -13,7 +13,7 @@
 (() => {
   'use strict';
 
-  const ID='productValidator', VERSION='1.4.0';
+  const ID='productValidator', VERSION='1.4.1';
   const UPDATE_URL='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-product-validator.user.js';
   const PANEL_ID='ddo-product-validator-status', BADGE='ddo-product-validator-badge';
   const BULK_PANEL_ID='ddo-product-validator-supplier-panel';
@@ -841,13 +841,21 @@ if(tagsSelect){
 
   function installSupplierBulkButton(){
     const brandId=supplierBulkBrand();
-    if(!brandId||window.__ddoToolbox?.isEnabled?.(ID)!==true)return;
+    if(!brandId)return;
+    const coreAccess=window.__ddoToolbox?.isEnabled?.(ID);
+    if(coreAccess===false)return;
+    if(coreAccess!==true){
+      // GM_xxx- en @grant none-scripts kunnen in gescheiden werelden draaien.
+      // Neem dan dezelfde expliciete namenlijst als de Core, nooit een open fallback.
+      const name=document.querySelector('.profile .profile_content h1,.profile h1')?.textContent?.replace(/\s+/g,' ').trim().toLocaleLowerCase('nl')||'';
+      if(!['chantor pascal van beek','folkert van beek','monique van beek','chantal timmer','anke adams'].includes(name))return;
+    }
     const toolbox=document.getElementById('ddo-toolbox');
     if(!toolbox||document.getElementById(BULK_PANEL_ID))return;
     const section=document.createElement('section');section.id=BULK_PANEL_ID;section.className='ddo-module-panel';
     const title=document.createElement('div');title.className='ddo-edi-title';title.textContent='Product Validator';
-    const row=document.createElement('div');row.className='ddo-edi-row';
-    const control=document.createElement('button');control.type='button';control.className='ddo-edi-action';control.textContent='Supplier ID’s wijzigen';control.title='Wijzig Supplier PID’s in bulk na exacte controle van Product ID, merk en oude Supplier ID';control.onclick=()=>openSupplierBulk(brandId);
+    const row=document.createElement('div');row.className='ddo-edi-row';row.style.display='block';
+    const control=document.createElement('button');control.type='button';control.className='ddo-edi-action';control.style.width='100%';control.textContent='Supplier ID’s wijzigen';control.title='Wijzig Supplier PID’s in bulk na exacte controle van Product ID, merk en oude Supplier ID';control.onclick=()=>openSupplierBulk(brandId);
     row.append(control);section.append(title,row);toolbox.querySelector('#ddo-edi-panel')?.insertAdjacentElement('afterend',section)||toolbox.append(section);
   }
 
