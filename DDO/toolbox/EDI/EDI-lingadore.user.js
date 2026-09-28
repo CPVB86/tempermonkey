@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Adapter | LingaDore
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.1
+// @version 1.0.5
 // @description LingaDore EDI: modelcheck, product, maten, EAN, foto's en DDO EAN-koppeling.
 // @match https://b2b.lingadore.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -82,7 +82,7 @@ const DDO_EDI = (() => {
 (() => {
   'use strict';
   if (location.hostname !== 'www.dutchdesignersoutlet.com' || window.top !== window.self) return;
-  const ID = 'lingadore', VERSION = '1.0.1';
+  const ID = 'lingadore', VERSION = '1.0.5';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js';
   const $ = (s, root = document) => root.querySelector(s);
   const send = (name, data) => document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`, {detail:JSON.stringify(data)}));
@@ -193,7 +193,7 @@ const DDO_EDI = (() => {
   // ============================================================
 
   const APP = 'DDO Toolbox | LingaDore';
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.5';
   const SUPPLIER = 'LingaDore';
 
   const DDO_BRAND_IDS = [2, 58, 61, 146];
@@ -203,17 +203,12 @@ const DDO_EDI = (() => {
     export: 'Export products'
   };
 
-  const CACHE_PREFIX = 'edi:lingadore:ddo:v1';
+  const CACHE_PREFIX = 'edi:lingadore:ddo:v4';
   const UI_KEY = 'edi:lingadore:ui:v1';
   const CACHE_TTL_MS = 15 * 60 * 1000;
 
   const IMAGE_PREFIX =
     'https://www.dutchdesignersoutlet.com/img/product/';
-
-  const SHEET_PREFERRED = 'Parent';
-  const COL_IMAGE = 1;
-  const COL_PRODUCT_ID = 3;
-  const HEADER_ROW_INDEX = 0;
 
   const state = {
     ddoMap: null,
@@ -244,13 +239,21 @@ const DDO_EDI = (() => {
     );
   }
 
-  function normalizeModel(value) {
-    const s =
-      String(value ?? '')
-        .trim()
-        .toUpperCase();
+  function normalizeCodeText(value) {
+    return String(value ?? '').normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/[\u2010-\u2015\u2212]/g, '-').trim().toUpperCase()
+      .split('-').map(part => part.trim()).join('-');
+  }
 
-    return s || null;
+  function normalizeModel(value) {
+    return normalizeCodeText(value) || null;
+  }
+
+  // Comparison only: do not change supplier request URLs or copied product codes.
+  function modelComparisonKey(value) {
+    return normalizeCodeText(value).split('-').map((part, index) =>
+      index > 0 && /^\d+$/.test(part) ? part.replace(/^0+(?=\d)/, '') : part
+    ).join('-');
   }
 
   function normalizeColor(value) {
@@ -274,22 +277,14 @@ const DDO_EDI = (() => {
   }
 
   function normalizeDDOProductCode(value) {
-    const s =
-      String(value ?? '')
-        .trim()
-        .toUpperCase();
-
-    if (!s) return null;
-
-    const parts = s.split('-');
-
-    return (
-      parts.length >= 2 &&
-      parts[0] &&
-      parts[1]
-    )
-      ? `${parts[0].trim()}-${parts[1].trim()}`
-      : s;
+    const code = normalizeCodeText(value);
+    if (!code) return null;
+    // Preserve the entire model (e.g. 1400-1A) and colour. Only a terminal
+    // cup after a numeric colour is optional: 1400-1A-02-D -> 1400-1A-02.
+    const parts = code.replace(/(-\d+)-[A-Z]{1,3}$/, '$1').split('-');
+    if (parts.length < 2) return code;
+    const color = parts.pop();
+    return `${modelComparisonKey(parts.join('-'))}-${color}`;
   }
 
   function parsePriceText(value) {
@@ -1189,7 +1184,7 @@ const DDO_EDI = (() => {
             id="edi-start-check"
             type="button"
           >
-            Start modelcheck
+            ${isPDP() ? 'Controleer in DDO' : 'Start modelcheck'}
           </button>
 
           <button
@@ -1417,7 +1412,7 @@ const DDO_EDI = (() => {
             0,
             Math.min(
               saved.left,
-              innerWidth - 80
+              innerWidth - panel.offsetWidth
             )
           )}px`;
 
@@ -1426,7 +1421,7 @@ const DDO_EDI = (() => {
             0,
             Math.min(
               saved.top,
-              innerHeight - 38
+              innerHeight - panel.offsetHeight
             )
           )}px`;
 
@@ -1617,135 +1612,46 @@ const DDO_EDI = (() => {
   // PDP
   // ============================================================
 
+  // DDO presence must not depend on the supplier's optional colour dropdown.
+  function getColorOptions() {
+    const colors = new Map();
+    const add = (raw, name = '', ddoOnly = false) => {
+      const color = normalizeColor(raw);
+      if (!color) return;
+      if (colors.has(color)) { if (!colors.get(color).name && name) colors.get(color).name = name.trim(); return; }
+      colors.set(color, {color, optionValue:raw, name:name.trim(), ddoOnly});
+    };
+    for (const option of getColorSelect()?.options || []) if (option.value) add(option.value, option.textContent);
+    for (const row of $$('[data-color-id].item-row, .style_row[data-color-id]')) add(row.dataset.colorId);
+    for (const [color, info] of getSupplierColorMap()) add(color, info.title || info.description || '');
+    return [...colors.values()];
+  }
+
   function renderPDP() {
-
-    const host =
-      $('#edi-pdp');
-
+    const host = $('#edi-pdp');
     if (!host) return;
-
-    if (!isPDP()) {
-
-      host.innerHTML = '';
-
-      return;
+    if (!isPDP()) { host.innerHTML = ''; return; }
+    const select = getColorSelect(), model = getModelNo(), title = getProductTitle();
+    select?.classList.add('edi-original-color-select');
+    const supplierColors = getSupplierColorMap(), options = getColorOptions();
+    const known = state.modelCheckStarted && state.ddoMap;
+    const existing = known ? [...state.ddoMap.keys()].filter(code => code.startsWith(modelComparisonKey(model) + '-')) : [];
+    const rows = [...options];
+    for (const code of existing) {
+      const color = code.slice(modelComparisonKey(model).length + 1);
+      if (!rows.some(item => item.color === color)) rows.push({color, optionValue:'', name:'Alleen in DDO gevonden', ddoOnly:true});
     }
-
-    const select =
-      getColorSelect();
-
-    const model =
-      getModelNo();
-
-    const title =
-      getProductTitle();
-
-    if (
-      !select ||
-      !model
-    ) {
-
-      host.innerHTML = `
-
-        <div class="edi-pdp-meta">
-
-          <strong>
-            ${escapeHTML(
-              model ||
-              'Product'
-            )}
-          </strong>
-
-          <span>
-            ${escapeHTML(title)}
-          </span>
-
-        </div>
-
-        <div class="edi-summary">
-          Wacht op kleurmatrix…
-        </div>
-      `;
-
-      return;
-    }
-
-    select.classList.add(
-      'edi-original-color-select'
-    );
-
-    const supplierColors =
-      getSupplierColorMap();
-
-    const active =
-      normalizeColor(
-        select.value
-      );
-
-    const options =
-      Array.from(
-        select.options
-      )
-        .filter(
-          option =>
-            option.value
-        )
-        .map(
-          option => ({
-            optionValue:
-              option.value,
-
-            color:
-              normalizeColor(
-                option.value
-              ),
-
-            name:
-              option
-                .textContent
-                .trim()
-          })
-        )
-        .filter(
-          item =>
-            item.color
-        );
-
-    host.innerHTML = `
-
-      <div class="edi-pdp-meta">
-
-        <strong>
-          ${escapeHTML(model)}
-        </strong>
-
-        <span>
-          ${escapeHTML(title)}
-        </span>
-
-      </div>
-
-      <div class="edi-colors">
-
-        ${options
-          .map(
-            item =>
-              renderColorRow(
-                item,
-                supplierColors.get(
-                  item.color
-                ),
-                active
-              )
-          )
-          .join('')}
-
-      </div>
-    `;
-
-    bindPDPEvents(
-      select
-    );
+    const matches = options.filter(item => getStatusForCode(buildCode(model,item.color)).match).length;
+    const summary = known
+      ? options.length
+        ? matches + '/' + options.length + ' leverancierskleuren in DDO' + (matches === options.length ? ' · alle kleuren aanwezig' : ' · ' + (options.length - matches) + ' ontbreken')
+        : existing.length + ' producten van dit model in DDO · leverancierskleuren nog niet vastgesteld'
+      : 'Nog niet gecontroleerd in DDO. Klik op Controleer in DDO.';
+    host.innerHTML = '<div class="edi-pdp-meta"><strong>' + escapeHTML(model || 'Product') + '</strong><span>' + escapeHTML(title) + '</span></div>' +
+      '<div class="edi-summary" id="edi-product-presence">' + escapeHTML(summary) + '</div>' +
+      (!options.length ? '<div class="edi-summary">Geen leverancierskleuren herkend. De DDO-controle blijft beschikbaar.</div>' : '') +
+      '<div class="edi-colors">' + rows.map(item => renderColorRow(item,supplierColors.get(item.color),getActiveBaseColor())).join('') + '</div>';
+    bindPDPEvents(select);
   }
 
   function renderColorRow(
@@ -1754,8 +1660,7 @@ const DDO_EDI = (() => {
     active
   ) {
 
-    const isActive =
-      item.color === active;
+    const isActive = !item.ddoOnly && (getColorSelect() ? item.color === active : getColorOptions().some(option => option.color === item.color));
 
     const match =
       getStatusForCode(
@@ -1830,6 +1735,7 @@ const DDO_EDI = (() => {
             type="button"
             class="edi-action"
             data-action="product"
+            ${item.ddoOnly ? 'disabled' : ''}
             title="Productgegevens kopiëren"
           >
             Product
@@ -1863,6 +1769,7 @@ const DDO_EDI = (() => {
             type="button"
             class="edi-action"
             data-action="photos"
+            ${item.ddoOnly ? 'disabled' : ''}
             title="Originele foto's downloaden"
           >
             Foto's
@@ -1895,7 +1802,7 @@ const DDO_EDI = (() => {
             edi-match-miss
           "
         >
-          —
+          × Ontbreekt
         </span>
       `;
     }
@@ -1932,7 +1839,7 @@ const DDO_EDI = (() => {
           )}"
           target="_blank"
           rel="noopener"
-          title="Open DDO"
+          title="${escapeAttr('Aanwezig in DDO: ' + (match.exportCode || id))}"
         >
           ✓ ${escapeHTML(id)}
         </a>
@@ -1960,7 +1867,10 @@ const DDO_EDI = (() => {
                 button.dataset
                   .optionValue;
 
-              if (!value) {
+              if (!value) return;
+              if (!select) {
+                const switcher = $$('.item-colors a.color_switcher[data-color]').find(node => normalizeColor(node.dataset.color) === normalizeColor(value));
+                switcher?.click();
                 return;
               }
 
@@ -2125,7 +2035,7 @@ const DDO_EDI = (() => {
       );
 
     if (
-      !select.dataset
+      select && !select.dataset
         .ediBound
     ) {
 
@@ -2188,7 +2098,7 @@ const DDO_EDI = (() => {
       option
         ?.textContent
         ?.trim() ||
-      '';
+      getColorOptions().find(item => item.color === color)?.name || '';
 
     const baseTitle =
       getProductTitle();
@@ -2286,7 +2196,7 @@ const DDO_EDI = (() => {
       getActiveBaseColor();
 
     if (
-      active !== color
+      getColorSelect() && active !== color
     ) {
       throw new Error(
         `Selecteer eerst kleur ${color}.`
@@ -2407,6 +2317,8 @@ const DDO_EDI = (() => {
         const variantUrl =
           node.dataset
             .variantUrl ||
+
+          node.closest('.sizes-el.cell.size, .cell.size')?.querySelector('[data-variant-url]')?.dataset.variantUrl ||
 
           row.querySelector(
             `[data-size="${
@@ -2818,57 +2730,30 @@ const DDO_EDI = (() => {
     );
   }
 
-  async function fetchEAN(
-    url
-  ) {
-
-    if (!url) {
-      return '';
+  async function fetchEAN(url) {
+    if (!url) return '';
+    const endpoint = new URL(url, location.origin);
+    // The session's CSRF token may only be sent to the supplier's own modal endpoint.
+    if (endpoint.origin !== location.origin || !/^\/(?:[a-z]{2}\/)?catalog\/variant-modal\//.test(endpoint.pathname)) {
+      throw new Error('Ongeldige LingaDore-variantlink');
     }
-
-    if (
-      state.eanCache
-        .has(url)
-    ) {
-      return state
-        .eanCache
-        .get(url);
-    }
-
-    const response =
-      await fetch(
-        url,
-        {
-          credentials:
-            'include',
-
-          headers: {
-            'X-Requested-With':
-              'XMLHttpRequest'
-          }
-        }
-      );
-
-    if (
-      !response.ok
-    ) {
-      throw new Error(
-        `EAN endpoint HTTP ${response.status}`
-      );
-    }
-
-    const html =
-      await response.text();
-
-    const ean = DDO_EDI.parseEAN(html);
-
-    state.eanCache
-      .set(
-        url,
-        ean
-      );
-
-    return ean;
+    const cacheKey = endpoint.href;
+    if (state.eanCache.has(cacheKey)) return state.eanCache.get(cacheKey);
+    const headers = {'X-Requested-With':'XMLHttpRequest', Accept:'text/html, */*; q=0.01'};
+    const csrf = $('meta[name="csrf-token"]')?.content;
+    if (csrf) headers['X-CSRF-TOKEN'] = csrf;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      // Match the native jQuery/axios setup: include both session cookies and CSRF header.
+      const response = await fetch(endpoint.href, {credentials:'include', headers, signal:controller.signal});
+      if (response.status === 401 || response.status === 403 || response.status === 419 || /\/login(?:[/?]|$)/.test(response.url || '')) {
+        throw new Error('LingaDore weigert de EAN-aanvraag (' + response.status + '). Vernieuw de B2B-pagina en controleer of de eigen infoknop werkt.');
+      }
+      if (!response.ok) throw new Error('EAN endpoint HTTP ' + response.status);
+      const ean = DDO_EDI.parseEAN(await response.text());
+      if (ean) state.eanCache.set(cacheKey,ean);
+      return ean;
+    } finally { clearTimeout(timer); }
   }
 
   // ============================================================
@@ -3394,7 +3279,7 @@ const DDO_EDI = (() => {
     ) {
 
       setStatus(
-        'Klik eerst op Start modelcheck.'
+        'Klik eerst op Controleer in DDO / Start modelcheck.'
       );
 
       return;
@@ -3407,22 +3292,7 @@ const DDO_EDI = (() => {
       const model =
         getModelNo();
 
-      const colors =
-        Array.from(
-          getColorSelect()
-            ?.options ||
-          []
-        )
-          .filter(
-            o => o.value
-          )
-          .map(
-            o =>
-              normalizeColor(
-                o.value
-              )
-          )
-          .filter(Boolean);
+      const colors = getColorOptions().map(item => item.color);
 
       const matches =
         colors.filter(
@@ -3497,12 +3367,13 @@ const DDO_EDI = (() => {
 
     const info =
       state.ddoMap.get(
-        code
+        normalizeDDOProductCode(code)
       );
 
     return info
       ? {
           match: true,
+          exportCode: info.exportCode || code,
 
           productId:
             info.productId ||
@@ -3776,7 +3647,7 @@ const DDO_EDI = (() => {
       `Cards ${cards} · ` +
       `compleet ${complete} · ` +
       `deels ${partial} · ` +
-      `geen ${missing} · ` +
+      `ontbreekt ${missing} · ` +
       `kleuren ${variantsMatch}/${variantsTotal}`
     );
   }
@@ -3806,7 +3677,9 @@ const DDO_EDI = (() => {
       'edi-grid-badge';
 
     badge.textContent =
-      `${matches}/${results.length} in DDO`;
+      `${matches}/${results.length} aanwezig in DDO`;
+
+    badge.title = 'Aanwezig / ontbreekt volgens de geladen DDO-merkexports. Opnieuw checken haalt alle vier de exports vers op.';
 
     card.appendChild(
       badge
@@ -3858,7 +3731,7 @@ const DDO_EDI = (() => {
             : `× ${result.color}`;
 
         el.title =
-          `${result.code}${
+          `${result.match ? 'Gevonden: ' : 'Ontbreekt in geladen DDO-export: '}${result.code}${result.exportCode && result.exportCode !== result.code ? ' · Exportcode: ' + result.exportCode : ''}${
             result.colorName
               ? ` · ${result.colorName}`
               : ''
@@ -4115,170 +3988,34 @@ const DDO_EDI = (() => {
     );
   }
 
-  function parseArticleMapFromWorkbook(
-    arrayBuffer
-  ) {
-
+  function parseArticleMapFromWorkbook(arrayBuffer) {
     let workbook;
-
-    try {
-
-      workbook =
-        XLSX.read(
-          arrayBuffer,
-          {
-            type: 'array'
-          }
-        );
-
-    } catch {
-
-      throw new Error(
-        'DDO Excel-export kon niet worden gelezen.'
-      );
-    }
-
-    const sheetNames =
-      workbook.SheetNames ||
-      [];
-
-    const ordered = [
-
-      ...(
-        sheetNames.includes(
-          SHEET_PREFERRED
-        )
-          ? [SHEET_PREFERRED]
-          : []
-      ),
-
-      ...sheetNames.filter(
-        name =>
-          name !==
-          SHEET_PREFERRED
-      )
-    ];
-
-    let best =
-      new Map();
-
-    for (
-      const sheetName
-      of ordered
-    ) {
-
-      const sheet =
-        workbook.Sheets[
-          sheetName
-        ];
-
-      if (!sheet) {
-        continue;
-      }
-
-      const rows =
-        XLSX.utils
-          .sheet_to_json(
-            sheet,
-            {
-              header: 1,
-              raw: false,
-              defval: '',
-              blankrows: false
-            }
-          );
-
-      const map =
-        new Map();
-
-      for (
-        let r =
-          HEADER_ROW_INDEX + 1;
-
-        r < rows.length;
-
-        r++
-      ) {
-
-        const row =
-          Array.isArray(
-            rows[r]
-          )
-            ? rows[r]
-            : [];
-
-        const rawImage =
-          row[
-            COL_IMAGE
-          ];
-
-        const rawProductId =
-          row[
-            COL_PRODUCT_ID
-          ];
-
-        if (
-          rawProductId == null ||
-          rawProductId === ''
-        ) {
-          continue;
-        }
-
-        const code =
-          normalizeDDOProductCode(
-            rawProductId
-          );
-
-        if (!code) {
-          continue;
-        }
-
-        map.set(
-          code,
-          {
-
-            ddoEditId:
-              extractDDOEditIdFromImageField(
-                rawImage
-              ),
-
-            productId:
-              extractProductIdFromImageField(
-                rawImage
-              )
-          }
-        );
-      }
-
-      if (
-        map.size >
-        best.size
-      ) {
-
-        best =
-          map;
-      }
-
-      if (
-        sheetName ===
-          SHEET_PREFERRED &&
-        map.size
-      ) {
-
-        break;
+    try { workbook = XLSX.read(arrayBuffer, {type:'array'}); }
+    catch { throw new Error('DDO Excel-export kon niet worden gelezen.'); }
+    const map = new Map(), headersSeen = [];
+    const headerKey = value => String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[ _-]+/g, '');
+    for (const sheetName of workbook.SheetNames || []) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1,raw:false,defval:'',blankrows:false});
+      if (!rows.length) continue;
+      const headers = rows[0].map(headerKey);
+      // Prefer an explicitly named supplier code; never assume the fourth column.
+      const codeColumn = ['supplierpid','supplierproductid','productid'].map(name => headers.indexOf(name)).find(index => index >= 0);
+      if (codeColumn === undefined) { headersSeen.push(sheetName + ': ' + rows[0].join(', ')); continue; }
+      const imageColumn = ['image','images','imageurl','afbeelding'].map(name => headers.indexOf(name)).find(index => index >= 0);
+      for (const row of rows.slice(1)) {
+        const rawCode = row[codeColumn], code = normalizeDDOProductCode(rawCode);
+        // A numeric internal DDO ID is not a supplier model-colour code.
+        if (!code || !/^.+-[A-Z0-9]+$/.test(code)) continue;
+        const rawImage = imageColumn === undefined ? '' : row[imageColumn];
+        const info = {exportCode:String(rawCode).trim(),ddoEditId:extractDDOEditIdFromImageField(rawImage),productId:extractProductIdFromImageField(rawImage)};
+        const previous = map.get(code);
+        if (!previous || (!previous.productId && info.productId)) map.set(code,info);
       }
     }
-
-    if (
-      !best.size
-    ) {
-
-      throw new Error(
-        'Geen bruikbare Product ID koppelingen in DDO export.'
-      );
-    }
-
-    return best;
+    if (!map.size) throw new Error('Geen herkenbare model-kleurcodes in DDO-export. Controleer Product ID / Supplier PID-kolom.' + (headersSeen.length ? ' Gelezen kolommen: ' + headersSeen.join(' | ') : ''));
+    return map;
   }
 
   function extractDDOEditIdFromImageField(
@@ -4628,6 +4365,13 @@ const DDO_EDI = (() => {
 
     startObserver();
 
+    const cached = readDDOCache();
+    if (isPDP() && cached) {
+      state.ddoMap = new Map(cached);
+      state.modelCheckStarted = true;
+      setStatus('DDO-controle uit recente cache · Opnieuw checken vernieuwt de gegevens.');
+      $('#edi-recheck').disabled = false;
+    }
     renderPDP();
 
     /*
@@ -4645,4 +4389,5 @@ const DDO_EDI = (() => {
   init();
 
 })();
+
 })();
