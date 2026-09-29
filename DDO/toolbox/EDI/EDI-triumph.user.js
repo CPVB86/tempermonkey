@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | Triumph + Sloggi
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.1.5
+// @version 1.1.6
 // @description Triumph/Sloggi EDI: modelcheck, Product, Maten, EAN, foto’s, DDO stock en Stock Check.
 // @match https://b2b.triumph.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -162,7 +162,7 @@ const TRI_API=(()=>{
   const brand=()=>/triumph|sloggi/i.test($('#tabs-1 #select2-brand-container')?.textContent||$('select[name="brand"] option:checked')?.textContent||'');
   const pid=()=>$('input[name="supplier_pid"]')?.value.trim()||'';
   const rows=table=>[...table.querySelectorAll('tbody tr')].flatMap(row=>{const field=$('input.product_option_small',row),ean=$('input[name$="[barcode]"]',row),stock=$('input[name$="[stock]"]',row);return field&&(ean||stock)?[{size:DDO_EDI.normalizeSize(field.value),ean,stock}]:[];});
-  const announce=()=>send('adapter-state',{id:'triumph-sloggi',label:'Triumph/Sloggi',version:'1.1.5',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-triumph.user.js',priority:90,available:brand(),capabilities:['ean','stock','edi']});
+  const announce=()=>send('adapter-state',{id:'triumph-sloggi',label:'Triumph/Sloggi',version:'1.1.6',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-triumph.user.js',priority:90,available:brand(),capabilities:['ean','stock','edi']});
   let busy=false;
   document.addEventListener('ddo-toolbox:discover',announce);
   document.addEventListener('ddo-toolbox:run-adapter',async e=>{
@@ -1391,18 +1391,12 @@ function buildStatusMapFromTriumphGrid(productsJson, wantedColorCode) {
     for(const title of $$('.product-card__second-title')){
       const card=title.closest('.product-card')||title.parentElement,pid=code(title.textContent),model=pid?.split('-')[0]||clean(title.textContent).match(/\b\d{6,10}\b/)?.[0];if(!model){unresolvedCards++;continue;}
       const variants=new Set(pid?[pid]:[]);
-      for(const swatch of $$('button.product-swatch',card)){
-        const label=clean($('.product-swatch__label',swatch)?.textContent),color=label.match(/^([A-Z0-9]{2,6})(?:\s|$)/i)?.[1];
-        if(color)variants.add(`${model}-${color.toUpperCase()}`);
-      }
-      for(const row of $$('.product-row__id',card)){const variant=code(row.textContent);if(variant?.startsWith(model+'-'))variants.add(variant);}
-      for(const link of $$('a[href]',card)){const match=new URL(link.href,location.origin).pathname.match(/^\/products\/[^/]+\/(\d{6,10})\/([A-Z0-9]{2,6})(?:\/|$)/i);if(match&&match[1]===model)variants.add(`${model}-${match[2].toUpperCase()}`);}
       for(const variant of variants)catalogVariants.add(variant);
       if(!variants.size)unresolvedCards++;
       let badge=$('.edi-tri-card',card);if(!state.map){badge?.remove();continue;}
       if(!badge){badge=document.createElement('div');badge.className='edi-tri-card';card.append(badge);}
       const complete=variants.size>0&&[...variants].every(variant=>state.map.has(variant));
-      badge.textContent=complete?'✓ Compleet — Alle kleuren in DDO':'× Niet Compleet — Niet alle kleuren in DDO';
+      badge.textContent=complete?'✓ Compleet':'× Niet Compleet';
       badge.removeAttribute('title');
       Object.assign(badge.style,{color:complete?'#18864b':'#c83939',fontWeight:'600',pointerEvents:'none',cursor:'default'});
 
@@ -1410,7 +1404,7 @@ function buildStatusMapFromTriumphGrid(productsJson, wantedColorCode) {
     const summary=$('#tri-catalog-summary');summary.hidden=!$$('.product-card__second-title').length;
     if(!summary.hidden){
       const matched=[...catalogVariants].filter(pid=>state.map?.has(pid)).length,complete=state.map&&catalogVariants.size>0&&!unresolvedCards&&matched===catalogVariants.size;
-      summary.textContent=state.map?(complete?'✓ Compleet — Alle kleuren in DDO':'× Niet Compleet — Niet alle kleuren in DDO'):'Catalogus nog niet gecontroleerd in DDO.';
+      summary.textContent=state.map?(complete?'✓ Compleet — Alle getoonde artikelen in DDO':'× Niet Compleet — Niet alle getoonde artikelen in DDO'):'Catalogus nog niet gecontroleerd in DDO.';
       summary.style.color=state.map?(complete?'#18864b':'#c83939'):'';
       summary.removeAttribute('title');
     }
@@ -1419,7 +1413,7 @@ function buildStatusMapFromTriumphGrid(productsJson, wantedColorCode) {
   function init(){
     if($('#edi-triumph'))return;
     const style=document.createElement('style');style.textContent=`#edi-triumph,#edi-triumph :where(*){all:revert;box-sizing:border-box}#edi-triumph :where(*){font:inherit;color:inherit;text-transform:none;letter-spacing:normal}#edi-triumph{position:fixed;top:18px;right:18px;width:430px;max-width:calc(100vw - 24px);z-index:2147483000;overflow:hidden}#edi-triumph .edi-head{display:flex;align-items:center;cursor:move}#edi-triumph button{width:auto!important;min-width:0!important;max-width:100%;margin:0!important;cursor:pointer}#edi-triumph.edi-minimized .edi-body{display:none}#edi-triumph.edi-minimized{width:220px}#edi-triumph .edi-body{overflow-x:hidden}`+DDO_EDI.theme.replaceAll('#edi-lingadore','#edi-triumph')+DDO_EDI.layout.replaceAll('#edi-lingadore','#edi-triumph');document.head.append(style);
-    const panel=document.createElement('section');panel.id='edi-triumph';panel.innerHTML=`<div class="edi-head"><div class="edi-title">Toolbox · Triumph / Sloggi<span class="edi-version">v1.1.5</span></div><button class="edi-icon-btn" id="tri-collapse" aria-label="Inklappen">−</button></div><div class="edi-body"><details class="edi-module" id="tri-edi" open><summary>EDI-module</summary><div class="edi-toolbar"><button class="edi-btn" id="tri-check">Controleer in DDO</button><button class="edi-btn" id="tri-refresh" disabled>Opnieuw checken</button><button class="edi-btn edi-danger" id="tri-reset">Reset</button></div><div class="edi-status" id="tri-status" role="status">Modelcheck wacht op startsignaal.</div><div id="tri-catalog-summary" class="edi-summary" hidden></div><div id="tri-colors"></div></details><details class="edi-module" id="tri-order"><summary>Ordermodule</summary><p class="edi-module-note">Ordermodule niet van toepassing op deze leverancier.</p></details></div>`;document.body.append(panel);
+    const panel=document.createElement('section');panel.id='edi-triumph';panel.innerHTML=`<div class="edi-head"><div class="edi-title">Toolbox · Triumph / Sloggi<span class="edi-version">v1.1.6</span></div><button class="edi-icon-btn" id="tri-collapse" aria-label="Inklappen">−</button></div><div class="edi-body"><details class="edi-module" id="tri-edi" open><summary>EDI-module</summary><div class="edi-toolbar"><button class="edi-btn" id="tri-check">Controleer in DDO</button><button class="edi-btn" id="tri-refresh" disabled>Opnieuw checken</button><button class="edi-btn edi-danger" id="tri-reset">Reset</button></div><div class="edi-status" id="tri-status" role="status">Modelcheck wacht op startsignaal.</div><div id="tri-catalog-summary" class="edi-summary" hidden></div><div id="tri-colors"></div></details><details class="edi-module" id="tri-order"><summary>Ordermodule</summary><p class="edi-module-note">Ordermodule niet van toepassing op deze leverancier.</p></details></div>`;document.body.append(panel);
     const cart=isCart();$('#tri-edi').hidden=cart;$('#tri-order').hidden=!cart;$('#tri-order').open=cart;
     const save=()=>{try{localStorage.setItem('edi:triumph:ui',JSON.stringify({left:panel.offsetLeft,top:panel.offsetTop,min:panel.classList.contains('edi-minimized')}));}catch{}};
     const clamp=()=>{if(panel.style.left)panel.style.left=Math.max(0,Math.min(panel.offsetLeft,innerWidth-panel.offsetWidth))+'px';panel.style.top=Math.max(0,Math.min(panel.offsetTop,innerHeight-panel.offsetHeight))+'px';};
