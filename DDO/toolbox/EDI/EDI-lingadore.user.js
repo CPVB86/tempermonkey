@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name DDO Toolbox | Adapter | LingaDore
+// @name DDO Toolbox | EDI | LingaDore
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.5
+// @version 1.0.7
 // @description LingaDore EDI: modelcheck, product, maten, EAN, foto's en DDO EAN-koppeling.
 // @match https://b2b.lingadore.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -62,6 +62,7 @@ const DDO_EDI = (() => {
   const sizesClipboard = (source, supplierId, sizes) => JSON.stringify({source, orderId:false, supplierId, sizes:[...new Set(sizes.map(normalizeSize))]}, null, 2);
   const theme = `
     #edi-lingadore{background:#fff;color:#25313b;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0002;font:12px/1.25 system-ui}
+    #edi-lingadore [hidden]{display:none!important}
     #edi-lingadore .edi-head{min-height:28px;padding:0 8px;background:#263746;color:#fff;border:0;touch-action:none}
     #edi-lingadore .edi-version{font-size:9px;color:#fff}
     #edi-lingadore .edi-icon-btn{color:#fff;border-radius:4px}
@@ -75,14 +76,43 @@ const DDO_EDI = (() => {
     #edi-lingadore .edi-match-miss{color:#c83939}
     #edi-lingadore .edi-body{max-height:calc(100vh - 65px);overflow:auto}
   `;
-  return {normalizeSize, sizeCandidates, parseEAN, variantMap, eanTSV, productClipboard, sizesClipboard, theme};
+  const isCartPage = () => /(?:^|\/)(?:cart|basket|winkelwagentje|winkelwagen|shopping-cart|shopping-basket)(?:\/|$)/i.test(location.pathname);
+  // One supplier-panel layout, based on LingaDore. Applied after supplier CSS.
+  const layout = `
+    #edi-lingadore [hidden]{display:none!important}
+    #edi-lingadore .edi-head{min-height:28px;padding:0 8px;gap:8px}
+    #edi-lingadore .edi-title{display:flex;align-items:center;gap:8px;font-weight:700;flex:1;min-width:0}
+    #edi-lingadore .edi-version{font-size:9px;font-weight:400;flex:none}
+    #edi-lingadore .edi-icon-btn{width:26px!important;min-height:26px;padding:0;font:14px/26px system-ui;background:transparent;border:0;flex:none}
+    #edi-lingadore .edi-body{padding:10px}
+    #edi-lingadore .edi-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+    #edi-lingadore .edi-status{min-height:24px;padding:5px 7px;margin-bottom:8px;font-size:10px}
+    #edi-lingadore .edi-pdp-meta{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;font-size:12px;font-weight:400;color:#5f6368}
+    #edi-lingadore .edi-pdp-meta strong{color:#202124;font-weight:400}
+    #edi-lingadore .edi-summary{color:#5f6368;font-size:11px;margin:-2px 0 8px}
+    #edi-lingadore .edi-colors{display:flex;flex-direction:column;gap:4px}
+    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid transparent;border-radius:7px}
+    #edi-lingadore .edi-color-row.edi-active{background:#f8f9fa;border-color:#e3e6e8}
+    #edi-lingadore .edi-color-main{display:flex;flex-direction:row;align-items:center;flex-wrap:nowrap;min-width:0;gap:7px;font-size:11px}
+    #edi-lingadore .edi-color-select{display:flex;align-items:center;gap:7px;min-width:0;padding:2px 0;border:0;background:transparent;text-align:left;color:#202124}
+    #edi-lingadore .edi-swatch{width:17px;height:17px;flex:0 0 17px;border-radius:50%;border:1px solid #0003;background:#e5e7eb}
+    #edi-lingadore .edi-color-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
+    #edi-lingadore .edi-match{margin-left:auto;font-size:10px;white-space:nowrap;flex:none}
+    #edi-lingadore .edi-match a{color:inherit;text-decoration:none}
+    #edi-lingadore .edi-actions{display:flex;gap:3px;flex-wrap:nowrap}
+    #edi-lingadore details.edi-module{border:0;margin:0;padding:0}
+    #edi-lingadore details.edi-module+details.edi-module{border-top:1px solid #dfe5e9;margin-top:8px;padding-top:8px}
+    #edi-lingadore .edi-module>summary{cursor:pointer;font-size:12px;font-weight:600;margin:0 0 8px;padding:0}
+    #edi-lingadore .edi-module-note{font-size:11px;line-height:1.4;margin:0;color:#5f6368}
+  `;
+  return {normalizeSize, sizeCandidates, parseEAN, variantMap, eanTSV, productClipboard, sizesClipboard, theme, layout, isCartPage};
 })();
 
 // END SHARED EDI
 (() => {
   'use strict';
   if (location.hostname !== 'www.dutchdesignersoutlet.com' || window.top !== window.self) return;
-  const ID = 'lingadore', VERSION = '1.0.5';
+  const ID = 'lingadore', VERSION = '1.0.7';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js';
   const $ = (s, root = document) => root.querySelector(s);
   const send = (name, data) => document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`, {detail:JSON.stringify(data)}));
@@ -193,7 +223,7 @@ const DDO_EDI = (() => {
   // ============================================================
 
   const APP = 'DDO Toolbox | LingaDore';
-  const VERSION = '1.0.5';
+  const VERSION = '1.0.7';
   const SUPPLIER = 'LingaDore';
 
   const DDO_BRAND_IDS = [2, 58, 61, 146];
@@ -1127,7 +1157,7 @@ const DDO_EDI = (() => {
 
     `;
 
-    style.textContent += DDO_EDI.theme;
+    style.textContent += DDO_EDI.theme + DDO_EDI.layout;
 
     document.head
       .appendChild(style);
@@ -1175,7 +1205,7 @@ const DDO_EDI = (() => {
 
       </div>
 
-      <div class="edi-body">
+      <div class="edi-body"><details class="edi-module" id="edi-module" open><summary>EDI-module</summary>
 
         <div class="edi-toolbar">
 
@@ -1218,7 +1248,7 @@ const DDO_EDI = (() => {
           id="edi-summary"
         ></div>
 
-        <div id="edi-pdp"></div>
+        <div id="edi-pdp"></div></details><details class="edi-module" id="edi-order-module"><summary>Ordermodule</summary><p class="edi-module-note">Ordermodule niet van toepassing op deze leverancier.</p></details>
 
       </div>
     `;
@@ -1285,7 +1315,7 @@ const DDO_EDI = (() => {
       ?.addEventListener(
         'click',
         () =>
-          recheckCurrentPage()
+          startModelCheck(true)
       );
 
     $('#edi-reset')
@@ -3207,6 +3237,7 @@ const DDO_EDI = (() => {
     forceRefresh = false
   ) {
 
+    if(DDO_EDI.isCartPage())return;
     if (
       state.loading
     ) {
@@ -3814,15 +3845,16 @@ const DDO_EDI = (() => {
       }
     }
 
+    let complete = 0;
+    let fetching = true;
+    setStatus(`DDO-exports ophalen: 0/${DDO_BRAND_IDS.length}`);
     const maps =
       await Promise.all(
 
         DDO_BRAND_IDS.map(
           async brandId => {
 
-            setStatus(
-              `DDO export merk ${brandId} ophalen…`
-            );
+
 
             const buffer =
               await fetchExport(
@@ -3832,15 +3864,14 @@ const DDO_EDI = (() => {
                 EXPORT_PAYLOAD
               );
 
-            return (
-              parseArticleMapFromWorkbook(
-                buffer
-              )
-            );
+            const parsed = parseArticleMapFromWorkbook(buffer);
+            if(fetching)setStatus(`DDO-exports opgehaald: ${++complete}/${DDO_BRAND_IDS.length} · merk ${brandId}`);
+            return parsed;
           }
         )
-      );
+      ).catch(error=>{fetching=false;throw error;});
 
+    fetching = false;
     const merged =
       new Map();
 
@@ -4363,6 +4394,12 @@ const DDO_EDI = (() => {
 
     createPanel();
 
+    const cart=DDO_EDI.isCartPage();
+    $('#edi-module').hidden=cart;
+    $('#edi-module').open=!cart;
+    $('#edi-order-module').hidden=!cart;
+    $('#edi-order-module').open=cart;
+    if(cart)return;
     startObserver();
 
     const cached = readDDOCache();
