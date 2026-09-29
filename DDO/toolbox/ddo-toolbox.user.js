@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Core
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 3.7.1
+// @version 3.7.2
 // @description Statische toolbox met los installeerbare leverancieradapters.
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
@@ -87,7 +87,7 @@ const DDO_EDI = (() => {
     #edi-lingadore .edi-pdp-meta strong{color:#202124;font-weight:400}
     #edi-lingadore .edi-summary{color:#5f6368;font-size:11px;margin:-2px 0 8px}
     #edi-lingadore .edi-colors{display:flex;flex-direction:column;gap:4px}
-    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid transparent;border-radius:7px}
+    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid #e3e6e8;border-radius:7px;background:#f8f9fa}
     #edi-lingadore .edi-color-row.edi-active{background:#f8f9fa;border-color:#e3e6e8}
     #edi-lingadore .edi-color-main{display:flex;flex-direction:row;align-items:center;flex-wrap:nowrap;min-width:0;gap:7px;font-size:11px}
     #edi-lingadore .edi-color-select{display:flex;align-items:center;gap:7px;min-width:0;padding:2px 0;border:0;background:transparent;text-align:left;color:#202124}
@@ -105,7 +105,7 @@ const DDO_EDI = (() => {
 })();
 
 // END SHARED EDI
-  const VERSION='3.7.1', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
+  const VERSION='3.7.2', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
@@ -131,7 +131,8 @@ const DDO_EDI = (() => {
     fluentL:{label:'FluentL',description:'Vertaal product- en paginavelden naar geselecteerde talen.',manager:true,picker:true,icon:'translate',action:true,adapter:true,file:'ddo-adapter-fluentl.user.js'},
     faqSelector:{label:'FAQ Selector',description:'Zoek en selecteer relevante FAQ’s voor de pagina.',manager:true,picker:true,icon:'help',action:true,adapter:true,file:'ddo-adapter-faq-selector.user.js'},
     ggQueue:{label:'GG Queue',description:'Bouw een GoedGepickt-queue op uit selecties of Product ID’s.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'},
-    productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
+    productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'},
+    changeModel:{label:'Change Model',description:'Wijzig merk en model van geselecteerde producten gecontroleerd in bulk.',manager:false,picker:false,icon:'tune',action:true,adapter:true,file:'ddo-adapter-change-model.user.js'}
   };
   const ADAPTER_CATALOG=[
     {id:'after-eden',label:'After Eden / Elbrina',folder:'EDI',file:'EDI-after-eden.user.js'},
@@ -144,6 +145,7 @@ const DDO_EDI = (() => {
     {id:'mey',label:'Mey',file:'ddo-adapter-mey.user.js'},
     {id:'seoWriter',label:'SEO Writer',file:'ddo-adapter-seo-writer.user.js'},
     {id:'productValidator',label:'Product Validator',file:'ddo-adapter-product-validator.user.js'},
+    {id:'changeModel',label:'Change Model',file:'ddo-adapter-change-model.user.js'},
     {id:'triumph-sloggi',label:'Triumph/Sloggi',folder:'EDI',file:'EDI-triumph.user.js'},
     {id:'wacoal-group',label:'Wacoal',file:'ddo-adapter-wacoal.user.js'}
   ].map(item=>({...item,updateUrl:`https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/${item.folder||'adapters'}/${item.file}`}));
