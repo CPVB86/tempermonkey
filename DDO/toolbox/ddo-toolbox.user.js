@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Core
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 3.6.3
+// @version 3.7.1
 // @description Statische toolbox met los installeerbare leverancieradapters.
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
@@ -58,6 +58,7 @@ const DDO_EDI = (() => {
   const sizesClipboard = (source, supplierId, sizes) => JSON.stringify({source, orderId:false, supplierId, sizes:[...new Set(sizes.map(normalizeSize))]}, null, 2);
   const theme = `
     #edi-lingadore{background:#fff;color:#25313b;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0002;font:12px/1.25 system-ui}
+    #edi-lingadore [hidden]{display:none!important}
     #edi-lingadore .edi-head{min-height:28px;padding:0 8px;background:#263746;color:#fff;border:0;touch-action:none}
     #edi-lingadore .edi-version{font-size:9px;color:#fff}
     #edi-lingadore .edi-icon-btn{color:#fff;border-radius:4px}
@@ -71,11 +72,40 @@ const DDO_EDI = (() => {
     #edi-lingadore .edi-match-miss{color:#c83939}
     #edi-lingadore .edi-body{max-height:calc(100vh - 65px);overflow:auto}
   `;
-  return {normalizeSize, sizeCandidates, parseEAN, variantMap, eanTSV, productClipboard, sizesClipboard, theme};
+  const isCartPage = () => /(?:^|\/)(?:cart|basket|winkelwagentje|winkelwagen|shopping-?cart|shopping-?basket)(?:\/|$)/i.test(location.pathname);
+  // One supplier-panel layout, based on LingaDore. Applied after supplier CSS.
+  const layout = `
+    #edi-lingadore [hidden]{display:none!important}
+    #edi-lingadore .edi-head{min-height:28px;padding:0 8px;gap:8px}
+    #edi-lingadore .edi-title{display:flex;align-items:center;gap:8px;font-weight:700;flex:1;min-width:0}
+    #edi-lingadore .edi-version{font-size:9px;font-weight:400;flex:none}
+    #edi-lingadore .edi-icon-btn{width:26px!important;min-height:26px;padding:0;font:14px/26px system-ui;background:transparent;border:0;flex:none}
+    #edi-lingadore .edi-body{padding:10px}
+    #edi-lingadore .edi-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+    #edi-lingadore .edi-status{min-height:24px;padding:5px 7px;margin-bottom:8px;font-size:10px}
+    #edi-lingadore .edi-pdp-meta{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;font-size:12px;font-weight:400;color:#5f6368}
+    #edi-lingadore .edi-pdp-meta strong{color:#202124;font-weight:400}
+    #edi-lingadore .edi-summary{color:#5f6368;font-size:11px;margin:-2px 0 8px}
+    #edi-lingadore .edi-colors{display:flex;flex-direction:column;gap:4px}
+    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid transparent;border-radius:7px}
+    #edi-lingadore .edi-color-row.edi-active{background:#f8f9fa;border-color:#e3e6e8}
+    #edi-lingadore .edi-color-main{display:flex;flex-direction:row;align-items:center;flex-wrap:nowrap;min-width:0;gap:7px;font-size:11px}
+    #edi-lingadore .edi-color-select{display:flex;align-items:center;gap:7px;min-width:0;padding:2px 0;border:0;background:transparent;text-align:left;color:#202124}
+    #edi-lingadore .edi-swatch{width:17px;height:17px;flex:0 0 17px;border-radius:50%;border:1px solid #0003;background:#e5e7eb}
+    #edi-lingadore .edi-color-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
+    #edi-lingadore .edi-match{margin-left:auto;font-size:10px;white-space:nowrap;flex:none}
+    #edi-lingadore .edi-match a{color:inherit;text-decoration:none}
+    #edi-lingadore .edi-actions{display:flex;gap:3px;flex-wrap:nowrap}
+    #edi-lingadore details.edi-module{border:0;margin:0;padding:0}
+    #edi-lingadore details.edi-module+details.edi-module{border-top:1px solid #dfe5e9;margin-top:8px;padding-top:8px}
+    #edi-lingadore .edi-module>summary{cursor:pointer;font-size:12px;font-weight:600;margin:0 0 8px;padding:0}
+    #edi-lingadore .edi-module-note{font-size:11px;line-height:1.4;margin:0;color:#5f6368}
+  `;
+  return {normalizeSize, sizeCandidates, parseEAN, variantMap, eanTSV, productClipboard, sizesClipboard, theme, layout, isCartPage};
 })();
 
 // END SHARED EDI
-  const VERSION='3.6.3', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
+  const VERSION='3.7.1', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
@@ -104,6 +134,7 @@ const DDO_EDI = (() => {
     productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
   };
   const ADAPTER_CATALOG=[
+    {id:'after-eden',label:'After Eden / Elbrina',folder:'EDI',file:'EDI-after-eden.user.js'},
     {id:'anita',label:'Anita/Rosa Faia',file:'ddo-adapter-anita.user.js'},
     {id:'faqSelector',label:'FAQ Selector',file:'ddo-adapter-faq-selector.user.js'},
     {id:'fluentL',label:'FluentL',file:'ddo-adapter-fluentl.user.js'},
@@ -113,7 +144,7 @@ const DDO_EDI = (() => {
     {id:'mey',label:'Mey',file:'ddo-adapter-mey.user.js'},
     {id:'seoWriter',label:'SEO Writer',file:'ddo-adapter-seo-writer.user.js'},
     {id:'productValidator',label:'Product Validator',file:'ddo-adapter-product-validator.user.js'},
-    {id:'triumph-sloggi',label:'Triumph/Sloggi',file:'ddo-adapter-triumph.user.js'},
+    {id:'triumph-sloggi',label:'Triumph/Sloggi',folder:'EDI',file:'EDI-triumph.user.js'},
     {id:'wacoal-group',label:'Wacoal',file:'ddo-adapter-wacoal.user.js'}
   ].map(item=>({...item,updateUrl:`https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/${item.folder||'adapters'}/${item.file}`}));
   const EDI_ACTIONS={scraper:{label:'Stock & EAN Scraper',manager:true,picker:true},autopaster:{label:'Stock & EAN Manueel',manager:true,picker:true},stockfixer:{label:'Zero Stock Fixer',manager:true,picker:true},importer:{label:'Product Verrijken',manager:true,picker:true},prune:{label:'Prune',manager:true,picker:true}};
@@ -306,9 +337,9 @@ const DDO_EDI = (() => {
     const box=document.createElement('section');box.id='ddo-toolbox';box.setAttribute('role','region');box.setAttribute('aria-label','DDO Toolbox');
     const tiles=Object.entries(FEATURES).map(([id,feature])=>`<button type="button" class="ddo-feature" data-feature="${id}" disabled><span class="ddo-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[feature.icon]||ICONS.product}</svg></span><span class="ddo-tile-label">${feature.label}</span><span class="ddo-tile-status"></span></button>`).join('');
     const edi=Object.entries(EDI_ACTIONS).map(([id,feature])=>`<div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-edi-action="${id}">${feature.label}</button><small class="ddo-edi-status">Controleren…</small></div>`).join('');
-    box.innerHTML=`<header><span>DDO Toolbox</span><span class="ddo-header-controls"><span class="ddo-version">v${VERSION}</span><button type="button" class="ddo-collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="ddo-user"><div id="ddo-user-name"></div><div id="ddo-user-role" class="ddo-role"></div></div><div class="ddo-grid">${tiles}</div><section id="ddo-edi-panel" class="ddo-edi-panel"><div class="ddo-edi-title">EDI</div>${edi}</section><section id="ddo-color-panel" class="ddo-module-panel" hidden><div class="ddo-edi-title">Kleurbeheer</div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="add">Nieuwe kleuren toevoegen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="change">Productkleuren wijzigen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="titlecheck">Kleur-titels aanvullen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="copy-all">Alle kleuren kopiëren</button></div></section><footer><button id="ddo-update">Updates</button><span id="ddo-update-state">Niet gecontroleerd</span></footer>`;
+    box.innerHTML=`<header><span>DDO Toolbox</span><span class="ddo-header-controls"><span class="ddo-version">v${VERSION}</span><button type="button" class="ddo-collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="ddo-user"><div id="ddo-user-name"></div><div id="ddo-user-role" class="ddo-role"></div></div><div class="ddo-grid">${tiles}</div><section id="ddo-edi-panel" class="ddo-edi-panel"><div class="ddo-edi-title">EDI</div>${edi}</section><section id="ddo-color-panel" class="ddo-module-panel" hidden><div class="ddo-edi-title">Kleurbeheer</div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="add">Nieuwe kleuren toevoegen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="change">Productkleuren wijzigen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="titlecheck">Kleur-titels aanvullen</button></div></section><footer><button id="ddo-update">Updates</button><span id="ddo-update-state">Niet gecontroleerd</span></footer>`;
     document.body.appendChild(box);
-    $('[data-edi-action="scraper"]').onclick=()=>runAdapter(false,true);$('[data-edi-action="autopaster"]').onclick=()=>autopaste();$('[data-edi-action="stockfixer"]').onclick=()=>fix(false);$('[data-edi-action="importer"]').onclick=()=>productImport(false);$('[data-edi-action="prune"]').onclick=pruneCurrentProduct;$('[data-feature="sizeChart"]').onclick=injectSizeChart;$('[data-color-action="add"]').onclick=()=>send('color-management',{mode:'add'});$('[data-color-action="change"]').onclick=()=>send('color-management',{mode:'change'});$('[data-color-action="titlecheck"]').onclick=()=>send('color-management',{mode:'titlecheck'});$('[data-color-action="copy-all"]').onclick=()=>send('color-management',{mode:'copy-all'});Object.entries(FEATURES).filter(([,feature])=>feature.adapter).forEach(([id])=>{$(`[data-feature="${id}"]`).onclick=()=>{if(enabled(id)&&adapters.get(id)?.ready)send('run-feature',{id})}});$('#ddo-update').onclick=updates;
+    $('[data-edi-action="scraper"]').onclick=()=>runAdapter(false,true);$('[data-edi-action="autopaster"]').onclick=()=>autopaste();$('[data-edi-action="stockfixer"]').onclick=()=>fix(false);$('[data-edi-action="importer"]').onclick=()=>productImport(false);$('[data-edi-action="prune"]').onclick=pruneCurrentProduct;$('[data-feature="sizeChart"]').onclick=injectSizeChart;$('[data-color-action="add"]').onclick=()=>send('color-management',{mode:'add'});$('[data-color-action="change"]').onclick=()=>send('color-management',{mode:'change'});$('[data-color-action="titlecheck"]').onclick=()=>send('color-management',{mode:'titlecheck'});Object.entries(FEATURES).filter(([,feature])=>feature.adapter).forEach(([id])=>{$(`[data-feature="${id}"]`).onclick=()=>{if(enabled(id)&&adapters.get(id)?.ready)send('run-feature',{id})}});$('#ddo-update').onclick=updates;
     const collapse=$('.ddo-collapse',box),renderCollapse=collapsed=>{box.classList.toggle('ddo-collapsed',collapsed);collapse.setAttribute('aria-expanded',String(!collapsed));collapse.title=collapsed?'Maximaliseren':'Minimaliseren';collapse.setAttribute('aria-label',collapsed?'Toolbox maximaliseren':'Toolbox minimaliseren');collapse.innerHTML=`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${collapsed?'<rect x="3" y="3" width="10" height="10" rx="1"/>':'<path d="M3 11h10"/>'}</svg>`;positionTab3Actions()};let collapsed=false;try{collapsed=localStorage.getItem('ddoToolboxCollapsed')==='true'}catch{}renderCollapse(collapsed);collapse.onclick=()=>{collapsed=!collapsed;try{localStorage.setItem('ddoToolboxCollapsed',String(collapsed))}catch{}renderCollapse(collapsed)};
     drag(box,$('header',box));try{const position=JSON.parse(localStorage.getItem('ddoToolboxPosition'));if(position){box.style.left=`${position.left}px`;box.style.top=`${position.top}px`;box.style.right='auto'}}catch{}
   }
@@ -352,7 +383,7 @@ const DDO_EDI = (() => {
     if(rows.length<2)throw Error('Plak kolomkoppen en minstens één gegevensregel.');const heads=rows.shift().map(norm);if(new Set(heads).size!==heads.length)throw Error('Dubbele kolomkoppen.');return rows.map((r,i)=>{if(r.length!==heads.length)throw Error(`Regel ${i+2}: aantal kolommen wijkt af.`);return Object.fromEntries(heads.map((h,j)=>[h,r[j].trim()]));});
   };
   const TRANSLATE_HEADERS=['color id','kleurnaam','kleurfamilie','en','de','fr'];
-  if(typeof module!=='undefined'&&module.exports){module.exports={parse,norm,prepare,translationTarget,translationForm,colorClipboardRows,colorClipboardText,tsvMatrix,mergeColorDatabase};return;}
+  if(typeof module!=='undefined'&&module.exports){module.exports={parse,norm,prepare,translationTarget,translationForm};return;}
   if(new URL(location.href).searchParams.get('section')!=='products')return;
   const host=document.querySelector('#tabs-7');
   if(!host||!document.querySelector('#product_coloradd_dialog form'))return;
@@ -360,7 +391,7 @@ const DDO_EDI = (() => {
   let opened=false;
   const renameTitleButton=()=>{const oldTitleButton=document.querySelector('[data-color-action="titlecheck"]');if(oldTitleButton){oldTitleButton.textContent='Kleuren Vertalen';oldTitleButton.dataset.colorAction='translate';oldTitleButton.onclick=()=>openTranslate();}};
   renameTitleButton();if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',renameTitleButton,{once:true});
-  document.addEventListener('ddo-toolbox:color-management',event=>{let data={};try{data=JSON.parse(event.detail||'{}')}catch{}if(['add','change'].includes(data.mode))open(data.mode);else if(data.mode==='translate')openTranslate();else if(data.mode==='copy-all')copyAllColors();});
+  document.addEventListener('ddo-toolbox:color-management',event=>{let data={};try{data=JSON.parse(event.detail||'{}')}catch{}if(['add','change'].includes(data.mode))open(data.mode);else if(data.mode==='translate')openTranslate();});
   async function get(value){const u=url(value);const response=await fetch(u,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error(`Ophalen mislukt: HTTP ${response.status}`);url(response.url);const doc=new DOMParser().parseFromString(await response.text(),'text/html');if(doc.querySelector('input[type=password]'))throw Error('Inlogsessie verlopen.');return doc;}
   const titleStyle=document.createElement('style');titleStyle.textContent='tr.ddo-title-missing>td{background:#ffd6d6!important}tr.ddo-title-missing>td:first-child{box-shadow:inset 5px 0 0 #c62828}tr.ddo-title-error>td{background:#fff3cd!important}tr.ddo-title-error>td:first-child{box-shadow:inset 5px 0 0 #e0a800}.ddo-title-warning,.ddo-title-request-error{display:inline-block;margin-left:8px;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:700}.ddo-title-warning{background:#c62828;color:#fff}.ddo-title-request-error{background:#e0a800;color:#222}';document.head.appendChild(titleStyle);
   function colorTitleRows(){const results=[],seen=new Set();for(const row of host.querySelectorAll('tr')){let id='',href='';const link=row.querySelector('a[href*="action=coloredit"][href*="id="]');if(link){const parsed=new URL(link.href,location.href);id=parsed.searchParams.get('id')||'';href=parsed.href}if(!id){const match=(row.getAttribute('onmousedown')||'').match(/action=coloredit(?:&|&amp;)id=(\d+)/i);if(match){id=match[1];href=`${location.origin}/admin.php?section=products&action=coloredit&id=${id}`}}if(id&&href&&!seen.has(id)){seen.add(id);results.push({row,id,href})}}return results}
@@ -369,82 +400,6 @@ const DDO_EDI = (() => {
   function colorEditForm(doc,item){const form=[...doc.querySelectorAll('form')].find(candidate=>candidate.querySelector('input[name="coloredit"]'));if(!form)throw Error('Kleurbewerkingsformulier ontbreekt.');const action=url(form.getAttribute('action')||item.href),id=form.querySelector('input[name="id"]')?.value?.trim();if(action.searchParams.get('action')!=='coloredit'||action.searchParams.get('id')!==item.id||id!==item.id)throw Error('Kleur-ID of formulieractie komt niet overeen.');if(form.method.toLowerCase()!=='post')throw Error('Onverwachte formuliermethode.');const name=form.querySelector('input[name="name"]')?.value?.trim(),title=form.querySelector('input[name="title"]');if(!name||!title)throw Error('Name- of Title-veld ontbreekt.');return {form,name,title:title.value.trim()}}
   async function saveColorTitle(item,form,name){await post(form,{id:item.id,title:name,coloredit:'Edit color'},'coloredit');const verified=colorEditForm(await get(item.href),item);if(verified.title!==name)throw Error('Titelwijziging niet bevestigd; controleer CMS.');}
   async function runTitleCheck(){const control=document.querySelector('[data-color-action="titlecheck"]');if(!control||control.disabled)return;clearTitleResults();const rows=colorTitleRows();if(!rows.length){control.textContent='Geen kleurregels gevonden';setTimeout(()=>control.textContent='Kleur-titels aanvullen',3000);return}control.disabled=true;let ok=0,filled=0,errors=0,stopped=false;const execute=async()=>{for(let i=0;i<rows.length;i++){const item=rows[i];control.textContent=`Verwerken ${i+1}/${rows.length}`;try{const edit=colorEditForm(await get(item.href),item);if(edit.title)ok++;else{await saveColorTitle(item,edit.form,edit.name);filled++;}}catch(error){errors++;stopped=true;item.row.classList.add('ddo-title-error');titleBadge(item.row,'AANVULLEN MISLUKT','ddo-title-request-error');console.error(`[DDO Kleurbeheer] Titel aanvullen ID ${item.id}`,error);break}await new Promise(resolve=>setTimeout(resolve,100))}};try{if(!navigator.locks)throw Error('Browser ondersteunt geen batchvergrendeling.');await navigator.locks.request('ddo-color-title-batch',{ifAvailable:true},async lock=>{if(!lock)throw Error('Er loopt al een kleur-titelbatch in een ander tabblad.');await execute();});control.textContent=`${ok} goed · ${filled} aangevuld${errors?` · ${errors} mislukt`:''}`;console.info('[DDO Kleurbeheer / Titels]',{gecontroleerd:ok+filled+errors,goed:ok,aangevuld:filled,mislukt:errors,gestopt:stopped})}catch(error){control.textContent=error.message;console.error('[DDO Kleurbeheer / Titels]',error)}finally{control.disabled=false}}
-  function colorClipboardRows(tab){
-    const colors=[],seen=new Set();
-    for(const row of tab?.querySelectorAll('tbody tr')||[]){
-      const raw=row.getAttribute('onmousedown')||row.querySelector('a[href*="action=coloredit"][href*="id="]')?.getAttribute('href')||'';
-      const id=raw.match(/action=coloredit(?:&amp;|&)id=(\d+)/i)?.[1];
-      if(!id||seen.has(id))continue;
-      const cells=row.querySelectorAll('td');
-      if(cells.length<2)continue;
-      const nameCell=cells[0].cloneNode(true);
-      nameCell.querySelectorAll('a,button').forEach(element=>element.remove());
-      const name=nameCell.textContent.replace(/\s+/g,' ').trim();
-      const family=cells[1].textContent.replace(/\s+/g,' ').trim();
-      seen.add(id);colors.push({id,name,family});
-    }
-    return colors;
-  }
-  function colorClipboardText(tab){
-    const rows=colorClipboardRows(tab);
-    if(!rows.length)throw Error('Geen kleuren in de kleurentabel gevonden.');
-    const clean=value=>String(value??'').replace(/[\t\r\n]+/g,' ').trim();
-    return {count:rows.length,text:['Color ID\tKleurnaam\tKleurfamilie',...rows.map(row=>[row.id,row.name,row.family].map(clean).join('\t'))].join('\n')};
-  }
-  function tsvMatrix(text){
-    const rows=[];let row=[],field='',quoted=false;
-    const source=String(text??'').replace(/^\uFEFF/,'');
-    for(let i=0;i<source.length;i++){
-      const char=source[i];
-      if(char==='"'){
-        if(quoted&&source[i+1]==='"'){field+='"';i++}
-        else if(quoted||!field)quoted=!quoted;
-        else field+=char;
-      }else if(!quoted&&(char==='\t'||char==='\n')){
-        row.push(field.replace(/\r$/,''));field='';
-        if(char==='\n'){if(row.some(value=>value.trim()))rows.push(row);row=[]}
-      }else field+=char;
-    }
-    if(quoted)throw Error('Niet afgesloten aanhalingsteken in de database.');
-    row.push(field.replace(/\r$/,''));if(row.some(value=>value.trim()))rows.push(row);
-    return rows;
-  }
-  function mergeColorDatabase(text,tab){
-    const matrix=tsvMatrix(text);
-    if(matrix.length<1)throw Error('Plak eerst de huidige kleurendatabase inclusief kopregel.');
-    const headers=matrix[0].map(value=>norm(value));
-    const idIndex=headers.indexOf('color id'),nameIndex=headers.indexOf('kleurnaam'),familyIndex=headers.indexOf('kleurfamilie');
-    if([idIndex,nameIndex,familyIndex].includes(-1))throw Error('Kolomkoppen Color ID, Kleurnaam en Kleurfamilie zijn verplicht.');
-    const width=matrix[0].length;
-    for(let index=1;index<matrix.length;index++){
-      if(matrix[index].length!==width)throw Error(`Databaseregel ${index+1} heeft ${matrix[index].length} in plaats van ${width} kolommen.`);
-    }
-    const known=new Set();
-    for(let index=1;index<matrix.length;index++){
-      const id=matrix[index][idIndex].trim();
-      if(!/^\d+$/.test(id))throw Error(`Databaseregel ${index+1} bevat een ongeldige Color ID.`);
-      if(known.has(id))throw Error(`Color ID ${id} staat dubbel in de huidige database.`);
-      known.add(id);
-    }
-    const additions=colorClipboardRows(tab).filter(color=>!known.has(color.id));
-    for(const color of additions){
-      const row=Array(width).fill('');row[idIndex]=color.id;row[nameIndex]=color.name;row[familyIndex]=color.family;matrix.push(row);
-    }
-    const escaped=value=>{const clean=String(value??'');return /["\t\r\n]/.test(clean)?`"${clean.replace(/"/g,'""')}"`:clean};
-    return {existing:known.size,added:additions.length,total:matrix.length-1,text:matrix.map(row=>row.map(escaped).join('\t')).join('\n')};
-  }
-  function copyAllColors(){
-    if(opened)return;opened=true;
-    const dialog=document.createElement('dialog');dialog.style.cssText='width:850px;max-width:95vw;max-height:90vh;padding:0 12px 12px;font:12px/1.3 system-ui;color:#25313b;background:#fff;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0003';document.body.append(dialog);
-    const heading=document.createElement('h2');heading.textContent='Kleurendatabase uitbreiden';heading.style.cssText='margin:0 -12px 8px;padding:8px 38px 8px 10px;background:#263746;color:#fff;border-radius:6px 6px 0 0;font:650 13px/1.2 system-ui';dialog.append(heading);
-    const close=button('×',dialog,()=>dialog.close());close.title='Sluiten';close.style.cssText='position:absolute;right:7px;top:4px;width:25px;height:25px;padding:0;border:0;background:transparent;color:#fff;font:20px/1 system-ui;cursor:pointer';
-    const intro=document.createElement('p');intro.textContent='Plak de huidige database inclusief kopregel. Bestaande regels en vertalingen blijven behouden; ontbrekende Color ID’s worden onderaan toegevoegd.';intro.style.margin='8px 0';dialog.append(intro);
-    const input=document.createElement('textarea');input.setAttribute('aria-label','Huidige kleurendatabase');input.placeholder='Color ID\tKleurnaam\tKleurfamilie\tEN\tDE\tFR';input.style.cssText='box-sizing:border-box;width:100%;height:300px;padding:8px;border:1px solid #cbd5df;border-radius:4px;font:12px/1.35 monospace';dialog.append(input);
-    const controls=document.createElement('div');controls.style.cssText='display:flex;align-items:center;gap:8px;margin-top:8px';dialog.append(controls);
-    const copy=button('Samenvoegen en kopiëren',controls,async()=>{copy.disabled=true;status.textContent='Samenvoegen…';try{const result=mergeColorDatabase(input.value,host);await navigator.clipboard.writeText(result.text);status.textContent=`${result.total} kleuren gekopieerd · ${result.existing} bestaand · ${result.added} nieuw`;copy.textContent='✓ Gekopieerd'}catch(error){status.textContent=error.message;copy.textContent='Samenvoegen en kopiëren'}finally{copy.disabled=false}});
-    const status=document.createElement('span');status.setAttribute('role','status');status.style.color='#56616a';controls.append(status);
-    dialog.addEventListener('close',()=>{opened=false;dialog.remove()});dialog.showModal();input.focus();
-  }
   function translationTarget(data){
     const id=data['color id'];
     if(!/^\d+$/.test(id||'')||id==='0')throw Error('Color ID moet een positief geheel getal zijn.');
