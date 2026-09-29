@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | LingaDore
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.9
+// @version 1.0.11
 // @description LingaDore EDI: modelcheck, product, maten, EAN, foto's en DDO EAN-koppeling.
 // @match https://b2b.lingadore.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -91,7 +91,7 @@ const DDO_EDI = (() => {
     #edi-lingadore .edi-pdp-meta strong{color:#202124;font-weight:400}
     #edi-lingadore .edi-summary{color:#5f6368;font-size:11px;margin:-2px 0 8px}
     #edi-lingadore .edi-colors{display:flex;flex-direction:column;gap:4px}
-    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid transparent;border-radius:7px}
+    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid #e3e6e8;border-radius:7px;background:#f8f9fa}
     #edi-lingadore .edi-color-row.edi-active{background:#f8f9fa;border-color:#e3e6e8}
     #edi-lingadore .edi-color-main{display:flex;flex-direction:row;align-items:center;flex-wrap:nowrap;min-width:0;gap:7px;font-size:11px}
     #edi-lingadore .edi-color-select{display:flex;align-items:center;gap:7px;min-width:0;padding:2px 0;border:0;background:transparent;text-align:left;color:#202124}
@@ -112,7 +112,7 @@ const DDO_EDI = (() => {
 (() => {
   'use strict';
   if (location.hostname !== 'www.dutchdesignersoutlet.com' || window.top !== window.self) return;
-  const ID = 'lingadore', VERSION = '1.0.9';
+  const ID = 'lingadore', VERSION = '1.0.11';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js';
   const $ = (s, root = document) => root.querySelector(s);
   const send = (name, data) => document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`, {detail:JSON.stringify(data)}));
@@ -223,7 +223,7 @@ const DDO_EDI = (() => {
   // ============================================================
 
   const APP = 'DDO Toolbox | LingaDore';
-  const VERSION = '1.0.9';
+  const VERSION = '1.0.11';
   const SUPPLIER = 'LingaDore';
 
   const DDO_BRAND_IDS = [2, 58, 61, 146];
@@ -2179,7 +2179,7 @@ const DDO_EDI = (() => {
         ),
 
       modelName:
-        baseTitle,
+        (model.split('-')[0].match(/^\d+/) || [''])[0],
 
       descriptionHtml,
 
