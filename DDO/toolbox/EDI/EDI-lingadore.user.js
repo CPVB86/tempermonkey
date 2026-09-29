@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | LingaDore
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.7
+// @version 1.0.9
 // @description LingaDore EDI: modelcheck, product, maten, EAN, foto's en DDO EAN-koppeling.
 // @match https://b2b.lingadore.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -76,7 +76,7 @@ const DDO_EDI = (() => {
     #edi-lingadore .edi-match-miss{color:#c83939}
     #edi-lingadore .edi-body{max-height:calc(100vh - 65px);overflow:auto}
   `;
-  const isCartPage = () => /(?:^|\/)(?:cart|basket|winkelwagentje|winkelwagen|shopping-cart|shopping-basket)(?:\/|$)/i.test(location.pathname);
+  const isCartPage = () => /(?:^|\/)(?:cart|basket|winkelwagentje|winkelwagen|shopping-?cart|shopping-?basket)(?:\/|$)/i.test(location.pathname);
   // One supplier-panel layout, based on LingaDore. Applied after supplier CSS.
   const layout = `
     #edi-lingadore [hidden]{display:none!important}
@@ -112,7 +112,7 @@ const DDO_EDI = (() => {
 (() => {
   'use strict';
   if (location.hostname !== 'www.dutchdesignersoutlet.com' || window.top !== window.self) return;
-  const ID = 'lingadore', VERSION = '1.0.7';
+  const ID = 'lingadore', VERSION = '1.0.9';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js';
   const $ = (s, root = document) => root.querySelector(s);
   const send = (name, data) => document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`, {detail:JSON.stringify(data)}));
@@ -223,7 +223,7 @@ const DDO_EDI = (() => {
   // ============================================================
 
   const APP = 'DDO Toolbox | LingaDore';
-  const VERSION = '1.0.7';
+  const VERSION = '1.0.9';
   const SUPPLIER = 'LingaDore';
 
   const DDO_BRAND_IDS = [2, 58, 61, 146];
@@ -4397,7 +4397,7 @@ const DDO_EDI = (() => {
     const cart=DDO_EDI.isCartPage();
     $('#edi-module').hidden=cart;
     $('#edi-module').open=!cart;
-    $('#edi-order-module').hidden=!cart;
+    $('#edi-order-module').hidden=false;
     $('#edi-order-module').open=cart;
     if(cart)return;
     startObserver();
