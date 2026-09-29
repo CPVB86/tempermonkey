@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | After Eden
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.10
+// @version 1.0.11
 // @description Modelcheck, Product, Maten, ordermodule en Stock Check voor After Eden / Elbrina.
 // @match https://bcg.fashionportal.shop/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -98,7 +98,7 @@ const DDO_EDI = (() => {
     #edi-lingadore .edi-pdp-meta strong{color:#202124;font-weight:400}
     #edi-lingadore .edi-summary{color:#5f6368;font-size:11px;margin:-2px 0 8px}
     #edi-lingadore .edi-colors{display:flex;flex-direction:column;gap:4px}
-    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid transparent;border-radius:7px}
+    #edi-lingadore .edi-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-height:34px;padding:3px 4px;border:1px solid #e3e6e8;border-radius:7px;background:#f8f9fa}
     #edi-lingadore .edi-color-row.edi-active{background:#f8f9fa;border-color:#e3e6e8}
     #edi-lingadore .edi-color-main{display:flex;flex-direction:row;align-items:center;flex-wrap:nowrap;min-width:0;gap:7px;font-size:11px}
     #edi-lingadore .edi-color-select{display:flex;align-items:center;gap:7px;min-width:0;padding:2px 0;border:0;background:transparent;text-align:left;color:#202124}
@@ -160,7 +160,7 @@ const AE_EAN = (() => {
   const pid=()=>$('input[name="supplier_pid"]')?.value.trim()||'';
   const rows=table=>[...table.querySelectorAll('tr')].flatMap(row=>{const input=$('input[name$="[barcode]"]',row),cell=$('td',row);if(!input||!cell)return [];return [{input,size:AE_EAN.size($('input,select',cell)?.value??cell.textContent)}];});
   let busy=false;
-  const announce=()=>send('adapter-state',{id:'after-eden',label:'After Eden / Elbrina',version:'1.0.10',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js',priority:70,available:brand(),capabilities:['ean','edi']});
+  const announce=()=>send('adapter-state',{id:'after-eden',label:'After Eden / Elbrina',version:'1.0.11',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js',priority:70,available:brand(),capabilities:['ean','edi']});
   document.addEventListener('ddo-toolbox:discover',announce);
   document.addEventListener('ddo-toolbox:run-adapter',async event=>{
     let request;try{request=JSON.parse(event.detail);}catch{return;}if(request.id!=='after-eden')return;
@@ -380,7 +380,7 @@ return {build:buildSparklePayloadFromColorWrap};
 
 (() => {
   'use strict';
-  const ID='after-eden', VERSION='1.0.10', BASE='https://bcg.fashionportal.shop';
+  const ID='after-eden', VERSION='1.0.11', BASE='https://bcg.fashionportal.shop';
   const UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js';
   if(window.top!==window.self)return;
   if(location.origin!==BASE)return;
