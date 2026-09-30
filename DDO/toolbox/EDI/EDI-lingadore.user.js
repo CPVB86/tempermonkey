@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | LingaDore
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.11
+// @version 1.0.12
 // @description LingaDore EDI: modelcheck, product, maten, EAN, foto's en DDO EAN-koppeling.
 // @match https://b2b.lingadore.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -112,7 +112,7 @@ const DDO_EDI = (() => {
 (() => {
   'use strict';
   if (location.hostname !== 'www.dutchdesignersoutlet.com' || window.top !== window.self) return;
-  const ID = 'lingadore', VERSION = '1.0.11';
+  const ID = 'lingadore', VERSION = '1.0.12';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-lingadore.user.js';
   const $ = (s, root = document) => root.querySelector(s);
   const send = (name, data) => document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`, {detail:JSON.stringify(data)}));
@@ -223,7 +223,7 @@ const DDO_EDI = (() => {
   // ============================================================
 
   const APP = 'DDO Toolbox | LingaDore';
-  const VERSION = '1.0.11';
+  const VERSION = '1.0.12';
   const SUPPLIER = 'LingaDore';
 
   const DDO_BRAND_IDS = [2, 58, 61, 146];
@@ -2151,13 +2151,16 @@ const DDO_EDI = (() => {
     } =
       getDescription();
 
+    const modelName = (model.split('-')[0].match(/^\d+/) || [''])[0];
+    const productName = [modelName, computedName].filter(Boolean).join(' ');
+
     const payload = {
 
       name:
-        computedName,
+        productName,
 
       title:
-        computedName,
+        productName,
 
       rrp:
         fmtMoney(
@@ -2178,8 +2181,7 @@ const DDO_EDI = (() => {
           color
         ),
 
-      modelName:
-        (model.split('-')[0].match(/^\d+/) || [''])[0],
+      modelName,
 
       descriptionHtml,
 
