@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | Charlie Choe / Mila
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.1
+// @version 1.0.5
 // @description Charlie Choe/Mila: modelcheck, Product, Maten, foto's, ordermodule.
 // @match https://vangennip.itsperfect.it/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -477,7 +477,7 @@ const VG_ORDER = (() => {
     const parts = text.split("-").map((part) => part.trim()).filter(Boolean);
     if(parts.length===2)throw Error("Supplier ID mist p_id; gebruik artikel-kleur-p_id of een productlink");
     const productId = /^\d+$/.test(parts.at(-1) || "") ? parts.at(-1) : "";
-    const colorNumber = productId && /^\d+$/.test(parts.at(-2) || "") ? parts.at(-2) : "";
+    const colorNumber = productId && /^[A-Z0-9]+$/i.test(parts.at(-2) || "") ? parts.at(-2) : "";
     const itemNumber = productId ? parts.slice(0, -2).join("-") : "";
     const productUrl = productId
       ? `${location.origin}/webshop/shop/p_id=${encodeURIComponent(productId)}?set-season=direct-order`
@@ -647,7 +647,7 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
 
 (() => {
   'use strict';
-  const VERSION='1.0.1', ID='charlie-choe', BASE='https://vangennip.itsperfect.it';
+  const VERSION='1.0.5', ID='charlie-choe', BASE='https://vangennip.itsperfect.it';
   if(window.top!==window.self)return;
   if(location.hostname==='www.dutchdesignersoutlet.com') {
     const announce=()=>document.dispatchEvent(new CustomEvent('ddo-toolbox:adapter-state',{detail:JSON.stringify({id:ID,label:'Charlie Choe / Mila',version:VERSION,available:false,capabilities:['edi'],updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-charlie-choe.user.js'})}));
@@ -658,12 +658,12 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
   const clean=s=>String(s??'').replace(/\s+/g,' ').trim();
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cart=()=>/^\/webshop\/shoppingbag(?:\/|$)/i.test(location.pathname)||DDO_EDI.isCartPage();
-  const CACHE='edi:charlie-choe:ddo:v1', BRANDS=[34,145];
-  const state={map:null,checking:false,ordering:false,rows:[]};
+  const CACHE='edi:charlie-choe:ddo:v2', BRANDS=[34,145];
+  const state={map:null,checking:false,ordering:false,downloading:false,rows:[]};
   // Article-colour is the comparison key; the trailing supplier p_id is retained in clipboard data.
   function code(value) {
     const s=clean(value).normalize('NFKC').replace(/[‐‑‒–—]/g,'-').toUpperCase();
-    return s.match(/^(?:[A-Z0-9._]+)-[A-Z0-9]+(?=-\d+$|$)/)?.[0]||'';
+    return s.match(/^[A-Z0-9._]+-[A-Z0-9]+(?=-[A-Z0-9]+(?:-\d+)?$|$)/)?.[0]||'';
   }
   function exportMap(buffer) {
     const wb=XLSX.read(buffer,{type:'array'}), map=new Map();let valid=false;
@@ -714,7 +714,7 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
     if(!model||!pid)return [];
     const rows=$$('.product-matrix tbody tr').filter(row=>$('.item__color_number',row));
     return rows.map(row=>{
-      const color=clean($('.item__color_number',row).textContent),key=code(`${model}-${color}`);
+      const color=clean($('.item__color_number',row).textContent),key=code(model)||code(`${model}-${color}`);
       const sizes=[...new Set($$('input[name*="[quantities]"]',row).map(input=>input.getAttribute('data-size')||VG_ORDER.parseQuantityInput(input)?.size||'').filter(Boolean).map(DDO_EDI.normalizeSize))];
       // Some matrices provide quantities only as cells; use the matching table's explicit size headers.
       if(!sizes.length) {
@@ -726,23 +726,41 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
   }
   function gallery(key,root=document) {
     const seen=new Set(),result=[];
-    for(const img of $$('.pdp-screen__images img[data-zoom_image]',root)) {
-      const raw=img.getAttribute('data-zoom_image');if(!raw)continue;
+    for(const img of $$('.pdp-screen__images img',root)) {
+      const raw=img.getAttribute('data-zoom_image')||img.getAttribute('data-zoom-image')||(/\/max\//i.test(img.getAttribute('src')||'')?img.getAttribute('src'):'');if(!raw)continue;
       let url,file;try{url=new URL(raw,BASE);file=decodeURIComponent(url.pathname.split('/').pop());}catch{continue;}
-      if(url.origin!==BASE||!file.toUpperCase().startsWith(`${key.toUpperCase()}_`)||! /\.(?:jpe?g|png|webp)$/i.test(file))continue;
+      if(url.origin!==BASE||! /\.(?:jpe?g|png|webp)$/i.test(file))continue;
       url.hash='';if(seen.has(url.href))continue;seen.add(url.href);
       result.push({url:url.href,name:`${key}_${result.length+1}.${file.split('.').pop().toLowerCase()}`});
     }
     return result;
   }
+  async function loadGallery(item) {
+    let images=gallery(item.key);if(images.length)return images;
+    status(`${item.key}: originele foto’s ophalen…`);
+    const url=location.href;
+    const response=await fetch(url,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(20000)});
+    if(!response.ok)throw Error(`Foto’s ophalen: HTTP ${response.status}`);
+    const doc=new DOMParser().parseFromString(await response.text(),'text/html');
+    if(doc.querySelector('input[type="password"]'))throw Error('Log opnieuw in bij Van Gennip om foto’s op te halen');
+    const article=clean(doc.querySelector('#item_number .spec__value, #itemNumber .spec__value')?.textContent);
+    if(article!==item.model||location.href!==url)throw Error('Productpagina gewijzigd; open het product opnieuw');
+    images=gallery(item.key,doc);
+    if(!images.length)throw Error(`Geen originele foto’s gevonden in de galerij van deze productpagina.`);
+    return images;
+  }
   const clipboard=value=>typeof GM_setClipboard==='function'?GM_setClipboard(value,'text'):navigator.clipboard.writeText(value);
   async function download(images) {
-    for(const item of images)await new Promise((resolve,reject)=>GM_download({url:item.url,name:item.name,saveAs:false,timeout:30000,onload:resolve,onerror:()=>reject(Error(`Download mislukt: ${item.name}`)),ontimeout:()=>reject(Error(`Download timeout: ${item.name}`))}));
+    if(typeof GM_download!=='function')throw Error('Downloadrechten ontbreken; installeer de nieuwste Charlie Choe/Mila-adapter');
+    for(const [index,item] of images.entries()) {
+      status(`Foto ${index+1}/${images.length} downloaden · ${item.name}`);
+      await new Promise((resolve,reject)=>GM_download({url:item.url,name:item.name,saveAs:false,timeout:30000,onload:resolve,onerror:error=>reject(Error(`Foto ${index+1}/${images.length} mislukt (${item.name}): ${error?.error||'controleer de downloadrechten in Tampermonkey'}`)),ontimeout:()=>reject(Error(`Foto ${index+1}/${images.length}: download duurt te lang (${item.name})`))}));
+    }
   }
   function render() {
     if(cart())return;
-    const list=colors(),out=$('#vg-colors');
-    out.innerHTML=list.length?`<div class="edi-pdp-meta"><strong>${esc(list[0].model)}</strong><span>${esc(VG_PRODUCT.getTitleBase())}</span></div>${state.map?`<div class="edi-summary">${list.filter(v=>state.map.has(v.key)).length}/${list.length} leverancierskleuren in DDO</div>`:''}<div class="edi-colors">${list.map((v,i)=>`<div class="edi-color-row"><div class="edi-color-main"><span class="edi-swatch"></span><span class="edi-color-label" title="${esc(v.label)}">${esc(v.label)}</span>${match(v.key)}</div><div class="edi-actions"><button type="button" class="edi-action" data-action="product" data-index="${i}">Product</button><button type="button" class="edi-action" data-action="sizes" data-index="${i}" ${v.sizes.length?'':'disabled'}>Maten</button><button type="button" class="edi-action" disabled title="Geen EAN-bron aangeleverd">EAN</button><button type="button" class="edi-action" data-action="photos" data-index="${i}" ${gallery(v.key).length?'':'disabled title="Geen originele foto’s voor deze kleur op de pagina"'}>Foto’s</button></div></div>`).join('')}</div>`:'<p class="edi-module-note">Open een product om Product, Maten en Foto’s te gebruiken.</p>';
+    const list=colors(),out=$('#vg-colors');if(!out)return;
+    out.innerHTML=list.length?`<div class="edi-pdp-meta"><strong>${esc(list[0].model)}</strong><span>${esc(VG_PRODUCT.getTitleBase())}</span></div>${state.map?`<div class="edi-summary">${list.filter(v=>state.map.has(v.key)).length}/${list.length} leverancierskleuren in DDO</div>`:''}<div class="edi-colors">${list.map((v,i)=>`<div class="edi-color-row"><div class="edi-color-main"><span class="edi-swatch"></span><span class="edi-color-label" title="${esc(v.label)}">${esc(v.label)}</span>${match(v.key)}</div><div class="edi-actions"><button type="button" class="edi-action" data-action="product" data-index="${i}">Product</button><button type="button" class="edi-action" data-action="sizes" data-index="${i}" ${v.sizes.length?'':'disabled'}>Maten</button><button type="button" class="edi-action" disabled title="Geen EAN-bron aangeleverd">EAN</button><button type="button" class="edi-action" data-action="photos" data-index="${i}" ${state.downloading?'disabled':''} title="Download originele foto’s">Foto’s</button></div></div>`).join('')}</div>`:'<p class="edi-module-note">Open een product om Product, Maten en Foto’s te gebruiken.</p>';
     for(const button of $$('button[data-action]',out))button.onclick=async()=>{
       const v=list[Number(button.dataset.index)];button.disabled=true;
       try {
@@ -750,7 +768,7 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
           const payload=VG_PRODUCT.build(v.row);if(!payload.name||!payload.rrp||!payload.productCode)throw Error('Product mist naam, adviesprijs of artikelcode');
           await clipboard(DDO_EDI.productClipboard(payload));status(`${v.key}: product gekopieerd`);
         }else if(button.dataset.action==='sizes'){await clipboard(DDO_EDI.sizesClipboard('Charlie Choe / Mila',v.supplierId,v.sizes));status(`${v.key}: maten gekopieerd`);}
-        else {const images=gallery(v.key);if(!images.length)throw Error('Geen originele foto’s voor deze kleur');await download(images);status(`${v.key}: ${images.length} foto’s gedownload`);}
+        else {if(state.downloading)return;state.downloading=true;$$('[data-action=photos]',out).forEach(b=>b.disabled=true);try{const images=await loadGallery(v);await download(images);status(`${v.key}: ${images.length} foto’s gedownload`);}finally{state.downloading=false;render();}}
       }catch(e){status(e.message,true);}finally{button.disabled=false;}
     };
     for(const line of $$('.plp-product__line2')) {
@@ -824,7 +842,7 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
     orderLog('Plak orderregels of voeg een regel toe.');renderOrder();render();
     if(cart())return;
     try{const cached=JSON.parse(localStorage.getItem(CACHE));if(cached&&Date.now()-cached.time<900000&&Array.isArray(cached.entries)){state.map=new Map(cached.entries);status('DDO-controle uit recente cache · Opnieuw checken vernieuwt de gegevens.');render();}}catch{}
-    let timer;new MutationObserver(records=>{if(records.some(r=>!panel.contains(r.target)&&!r.target.closest?.('.vg-catalog-status')&&(r.type!=='childList'||![...r.addedNodes,...r.removedNodes].every(n=>n.nodeType===1&&n.classList?.contains('vg-catalog-status'))))){clearTimeout(timer);timer=setTimeout(render,150);}}).observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src','data-zoom_image']});
+    let timer;new MutationObserver(records=>{if(records.some(r=>!panel.contains(r.target)&&!r.target.closest?.('.vg-catalog-status')&&(r.type!=='childList'||![...r.addedNodes,...r.removedNodes].every(n=>n.nodeType===1&&n.classList?.contains('vg-catalog-status'))))){clearTimeout(timer);timer=setTimeout(render,150);}}).observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src','data-zoom_image','data-zoom-image']});
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
