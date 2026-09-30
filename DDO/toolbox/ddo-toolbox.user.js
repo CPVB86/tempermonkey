@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | Core
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 3.7.2
+// @version 3.8.3
 // @description Statische toolbox met los installeerbare leverancieradapters.
 // @match https://www.dutchdesignersoutlet.com/admin.php*
 // @grant GM_xmlhttpRequest
@@ -105,7 +105,1228 @@ const DDO_EDI = (() => {
 })();
 
 // END SHARED EDI
-  const VERSION='3.7.2', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
+
+// Coremodule: Change Model
+(() => {
+  'use strict';
+  if(window.__ddoChangeModelLoaded)return;
+  window.__ddoChangeModelLoaded=true;
+
+  const ID='changeModel', VERSION='1.0.0';
+  const UPDATE_URL='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-change-model.user.js';
+  const DIALOG_ID='ddo-change-model-dialog';
+  let modelRequest=null, modelGeneration=0, running=false;
+
+  const params=()=>new URLSearchParams(location.search);
+  const boxes=()=>[...document.querySelectorAll('input[type="checkbox"][name="products[]"]')];
+  const normalized=value=>String(value||'').replace(/\s+/g,' ').trim().toLocaleLowerCase('nl');
+  const administrator=()=>normalized(document.querySelector('.profile .profile_content h1,.profile h1')?.textContent)===normalized('Chantor Pascal van Beek');
+  const applicable=()=>administrator()&&params().get('section')==='products'&&params().get('action')!=='edit'&&boxes().length>0&&window.__ddoToolbox?.isEnabled?.(ID)!==false;
+  const send=(name,data)=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
+  const safe=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+  const selectedIds=()=>[...new Set(boxes().filter(box=>box.checked).map(box=>String(box.value||'').trim()).filter(id=>/^\d+$/.test(id)))];
+  const editUrl=id=>new URL(`/admin.php?section=products&action=edit&id=${encodeURIComponent(id)}`,location.origin).href;
+
+  function parseClipboardBatch(text){
+    const rows=String(text||'').split(/\r?\n/).map(line=>line.split('\t').map(value=>value.trim())).filter(cells=>cells.some(Boolean));
+    if(rows.length&&/product\s*id/i.test(rows[0][0]))rows.shift();
+    if(!rows.length)throw Error('Geen regels gevonden. Verwacht: Product ID, Merk, Nieuw model.');
+    const seen=new Set();return rows.map((cells,index)=>{if(cells.length!==3)throw Error(`Regel ${index+1}: verwacht exact 3 kolommen.`);const[id,brandName,modelName]=cells;if(!/^\d+$/.test(id))throw Error(`Regel ${index+1}: ongeldig Product ID.`);if(!brandName||!modelName)throw Error(`Regel ${index+1}: merk of model ontbreekt.`);if(seen.has(id))throw Error(`Product ${id} staat dubbel in de plaklijst.`);seen.add(id);return{id,brandName,modelName}});
+  }
+
+  function report(){
+    const ready=applicable();
+    send('adapter-state',{id:ID,kind:'feature',label:'Change Model',version:VERSION,updateUrl:UPDATE_URL,available:ready,ready,reason:ready?'Selecteer producten om merk en model te wijzigen':'Open een productlijst'});
+  }
+
+  async function getDocument(id,signal){
+    const response=await fetch(editUrl(id),{credentials:'same-origin',cache:'no-store',signal});
+    if(!response.ok)throw Error(`Product ${id}: HTTP ${response.status}`);
+    return new DOMParser().parseFromString(await response.text(),'text/html');
+  }
+
+  function productForm(doc,id){
+    const matches=[...doc.querySelectorAll('form')].filter(form=>{
+      let action;
+      try{action=new URL(form.getAttribute('action')||'',location.origin)}catch{return false}
+      const query=action.searchParams;
+      return action.origin===location.origin&&/\/admin\.php$/.test(action.pathname)&&query.get('section')==='products'&&query.get('action')==='edit'&&query.get('id')===String(id)&&
+        form.querySelector('input[name="product_id"]')?.value===String(id)&&form.querySelector('select[name="brand_id"]')&&form.querySelector('select[name="model_id"]');
+    });
+    if(matches.length!==1)throw Error(`Product ${id}: exact productformulier ${matches.length?'is niet uniek':'niet gevonden'}`);
+    return matches[0];
+  }
+
+  const selectedValue=(form,name)=>String(form.querySelector(`select[name="${name}"]`)?.value||'').trim();
+  const selectedText=(form,name)=>form.querySelector(`select[name="${name}"] option:checked`)?.textContent?.replace(/\s+/g,' ').trim()||'—';
+
+  function fullPayload(form,id,brandId,modelId){
+    const data=new FormData(form);
+    data.set('brand_id',brandId);data.set('model_id',modelId);data.set('product_id',String(id));data.set('ajax','1');data.set('edit','Update product');
+    return data;
+  }
+
+  function parseModels(xmlText){
+    const doc=new DOMParser().parseFromString(xmlText,'application/xml');
+    if(doc.querySelector('parsererror'))throw Error('Ongeldige XML-response');
+    const seen=new Set(), models=[];
+    for(const node of doc.querySelectorAll('models > model')){
+      const id=String(node.getAttribute('id')||'').trim(),name=node.querySelector('name')?.textContent?.replace(/\s+/g,' ').trim()||'';
+      if(!/^\d+$/.test(id)||!name||seen.has(id))continue;
+      seen.add(id);models.push({id,name});
+    }
+    return models;
+  }
+
+  async function modelsForBrand(brandId,signal){
+    const url=new URL('/api.php',location.origin);
+    url.search=new URLSearchParams({section:'brand',action:'modelfilter',filter:'brand_id',filter_id:brandId});
+    const response=await fetch(url,{credentials:'same-origin',cache:'no-store',signal});
+    if(!response.ok)throw Error(`Modellen ophalen: HTTP ${response.status}`);
+    const models=parseModels(await response.text());
+    if(!models.length)throw Error('Geen modellen voor dit merk gevonden');
+    return models;
+  }
+
+  function makeDialog(ids,brands){
+    document.getElementById(DIALOG_ID)?.remove();
+    const shade=document.createElement('div');shade.id=DIALOG_ID;
+    shade.innerHTML=`<section class="ddo-cm-card" role="dialog" aria-modal="true" aria-labelledby="ddo-cm-title">
+      <header><strong id="ddo-cm-title">Change Model</strong><button type="button" data-action="close" aria-label="Sluiten">×</button></header>
+      <div class="ddo-cm-fields"><label>Brand<select data-field="brand"><option value="">Kies een merk</option>${brands.map(item=>`<option value="${safe(item.id)}">${safe(item.name)}</option>`).join('')}</select></label><label>Other Model<select data-field="model" disabled><option value="">Kies eerst een merk</option></select></label><button type="button" data-action="paste">Plak Product ID · Merk · Nieuw model</button></div>
+      <div class="ddo-cm-status" role="status">${ids.length} geselecteerde producten</div>
+      <div class="ddo-cm-table"><table><thead><tr><th>Product</th><th>Huidig merk</th><th>Huidig model</th><th>Nieuw merk</th><th>Nieuw model</th><th>Status</th></tr></thead><tbody>${ids.map(id=>`<tr data-id="${id}"><td>${id}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>Niet gecontroleerd</td></tr>`).join('')}</tbody></table></div>
+      <footer><button type="button" data-action="check">Controleren</button><button type="button" data-action="apply" disabled>Uitvoeren</button><button type="button" data-action="stop" disabled>Stop na huidige</button></footer>
+    </section>`;
+    const style=document.createElement('style');style.textContent=`#${DIALOG_ID}{position:fixed;inset:0;z-index:100000000;background:#0005;display:grid;place-items:center;font:12px/1.35 system-ui;color:#25313b}#${DIALOG_ID} *{box-sizing:border-box}.ddo-cm-card{width:min(940px,calc(100vw - 24px));max-height:calc(100vh - 24px);display:flex;flex-direction:column;background:#fff;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 8px 30px #0004;overflow:hidden}.ddo-cm-card>header{min-height:32px;padding:5px 9px;display:flex;align-items:center;justify-content:space-between;background:#263746;color:#fff}.ddo-cm-card>header button{border:0;background:transparent;color:#fff;font-size:21px;line-height:1}.ddo-cm-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:9px}.ddo-cm-fields label{display:grid;gap:3px;font-weight:600}.ddo-cm-fields select{width:100%;min-height:30px}.ddo-cm-fields>[data-action="paste"]{grid-column:1/-1;justify-self:start}.ddo-cm-status{padding:5px 9px;border-block:1px solid #dfe5e9;background:#f4f7f9}.ddo-cm-table{overflow:auto}.ddo-cm-table table{width:100%;border-collapse:collapse}.ddo-cm-table th,.ddo-cm-table td{padding:5px 7px;border-bottom:1px solid #edf1f4;text-align:left}.ddo-cm-table tr[data-state="ready"]{background:#eef8f2}.ddo-cm-table tr[data-state="error"]{background:#fff0f0}.ddo-cm-table tr[data-state="done"]{background:#e7f5ff}.ddo-cm-card>footer{display:flex;gap:6px;padding:8px;background:#f4f7f9}.ddo-cm-card button{min-height:29px;padding:4px 10px;border:0;border-radius:4px;background:#0877b9;color:#fff;font-weight:600}.ddo-cm-card button:disabled{background:#d6dce1;color:#7b858d}`;
+    shade.prepend(style);document.body.appendChild(shade);return shade;
+  }
+
+  function brandOptions(form){
+    return [...form.querySelectorAll('select[name="brand_id"] option')].map(option=>({id:String(option.value||'').trim(),name:option.textContent.replace(/\s+/g,' ').trim()})).filter(item=>/^\d+$/.test(item.id)&&item.id!=='0'&&item.name);
+  }
+
+  async function open(){
+    if(running)return;
+    if(!administrator()){alert('Change Model is alleen beschikbaar voor de beheerder.');return}
+    let ids=selectedIds(),pastedAtOpen=null;
+    if(!ids.length){try{pastedAtOpen=parseClipboardBatch(await navigator.clipboard.readText());ids=pastedAtOpen.map(item=>item.id)}catch(error){alert(`Selecteer producten of zet een geldige lijst op het klembord. ${error.message}`);return}}
+    running=true;
+    let doc,form;
+    try{doc=await getDocument(ids[0]);form=productForm(doc,ids[0])}catch(error){alert(`Change Model kan niet starten. ${error.message}`);return}finally{running=false}
+    const brands=brandOptions(form);if(!brands.length){alert('Geen merken gevonden in het productformulier.');return}
+    const root=makeDialog(ids,brands),brand=root.querySelector('[data-field="brand"]'),model=root.querySelector('[data-field="model"]'),status=root.querySelector('.ddo-cm-status'),check=root.querySelector('[data-action="check"]'),apply=root.querySelector('[data-action="apply"]'),stopButton=root.querySelector('[data-action="stop"]'),pasteButton=root.querySelector('[data-action="paste"]'),tbody=root.querySelector('tbody');
+    let items=[],stop=false,models=new Map(),batchTargets=null;
+    const modelCache=new Map(),hasTarget=()=>batchTargets?.size>0||(!batchTargets&&brand.value&&model.value&&models.has(model.value));
+    const controls=busy=>{running=busy;brand.disabled=busy;model.disabled=busy||!brand.value||!models.size;pasteButton.disabled=busy;check.disabled=busy||!hasTarget();apply.disabled=busy||!items.some(item=>item.state==='ready');stopButton.disabled=!busy};
+    const rows=()=>ids.map(id=>`<tr data-id="${id}"><td>${id}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>Niet gecontroleerd</td></tr>`).join('');
+    const reset=message=>{items=[];apply.disabled=true;check.disabled=!hasTarget();tbody.innerHTML=rows();if(message)status.textContent=message};
+    brand.addEventListener('change',async()=>{
+      batchTargets=null;modelRequest?.abort();const generation=++modelGeneration;models.clear();model.replaceChildren(new Option(brand.value?'Modellen laden…':'Kies eerst een merk',''));model.disabled=true;reset(brand.value?'Modellen laden…':`${ids.length} geselecteerde producten`);if(!brand.value)return;
+      modelRequest=new AbortController();
+      try{const found=await modelsForBrand(brand.value,modelRequest.signal);if(generation!==modelGeneration)return;models=new Map(found.map(item=>[item.id,item]));model.replaceChildren(new Option('Kies een model',''),...found.map(item=>new Option(item.name,item.id)));model.disabled=false;status.textContent=`${found.length} modellen geladen voor ${brand.selectedOptions[0].textContent}`}
+      catch(error){if(error.name==='AbortError'||generation!==modelGeneration)return;model.replaceChildren(new Option('Modellen laden mislukt',''));status.textContent=error.message}
+    });
+    model.addEventListener('change',()=>{batchTargets=null;reset(model.value?`Klaar om ${ids.length} producten te controleren`:'Kies een model')});
+    const loadPasted=async pasted=>{
+      ids=pasted.map(item=>item.id);batchTargets=new Map();items=[];tbody.innerHTML=rows();brand.value='';model.replaceChildren(new Option('Kies eerst een merk',''));model.disabled=true;controls(true);let resolved=0;
+      const load=brandId=>{if(!modelCache.has(brandId))modelCache.set(brandId,modelsForBrand(brandId));return modelCache.get(brandId)};
+      for(const input of pasted){const row=root.querySelector(`tr[data-id="${input.id}"]`);row.children[3].textContent=input.brandName;row.children[4].textContent=input.modelName;row.children[5].textContent='Merk en model opzoeken…';
+        try{const brandMatches=brands.filter(item=>normalized(item.name)===normalized(input.brandName));if(brandMatches.length!==1)throw Error(brandMatches.length?'Merknaam is niet uniek':'Merk niet gevonden');const targetBrand=brandMatches[0],found=await load(targetBrand.id),modelMatches=found.filter(item=>normalized(item.name)===normalized(input.modelName));if(modelMatches.length!==1)throw Error(modelMatches.length?'Modelnaam is niet uniek':'Model niet gevonden');const targetModel=modelMatches[0];batchTargets.set(input.id,{targetBrand:targetBrand.id,targetModel:targetModel.id,targetBrandName:targetBrand.name,targetModelName:targetModel.name});row.children[3].textContent=targetBrand.name;row.children[4].textContent=targetModel.name;row.children[5].textContent='Gevonden · nog controleren';resolved++}
+        catch(error){batchTargets.set(input.id,{error:error.message,targetBrandName:input.brandName,targetModelName:input.modelName});row.dataset.state='error';row.children[5].textContent=`Overgeslagen: ${error.message}`}
+        status.textContent=`${batchTargets.size}/${pasted.length} opgezocht · ${resolved} gevonden`;
+      }
+      controls(false);status.textContent=`${resolved} van ${pasted.length} regels exact gevonden · klaar om te controleren`;
+    };
+    pasteButton.addEventListener('click',async()=>{let pasted;try{pasted=parseClipboardBatch(await navigator.clipboard.readText());await loadPasted(pasted)}catch(error){status.textContent=`Plakken mislukt: ${error.message}`}});
+    root.querySelector('[data-action="close"]').addEventListener('click',()=>{if(!running){modelRequest?.abort();root.remove()}});
+    stopButton.addEventListener('click',()=>{stop=true;stopButton.disabled=true;status.textContent='Stoppen na huidige product…'});
+    check.addEventListener('click',async()=>{
+      if(!hasTarget())return;items=[];stop=false;controls(true);let processed=0,ready=0;
+      for(const id of ids){if(stop)break;const row=root.querySelector(`tr[data-id="${id}"]`);row.dataset.state='';row.children[5].textContent='Controleren…';
+        try{const target=batchTargets?.get(id)||{targetBrand:brand.value,targetModel:model.value,targetBrandName:brand.selectedOptions[0].textContent,targetModelName:models.get(model.value).name};if(target.error)throw Error(target.error);row.children[3].textContent=target.targetBrandName;row.children[4].textContent=target.targetModelName;const currentDoc=await getDocument(id),currentForm=productForm(currentDoc,id),sourceBrand=selectedValue(currentForm,'brand_id'),sourceModel=selectedValue(currentForm,'model_id');row.children[1].textContent=selectedText(currentForm,'brand_id');row.children[2].textContent=selectedText(currentForm,'model_id');const changed=sourceBrand!==target.targetBrand||sourceModel!==target.targetModel;const item={id,sourceBrand,sourceModel,...target,state:changed?'ready':'done'};items.push(item);row.dataset.state=item.state;row.children[5].textContent=changed?'Klaar om te wijzigen':'Merk en model zijn al correct';if(changed)ready++}
+        catch(error){items.push({id,state:'error',error:error.message});row.dataset.state='error';row.children[5].textContent=`Overgeslagen: ${error.message}`}
+        processed++;status.textContent=`${processed}/${ids.length} gecontroleerd · ${ready} klaar`;
+      }
+      controls(false);status.textContent=stop?`Controle gestopt · ${ready} klaar`:`Controle afgerond · ${ready} van ${ids.length} klaar om te wijzigen`;
+    });
+    apply.addEventListener('click',async()=>{
+      const ready=items.filter(item=>item.state==='ready');if(!ready.length)return;
+      if(!confirm(`Merk en model wijzigen voor ${ready.length} producten?`))return;
+      stop=false;controls(true);let processed=0,done=0,skipped=0;
+      for(const item of ready){if(stop)break;const row=root.querySelector(`tr[data-id="${item.id}"]`);row.children[5].textContent='Wijzigen…';
+        try{const freshDoc=await getDocument(item.id),freshForm=productForm(freshDoc,item.id),freshBrand=selectedValue(freshForm,'brand_id'),freshModel=selectedValue(freshForm,'model_id');if(freshBrand!==item.sourceBrand||freshModel!==item.sourceModel){item.state='error';skipped++;row.dataset.state='error';row.children[5].textContent='Overgeslagen: merk of model is sinds controle gewijzigd';continue}
+          const data=fullPayload(freshForm,item.id,item.targetBrand,item.targetModel);
+          const response=await fetch(editUrl(item.id),{method:'POST',body:data,credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}});if(!response.ok)throw Error(`Opslaan: HTTP ${response.status}`);
+          const verifyDoc=await getDocument(item.id),verifyForm=productForm(verifyDoc,item.id);if(selectedValue(verifyForm,'brand_id')!==item.targetBrand||selectedValue(verifyForm,'model_id')!==item.targetModel)throw Error('Verificatie wijkt af');
+          item.state='done';done++;row.dataset.state='done';row.children[1].textContent=item.targetBrandName;row.children[2].textContent=item.targetModelName;row.children[5].textContent='Gewijzigd en geverifieerd';
+        }catch(error){item.state='error';row.dataset.state='error';row.children[5].textContent=`Gestopt: ${error.message}`;stop=true}
+        finally{processed++;status.textContent=`${processed}/${ready.length} verwerkt · ${done} gewijzigd · ${skipped} overgeslagen`}
+      }
+      controls(false);apply.disabled=true;status.textContent=`${stop?'Gestopt':'Afgerond'} · ${done} gewijzigd · ${skipped} overgeslagen`;
+    });
+    if(pastedAtOpen)await loadPasted(pastedAtOpen);
+  }
+
+  document.addEventListener('ddo-toolbox:discover',report);
+  document.addEventListener('ddo-toolbox:run-feature',event=>{let detail={};try{detail=JSON.parse(event.detail||'{}')}catch{}if(detail.id===ID)open()});
+  report();
+})();
+
+// Coremodule: Product Validator
+(() => {
+  'use strict';
+  if(window.__ddoProductValidatorLoaded)return;
+  window.__ddoProductValidatorLoaded=true;
+
+  const ID='productValidator', VERSION='1.4.2';
+  const UPDATE_URL='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/adapters/ddo-adapter-product-validator.user.js';
+  const PANEL_ID='ddo-product-validator-status', BADGE='ddo-product-validator-badge';
+  const BULK_PANEL_ID='ddo-product-validator-supplier-panel';
+const REQUIRED_TAGS = {
+  promo: 'SYST - Promo',
+  webwinkelkeur: 'SYST - Webwinkelkeur'
+};
+  let run=null;
+
+  const params=()=>new URLSearchParams(location.search);
+  const boxes=()=>[...document.querySelectorAll('input[type="checkbox"][name="products[]"]')];
+  const productList=()=>params().get('section')==='products'&&params().get('action')!=='edit';
+  const applicable=()=>productList()&&boxes().length>0&&window.__ddoToolbox?.isEnabled?.(ID)!==false;
+  const send=(name,data)=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
+  const safe=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+
+  function cents(value){
+    let text=String(value??'').trim().replace(/\s/g,'');
+    if(!text)return null;
+    if(text.includes(',')&&text.includes('.'))text=text.replace(/\./g,'').replace(',','.');
+    else text=text.replace(',','.');
+    if(!/^-?\d+(?:\.\d+)?$/.test(text))return null;
+    const number=Number(text);
+    return Number.isFinite(number)?Math.round(number*100):null;
+  }
+
+  const value=(doc,name)=>doc.querySelector(`input[name="${name}"]`)?.value;
+  const optionValues=(doc,name)=>[...doc.querySelectorAll(`#tabs-3 input[name^="options"][name$="[${name}]"]`)]
+    .filter(field=>!field.closest('tr')?.classList.contains('empty_set'))
+    .map(field=>field.value);
+
+  const plural=(count,one,many)=>`${count} ${count===1?one:many}`;
+
+  const fixable=checks=>!!checks&&(
+    checks.vipTab1||
+    checks.priceTab3||
+    checks.adviceTab3||
+    checks.vipTab3||
+    checks.referenceNme||
+  checks.promoTag||
+  checks.webwinkelkeurTag
+  );
+
+  function validateDocument(doc){
+    const issues=[];
+    const checks={
+      vipTab1:false,
+      colorsTab2:false,
+      priceTab3:false,
+      adviceTab3:false,
+      vipTab3:false,
+      referenceNme:false,
+      supplierPid:false,
+  promoTag:false,
+  webwinkelkeurTag:false
+    };
+
+    const mainPrice=cents(value(doc,'price'));
+    const mainAdvice=cents(value(doc,'price_advice'));
+    const mainVip=cents(value(doc,'price_vip'));
+
+    if(!String(value(doc,'supplier_pid')??'').trim()){
+      checks.supplierPid=true;
+      issues.push('Supplier PID ontbreekt op tab 1');
+    }
+
+    if(mainVip===null){
+      checks.vipTab1=true;
+      issues.push('VIP-prijs op tab 1 is niet controleerbaar');
+    }
+    else if(mainVip!==0){
+      checks.vipTab1=true;
+      issues.push('VIP-prijs op tab 1 is hoger dan 0,00');
+    }
+
+    const colors=[...doc.querySelectorAll('#tabs-2 tr[id^="colordelete_"]')]
+      .filter(row=>!row.classList.contains('empty_set'));
+
+    if(colors.length>2){
+      checks.colorsTab2=true;
+      issues.push(`${colors.length} kleuren op tab 2 (maximaal 2)`);
+    }
+
+    const prices=optionValues(doc,'price').map(cents);
+    const advices=optionValues(doc,'price_advice').map(cents);
+    const vips=optionValues(doc,'price_vip').map(cents);
+
+    if(mainPrice===null){
+      checks.priceTab3=true;
+      issues.push('Prijs op tab 1 is niet controleerbaar');
+    }
+    else {
+      const wrong=prices.filter(price=>price===null||price!==mainPrice).length;
+      if(wrong){
+        checks.priceTab3=true;
+        issues.push(`${plural(wrong,'optieprijs','optieprijzen')} wijkt af van tab 1`);
+      }
+    }
+
+    if(mainAdvice===null){
+      checks.adviceTab3=true;
+      issues.push('Adviesprijs op tab 1 is niet controleerbaar');
+    }
+    else {
+      const wrong=advices.filter(price=>price===null||price!==mainAdvice).length;
+      if(wrong){
+        checks.adviceTab3=true;
+        issues.push(`${plural(wrong,'optie-adviesprijs','optie-adviesprijzen')} wijkt af van tab 1`);
+      }
+    }
+
+    const badVip=vips.filter(price=>price===null||price>0).length;
+    if(badVip){
+      checks.vipTab3=true;
+      issues.push(`${plural(badVip,'optie-VIP-prijs','optie-VIP-prijzen')} hoger dan 0,00 of niet controleerbaar`);
+    }
+
+    // NME-controle:
+    // Alleen [NME] tussen blokhaken, hoofdletterongevoelig.
+    // De rest van de reference blijft volledig ongemoeid.
+    const reference=value(doc,'reference');
+
+    if(/\[NME\]/i.test(reference||'')){
+      checks.referenceNme=true;
+      issues.push(`Reference bevat [NME]: ${reference}`);
+    }
+
+// Verplichte tags op tab 7
+const assignedTags=[...doc.querySelectorAll('tr[id^="tagdelete_"]')]
+  .filter(row=>!row.classList.contains('empty_set'))
+  .map(row=>(row.querySelector('td.control')?.textContent||'').trim().toLowerCase());
+
+if(!assignedTags.includes(REQUIRED_TAGS.promo.toLowerCase())){
+  checks.promoTag=true;
+  issues.push(`Tag ontbreekt: ${REQUIRED_TAGS.promo}`);
+}
+
+if(!assignedTags.includes(REQUIRED_TAGS.webwinkelkeur.toLowerCase())){
+  checks.webwinkelkeurTag=true;
+  issues.push(`Tag ontbreekt: ${REQUIRED_TAGS.webwinkelkeur}`);
+}
+
+    return {issues,checks};
+  }
+
+  function report(){
+    installSupplierBulkButton();
+    const ready=applicable();
+    send('adapter-state',{
+      id:ID,
+      kind:'feature',
+      label:'Product Validator',
+      version:VERSION,
+      updateUrl:UPDATE_URL,
+      available:ready,
+      ready,
+      reason:ready?'Selecteer producten om ze te controleren':'Open het productoverzicht'
+    });
+  }
+
+  function selected(){
+    return boxes()
+      .filter(box=>box.checked)
+      .map(box=>{
+        const row=box.closest('tr');
+        const cells=[...row?.querySelectorAll('td')||[]];
+
+        return {
+          id:String(box.value||'').trim(),
+          name:String(cells.find(cell=>cell!==box.closest('td'))?.innerText||'').trim().split('\n')[0],
+          row
+        };
+      })
+      .filter(item=>/^\d+$/.test(item.id)&&item.row);
+  }
+
+  function installStyle(){
+    if(document.getElementById('ddo-product-validator-style'))return;
+
+    const style=document.createElement('style');
+    style.id='ddo-product-validator-style';
+    style.textContent=`
+      tr.ddo-validator-error>td{background:#ffe3e3!important}
+      tr.ddo-validator-unreadable>td{background:#fff2c7!important}
+      .${BADGE}{
+        display:inline-block;
+        margin-left:6px;
+        padding:1px 5px;
+        border-radius:10px;
+        color:#fff;
+        font:600 10px/1.4 system-ui;
+        vertical-align:middle
+      }
+      tr.ddo-validator-error .${BADGE}{background:#b42318}
+      tr.ddo-validator-unreadable .${BADGE}{background:#a15c00}
+      tr.ddo-validator-ok .${BADGE}{background:#21863a}
+    `;
+    document.head.append(style);
+  }
+
+  function clearMarks(){
+    document
+      .querySelectorAll('tr.ddo-validator-error,tr.ddo-validator-unreadable,tr.ddo-validator-ok')
+      .forEach(row=>row.classList.remove(
+        'ddo-validator-error',
+        'ddo-validator-unreadable',
+        'ddo-validator-ok'
+      ));
+
+    document.querySelectorAll(`.${BADGE}`).forEach(node=>node.remove());
+  }
+
+  function mark(item,type,text,title){
+    item.row.classList.remove(
+      'ddo-validator-error',
+      'ddo-validator-unreadable',
+      'ddo-validator-ok'
+    );
+
+    item.row.querySelectorAll(`.${BADGE}`).forEach(node=>node.remove());
+    item.row.classList.add(`ddo-validator-${type}`);
+
+    const cell=item.row.querySelector('td:nth-child(2)')||item.row.querySelector('td');
+    if(!cell)return;
+
+    const badge=document.createElement('span');
+    badge.className=BADGE;
+    badge.textContent=text;
+    badge.title=title;
+    cell.append(badge);
+  }
+
+  function panel(){
+    let node=document.getElementById(PANEL_ID);
+    if(node)return node;
+
+    node=document.createElement('div');
+    node.id=PANEL_ID;
+    node.style.cssText='margin:0 0 8px;padding:7px 9px;border:1px solid #cad5df;border-radius:6px;background:#f7fafc;color:#25313b;font:11px/1.3 system-ui;display:flex;align-items:center;gap:8px';
+
+    const table=boxes()[0]?.closest('table');
+    table?.parentNode?.insertBefore(node,table);
+
+    return node;
+  }
+
+function summaryCounts(){
+  const results=run?.results||[];
+
+  return {
+    vipTab1:results.filter(r=>r.checks?.vipTab1).length,
+    referenceNme:results.filter(r=>r.checks?.referenceNme).length,
+    supplierPid:results.filter(r=>r.checks?.supplierPid).length,
+
+    colorsTab2:results.filter(r=>r.checks?.colorsTab2).length,
+
+    priceTab3:results.filter(r=>r.checks?.priceTab3).length,
+    adviceTab3:results.filter(r=>r.checks?.adviceTab3).length,
+    vipTab3:results.filter(r=>r.checks?.vipTab3).length,
+
+    promoTag:results.filter(r=>r.checks?.promoTag).length,
+    webwinkelkeurTag:results.filter(r=>r.checks?.webwinkelkeurTag).length,
+
+    failed:results.filter(r=>r.error).length
+  };
+}
+
+function render(progress){
+  const node=panel();
+  if(!node)return;
+
+  const canApply=!progress.running&&run?.results?.some(
+    result=>!result.error&&fixable(result.currentChecks||result.checks)
+  );
+
+  const s=summaryCounts();
+
+  node.style.cssText=`
+    margin:0 0 8px;
+    padding:7px 9px;
+    border:1px solid #cad5df;
+    border-radius:6px;
+    background:#f7fafc;
+    color:#25313b;
+    font:11px/1.3 system-ui;
+  `;
+
+  node.innerHTML=`
+    <div style="
+      display:flex;
+      align-items:center;
+      gap:8px;
+    ">
+      <strong>Product Validator</strong>
+
+      <span>${safe(progress.status)}</span>
+      <span>${progress.done}/${progress.total}</span>
+
+      <span style="color:#b42318">
+        ${progress.errors} afwijkend
+      </span>
+
+      <span style="color:#a15c00">
+        ${progress.failed} mislukt
+      </span>
+
+      <span style="flex:1"></span>
+
+      ${
+        progress.running
+          ? '<button type="button" data-action="stop">Stop</button>'
+          : `
+              ${canApply
+                ? '<button type="button" data-action="apply">Pas wijzigingen toe</button>'
+                : ''
+              }
+              ${run?.results?.length
+                ? '<button type="button" data-action="export">Exporteer CSV</button>'
+                : ''
+              }
+            `
+      }
+    </div>
+
+    <div style="
+  margin-top:6px;
+  padding-top:6px;
+  border-top:1px solid #dce3e8;
+  display:flex;
+  gap:7px;
+  align-items:center;
+  flex-wrap:wrap;
+  font-size:10px;
+">
+
+  <strong>Tab 1:</strong>
+
+  <span title="VIP-prijs op tab 1 is niet 0,00">
+    VIP-prijs <strong>${s.vipTab1}</strong>
+  </span>
+
+  <span title="Reference bevat [NME]">
+    NME <strong>${s.referenceNme}</strong>
+  </span>
+
+  <span title="Supplier PID ontbreekt op tab 1">
+    Supplier PID <strong>${s.supplierPid}</strong>
+  </span>
+
+  <span style="color:#aeb8bf">|</span>
+
+  <strong>Tab 2:</strong>
+
+  <span title="Producten met meer dan 2 kleuren">
+    Dubbele kleuren <strong>${s.colorsTab2}</strong>
+  </span>
+
+  <span style="color:#aeb8bf">|</span>
+
+  <strong>Tab 3:</strong>
+
+  <span title="Optieprijzen die afwijken van de hoofdprijs">
+    Prijs <strong>${s.priceTab3}</strong>
+  </span>
+
+  <span title="Optie-adviesprijzen die afwijken van de hoofdadviesprijs">
+    Adviesprijs <strong>${s.adviceTab3}</strong>
+  </span>
+
+  <span title="VIP-prijzen bij opties hoger dan 0,00">
+    VIP-prijs <strong>${s.vipTab3}</strong>
+  </span>
+
+<span style="color:#aeb8bf">|</span>
+
+<strong>Tab 7:</strong>
+
+<span title="Producten zonder SYST - Promo">
+  Promo <strong>${s.promoTag}</strong>
+</span>
+
+<span title="Producten zonder SYST - Webwinkelkeur">
+  Webwinkelkeur <strong>${s.webwinkelkeurTag}</strong>
+</span>
+
+<span style="color:#aeb8bf">|</span>
+
+<span
+  title="Producten die niet gecontroleerd konden worden"
+  style="${s.failed?'color:#a15c00':''}"
+>
+  Niet controleerbaar <strong>${s.failed}</strong>
+</span>
+
+</div>
+  `;
+
+  node.querySelectorAll('button').forEach(button=>{
+    button.style.cssText=`
+      border:0;
+      border-radius:4px;
+      padding:3px 7px;
+      background:#0877b9;
+      color:#fff;
+      cursor:pointer;
+    `;
+  });
+
+  node.querySelector('[data-action="stop"]')
+    ?.addEventListener('click',()=>{
+      if(run)run.cancelled=true;
+    });
+
+  node.querySelector('[data-action="apply"]')
+    ?.addEventListener('click',applyChanges);
+
+  node.querySelector('[data-action="export"]')
+    ?.addEventListener('click',exportCsv);
+}
+
+  const csvCell=value=>`"${String(value??'').replace(/"/g,'""')}"`;
+
+  function exportCsv(){
+    if(!run?.results?.length)return;
+
+    const headers=[
+      'ProductID',
+      'URL',
+      'VIP prijs tab 1',
+      'Meer dan 2 kleuren tab 2',
+      'Prijs afwijkend tab 3',
+      'Adviesprijs afwijkend tab 3',
+      'VIP prijs tab 3',
+      'NME in Reference',
+      'Supplier PID ontbreekt',
+      'Controle mislukt',
+      'Wijzigingslog',
+      'Wijziging mislukt'
+    ];
+
+    const rows=run.results.map(result=>[
+      result.id,
+      result.url,
+      result.checks?.vipTab1?'✓':'',
+      result.checks?.colorsTab2?'✓':'',
+      result.checks?.priceTab3?'✓':'',
+      result.checks?.adviceTab3?'✓':'',
+      result.checks?.vipTab3?'✓':'',
+      result.checks?.referenceNme?'✓':'',
+      result.checks?.supplierPid?'✓':'',
+      result.error||'',
+      (result.changes||[]).join(' | '),
+      result.applyError||''
+    ]);
+
+    const csv='\uFEFF'+
+      [headers,...rows]
+        .map(row=>row.map(csvCell).join(';'))
+        .join('\r\n');
+
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    const stamp=new Date().toISOString().slice(0,10);
+
+    link.href=url;
+    link.download=`ddo-product-validator-${stamp}.csv`;
+
+    document.body.append(link);
+    link.click();
+    link.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+
+  function setValue(field,newValue){
+    if(!field||field.value===newValue)return false;
+    field.value=newValue;
+    field.setAttribute('value',newValue);
+    return true;
+  }
+
+  async function updateProduct(result){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),30000);
+
+    try{
+      const doc=await fetchProduct(result.id,controller.signal);
+      const form=doc.querySelector('input[name="price"]')?.closest('form');
+
+      if(!form)throw new Error('productformulier niet gevonden');
+
+      const mainPriceField=doc.querySelector('input[name="price"]');
+      const mainAdviceField=doc.querySelector('input[name="price_advice"]');
+      const mainVipField=doc.querySelector('input[name="price_vip"]');
+      const referenceField=doc.querySelector('input[name="reference"]');
+const tagsSelect=doc.querySelector('select[name="tags[]"]');
+
+      const mainPrice=mainPriceField?.value;
+      const mainAdvice=mainAdviceField?.value;
+
+      const changes=[];
+
+      if(cents(mainVipField?.value)!==0&&setValue(mainVipField,'0.00')){
+        changes.push('VIP tab 1 → 0.00');
+      }
+
+      const sync=(name,source,label)=>{
+        if(cents(source)===null)return;
+
+        let count=0;
+
+        doc.querySelectorAll(
+          `#tabs-3 input[name^="options"][name$="[${name}]"]`
+        ).forEach(field=>{
+          if(cents(field.value)!==cents(source)&&setValue(field,source)){
+            count++;
+          }
+        });
+
+        if(count){
+          changes.push(`${count} ${label} tab 3 overgenomen`);
+        }
+      };
+
+      sync('price',mainPrice,'prijzen');
+      sync('price_advice',mainAdvice,'adviesprijzen');
+
+      let vipCount=0;
+
+      doc.querySelectorAll(
+        '#tabs-3 input[name^="options"][name$="[price_vip]"]'
+      ).forEach(field=>{
+        if(cents(field.value)!==0&&setValue(field,'0.00')){
+          vipCount++;
+        }
+      });
+
+      if(vipCount){
+        changes.push(`${vipCount} VIP-prijzen tab 3 → 0.00`);
+      }
+
+      // NME → EXT
+      //
+      // Voorbeelden:
+      // [NME]       → [EXT]
+      // [nme]       → [EXT]
+      // - [NME]     → - [EXT]
+      // 07 - [NME]  → 07 - [EXT]
+      //
+      // Niets anders uit Reference wordt verwijderd of gewijzigd.
+      if(referenceField&&/\[NME\]/i.test(referenceField.value)){
+        const oldReference=referenceField.value;
+        const newReference=oldReference.replace(/\[NME\]/gi,'[EXT]');
+
+        if(setValue(referenceField,newReference)){
+          changes.push(`Reference "${oldReference}" → "${newReference}"`);
+        }
+      }
+
+// Ontbrekende verplichte tags toevoegen
+if(tagsSelect){
+  const ensureTag=(label)=>{
+    const option=[...tagsSelect.options].find(option=>
+      (option.textContent||'').trim().toLowerCase()===label.toLowerCase()
+    );
+
+    if(!option){
+      throw new Error(`Ontbrekende tag niet beschikbaar in tags[]: ${label}`);
+    }
+
+    if(!option.selected){
+      option.selected=true;
+      return true;
+    }
+
+    return false;
+  };
+
+  if(result.currentChecks?.promoTag && ensureTag(REQUIRED_TAGS.promo)){
+    changes.push(`Tag toegevoegd: ${REQUIRED_TAGS.promo}`);
+  }
+
+  if(result.currentChecks?.webwinkelkeurTag && ensureTag(REQUIRED_TAGS.webwinkelkeur)){
+    changes.push(`Tag toegevoegd: ${REQUIRED_TAGS.webwinkelkeur}`);
+  }
+}
+
+      if(!changes.length){
+        return {
+          changes:[],
+          validation:validateDocument(doc)
+        };
+      }
+
+      const formData=new FormData(form);
+      const submit=form.querySelector(
+        'input[type="submit"][name="edit"],button[type="submit"][name="edit"],input[type="submit"][name]'
+      );
+
+      if(submit?.name){
+        formData.set(submit.name,submit.value||'Update product');
+      }
+
+      const action=new URL(
+        form.getAttribute('action')||result.url,
+        result.url
+      ).href;
+
+      const response=await fetch(action,{
+        method:(form.getAttribute('method')||'post').toUpperCase(),
+        body:formData,
+        credentials:'same-origin',
+        cache:'no-store',
+        signal:controller.signal
+      });
+
+      if(!response.ok){
+        throw new Error(`opslaan gaf HTTP ${response.status}`);
+      }
+
+      result.changes=[...changes];
+
+      const verifyDoc=await fetchProduct(result.id,controller.signal);
+      const validation=validateDocument(verifyDoc);
+
+      if(fixable(validation.checks)){
+        throw new Error('nacontrole vond nog corrigeerbare afwijkingen');
+      }
+
+      return {
+        changes,
+        validation
+      };
+    }
+    finally{
+      clearTimeout(timer);
+    }
+  }
+
+  async function applyChanges(){
+    if(!run||run.running)return;
+
+    const targets=run.results.filter(
+      result=>!result.error&&fixable(result.currentChecks||result.checks)
+    );
+
+    if(!targets.length)return;
+
+    if(!confirm(
+      `Wijzig ${targets.length} product(en)?\n\n`+
+      `VIP-prijzen worden 0.00.\n`+
+      `Afwijkende prijzen en adviesprijzen op tab 3 worden gelijkgezet aan tab 1.\n`+
+      `[NME] in Reference wordt vervangen door [EXT].\n\n`+
+      `Overige inhoud van Reference en kleuren blijven ongemoeid.`
+    ))return;
+
+    run.running=true;
+    run.cancelled=false;
+
+    const progress={
+      status:'Wijzigingen toepassen…',
+      done:0,
+      total:targets.length,
+      errors:0,
+      failed:0,
+      running:true
+    };
+
+    render(progress);
+
+    for(const result of targets){
+      if(run.cancelled)break;
+
+      try{
+        const outcome=await updateProduct(result);
+
+        result.changes=outcome.changes;
+        result.applyError='';
+        result.currentChecks=outcome.validation.checks;
+
+        const remaining=outcome.validation.issues;
+
+        if(remaining.length){
+          progress.errors++;
+
+          mark(
+            result.item,
+            'error',
+            `⚠ ${remaining.length}`,
+            `${remaining.join('\n')}\n\nGewijzigd: ${outcome.changes.join(' · ')}`
+          );
+        }
+        else {
+          mark(
+            result.item,
+            'ok',
+            '✓ Hersteld',
+            outcome.changes.join('\n')||'Was al correct'
+          );
+        }
+      }
+      catch(error){
+        const message=String(error?.message||error);
+
+        result.applyError=message;
+        progress.failed++;
+
+        mark(
+          result.item,
+          'unreadable',
+          '? Wijziging mislukt',
+          message
+        );
+
+        console.error(
+          `[DDO Product Validator] Wijzigen product ${result.id}`,
+          error
+        );
+      }
+
+      progress.done++;
+      render(progress);
+    }
+
+    progress.running=false;
+    progress.status=run.cancelled
+      ?'Wijzigen gestopt'
+      :'Wijzigingen afgerond';
+
+    run.running=false;
+    render(progress);
+  }
+
+  async function fetchProduct(id,signal){
+    const url=`${location.origin}/admin.php?section=products&action=edit&id=${encodeURIComponent(id)}`;
+
+    const response=await fetch(url,{
+      credentials:'same-origin',
+      cache:'no-store',
+      signal
+    });
+
+    if(!response.ok){
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const html=await response.text();
+    const doc=new DOMParser().parseFromString(html,'text/html');
+
+    if(
+      doc.querySelector('input[type="password"]')||
+      !doc.querySelector('input[name="price"]')
+    ){
+      throw new Error('productpagina niet herkenbaar');
+    }
+
+    return doc;
+  }
+
+  const supplierBulkBrand=()=>{
+    const query=params();
+    return query.get('section')==='products'&&query.get('action')==='list'&&query.get('filter')==='brand_id'&&/^\d+$/.test(query.get('id')||'')?query.get('id'):'';
+  };
+
+  function parseSupplierBulk(text){
+    const lines=String(text||'').replace(/^\uFEFF/,'').split(/\r?\n/).filter(line=>line.trim());
+    if(!lines.length)throw new Error('Plak minimaal één regel met Product ID, oude Supplier ID en nieuwe Supplier ID.');
+    const cells=line=>{
+      const parts=[];let field='',quoted=false;
+      for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'){if(quoted&&line[i+1]==='"'){field+='"';i++}else if(quoted||!field)quoted=!quoted;else field+=char}else if(char==='\t'&&!quoted){parts.push(field.trim());field=''}else field+=char}
+      if(quoted)throw new Error('Niet afgesloten aanhalingsteken in plakgegevens.');parts.push(field.trim());return parts;
+    };
+    const first=cells(lines[0]).map(cell=>cell.toLocaleLowerCase('nl').replace(/\s+/g,' '));
+    const header=first[0]==='product id'&&['oude supplier id','oude supplier pid'].includes(first[1])&&['nieuwe supplier id','nieuwe supplier pid'].includes(first[2]);
+    const data=header?lines.slice(1):lines;
+    if(!data.length)throw new Error('De lijst bevat alleen kolomkoppen.');
+    const seen=new Set();
+    return data.map((line,index)=>{
+      const row=cells(line),number=index+1+(header?1:0);
+      if(row.length!==3)throw new Error(`Regel ${number}: precies drie kolommen vereist.`);
+      const [id,oldPid,newPid]=row;
+      if(!/^\d+$/.test(id)||id==='0')throw new Error(`Regel ${number}: ongeldig Product ID.`);
+      if(seen.has(id))throw new Error(`Product ID ${id} staat dubbel in de lijst.`);
+      if(!newPid)throw new Error(`Regel ${number}: nieuwe Supplier ID ontbreekt.`);
+      seen.add(id);
+      return {id,oldPid,newPid,checked:false,done:false,error:'',message:'Nog niet gecontroleerd'};
+    });
+  }
+
+  const supplierReady=items=>items.filter(item=>item.checked&&!item.done);
+
+  class SupplierPreconditionError extends Error {}
+
+  function inspectSupplierProduct(doc,item,brandId){
+    const brand=doc.querySelector('select[name="brand_id"],input[name="brand_id"]')?.value;
+    if(!brand||brand!==brandId)throw new SupplierPreconditionError(`Merk-ID wijkt af: ${brand||'onbekend'} ≠ ${brandId}.`);
+    const field=doc.querySelector('input[name="supplier_pid"]');
+    if(!field)throw new SupplierPreconditionError('Supplier PID-veld ontbreekt.');
+    const current=field.value.trim();
+    if(current!==item.oldPid)throw new SupplierPreconditionError(`Oude Supplier ID wijkt af: “${current}” ≠ “${item.oldPid}”.`);
+    const form=field.closest('form');
+    if(!form)throw new SupplierPreconditionError('Productformulier ontbreekt.');
+    const page=`${location.origin}/admin.php?section=products&action=edit&id=${encodeURIComponent(item.id)}`;
+    const action=new URL(form.getAttribute('action')||page,page);
+    if(action.origin!==location.origin||action.pathname!=='/admin.php'||action.searchParams.get('section')!=='products'||action.searchParams.get('action')!=='edit'||action.searchParams.get('id')!==item.id||String(form.getAttribute('method')||'post').toLowerCase()!=='post')throw new SupplierPreconditionError('Onverwachte formulieractie; niet opslaan.');
+    return {field,form,action:action.href,changed:current!==item.newPid};
+  }
+
+  async function saveSupplierProduct(item,brandId){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+    try{
+      const doc=await fetchProduct(item.id,controller.signal);
+      const prepared=inspectSupplierProduct(doc,item,brandId);
+      if(!prepared.changed)return 'Reeds correct';
+      prepared.field.value=item.newPid;
+      const body=new FormData(prepared.form);
+      body.set('supplier_pid',item.newPid);
+      const submit=prepared.form.querySelector('input[type="submit"][name="edit"],button[type="submit"][name="edit"],input[type="submit"][name]');
+      if(submit?.name)body.set(submit.name,submit.value||'Update product');
+      const response=await fetch(prepared.action,{method:'POST',body,credentials:'same-origin',cache:'no-store',signal:controller.signal});
+      if(!response.ok)throw new Error(`Opslaan gaf HTTP ${response.status}.`);
+      const verified=await fetchProduct(item.id,controller.signal);
+      const current=verified.querySelector('input[name="supplier_pid"]')?.value.trim();
+      if(current!==item.newPid)throw new Error(`Nacontrole mislukt: Supplier PID is “${current??'ontbreekt'}”.`);
+      return 'Gewijzigd en geverifieerd';
+    }finally{clearTimeout(timer)}
+  }
+
+  function installSupplierBulkButton(){
+    const brandId=supplierBulkBrand();
+    if(!brandId)return;
+    const coreAccess=window.__ddoToolbox?.isEnabled?.(ID);
+    if(coreAccess===false)return;
+    if(coreAccess!==true){
+      // GM_xxx- en @grant none-scripts kunnen in gescheiden werelden draaien.
+      // Neem dan dezelfde expliciete namenlijst als de Core, nooit een open fallback.
+      const name=document.querySelector('.profile .profile_content h1,.profile h1')?.textContent?.replace(/\s+/g,' ').trim().toLocaleLowerCase('nl')||'';
+      if(!['chantor pascal van beek','folkert van beek','monique van beek','chantal timmer','anke adams'].includes(name))return;
+    }
+    const toolbox=document.getElementById('ddo-toolbox');
+    if(!toolbox||document.getElementById(BULK_PANEL_ID))return;
+    const section=document.createElement('section');section.id=BULK_PANEL_ID;section.className='ddo-module-panel';
+    const title=document.createElement('div');title.className='ddo-edi-title';title.textContent='Product Validator';
+    const row=document.createElement('div');row.className='ddo-edi-row';row.style.display='block';
+    const control=document.createElement('button');control.type='button';control.className='ddo-edi-action';control.style.width='100%';control.textContent='Supplier ID’s wijzigen';control.title='Wijzig Supplier PID’s in bulk na exacte controle van Product ID, merk en oude Supplier ID';control.onclick=()=>openSupplierBulk(brandId);
+    row.append(control);section.append(title,row);toolbox.querySelector('#ddo-edi-panel')?.insertAdjacentElement('afterend',section)||toolbox.append(section);
+  }
+
+  function openSupplierBulk(brandId){
+    if(document.getElementById('ddo-supplier-bulk-dialog'))return;
+    const dialog=document.createElement('dialog');dialog.id='ddo-supplier-bulk-dialog';dialog.style.cssText='width:900px;max-width:95vw;max-height:90vh;padding:0 12px 12px;border:1px solid #cbd5df;border-radius:7px;box-shadow:0 5px 18px #0003;background:#fff;color:#25313b;font:12px/1.3 system-ui';document.body.append(dialog);
+    const heading=document.createElement('h2');heading.textContent=`Supplier ID’s wijzigen · merk ${brandId}`;heading.style.cssText='margin:0 -12px 8px;padding:8px 38px 8px 10px;background:#263746;color:#fff;border-radius:6px 6px 0 0;font:650 13px/1.2 system-ui';dialog.append(heading);
+    const makeButton=(label,parent,handler)=>{const control=document.createElement('button');control.type='button';control.textContent=label;control.style.cssText='padding:7px 10px;border:0;border-radius:4px;background:#0877b9;color:#fff;font:600 11px/1.2 system-ui;cursor:pointer';control.onclick=handler;parent.append(control);return control};
+    const close=makeButton('×',dialog,()=>dialog.close());close.title='Sluiten';close.style.cssText='position:absolute;right:7px;top:4px;width:25px;height:25px;padding:0;border:0;background:transparent;color:#fff;font:20px/1 system-ui;cursor:pointer';
+    const intro=document.createElement('p');intro.textContent='Plak drie tabgescheiden kolommen: Product ID, oude Supplier ID, nieuwe Supplier ID. Een lege oude ID is toegestaan en wordt exact vergeleken. Alleen producten van dit merk worden verwerkt.';intro.style.margin='8px 0';dialog.append(intro);
+    const input=document.createElement('textarea');input.placeholder='Product ID\toude Supplier ID\tnieuwe Supplier ID';input.setAttribute('aria-label','Supplier ID-bulklijst');input.style.cssText='box-sizing:border-box;width:100%;height:105px;padding:8px;border:1px solid #cbd5df;border-radius:4px;font:12px/1.35 monospace';dialog.append(input);
+    const controls=document.createElement('div');controls.style.cssText='display:flex;gap:6px;margin:8px 0';dialog.append(controls);
+    const status=document.createElement('p');status.setAttribute('role','status');status.style.cssText='min-height:16px;margin:6px 0';dialog.append(status);
+    const scroller=document.createElement('div');scroller.style.cssText='max-height:45vh;overflow:auto;border:1px solid #cbd5df;border-radius:4px';dialog.append(scroller);
+    const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse';scroller.append(table);
+    const header=table.createTHead().insertRow();for(const label of ['Product ID','Oude Supplier ID','Nieuwe Supplier ID','Status']){const cell=header.insertCell();cell.textContent=label;cell.style.cssText='padding:5px;background:#edf2f7;text-align:left'}
+    const body=table.createTBody();let items=[],busy=false,stop=false;
+    const check=makeButton('Controleren',controls,()=>checkRows());const apply=makeButton('Uitvoeren',controls,()=>applyRows());const halt=makeButton('Stop na huidige regel',controls,()=>{stop=true});
+    const actionable=()=>supplierReady(items);
+    const update=()=>{check.disabled=busy||!input.value.trim();apply.disabled=busy||!actionable().length;halt.disabled=!busy;close.disabled=busy;input.disabled=busy;for(const control of [check,apply,halt])control.style.opacity=control.disabled?'.5':'1'};
+    const draw=()=>{body.replaceChildren();for(const item of items){const row=body.insertRow();for(const value of [item.id,item.oldPid,item.newPid,item.message]){const cell=row.insertCell();cell.textContent=value;cell.style.cssText=`padding:5px;border-bottom:1px solid #e2e8f0;${item.error?'color:#b91c1c':''}`}}};
+    input.oninput=()=>{items=[];body.replaceChildren();status.textContent='Lijst gewijzigd; opnieuw controleren.';update()};
+    async function checkRows(){
+      try{items=parseSupplierBulk(input.value)}catch(error){status.textContent=error.message;update();return}
+      busy=true;stop=false;update();draw();let count=0;
+      for(const item of items){
+        if(stop)break;
+        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+        try{
+          const doc=await fetchProduct(item.id,controller.signal),prepared=inspectSupplierProduct(doc,item,brandId);
+          item.checked=true;item.done=!prepared.changed;item.error='';item.message=prepared.changed?'Klaar om te wijzigen':'Reeds correct';
+        }catch(error){item.checked=false;item.error=String(error.message||error);item.message=`Overgeslagen: ${item.error}`}
+        finally{clearTimeout(timer)}
+        count++;status.textContent=`${count}/${items.length} gecontroleerd · ${items.length-count} resterend`;draw();
+      }
+      busy=false;
+      status.textContent=`${count}/${items.length} gecontroleerd · ${actionable().length} klaar om te wijzigen · ${items.filter(item=>item.error).length} overgeslagen`;
+      update();
+    }
+    async function applyRows(){
+      const ready=actionable();
+      if(!ready.length)return;
+      const notReady=items.filter(item=>!item.checked).length,already=items.filter(item=>item.checked&&item.done).length;
+      if(!confirm(`Wijzig de Supplier PID van ${ready.length} product(en)? ${notReady} afwijkende regel(s) worden overgeslagen; ${already} zijn reeds correct. De oude waarde en het merk worden vóór iedere opslag opnieuw exact gecontroleerd.`))return;
+      busy=true;stop=false;update();let processed=0,skipped=notReady;
+      try{
+        if(!navigator.locks)throw new Error('Browser ondersteunt geen batchvergrendeling.');
+        await navigator.locks.request('ddo-supplier-pid-batch',{ifAvailable:true},async lock=>{
+          if(!lock)throw new Error('Er loopt al een Supplier PID-batch in een ander tabblad.');
+          for(const item of ready){
+            if(stop)break;
+            try{item.message=await saveSupplierProduct(item,brandId);item.done=true;processed++}
+            catch(error){
+              item.error=String(error.message||error);
+              if(error instanceof SupplierPreconditionError){item.checked=false;item.message=`Overgeslagen: ${item.error}`;skipped++}
+              else{item.message=`Gestopt: ${item.error}`;stop=true}
+            }
+            status.textContent=`${processed}/${ready.length} gewijzigd · ${skipped} overgeslagen`;draw();
+          }
+        });
+      }catch(error){status.textContent=error.message}
+      finally{busy=false;update()}
+    }
+    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault()});dialog.addEventListener('close',()=>dialog.remove());update();dialog.showModal();input.focus();
+  }
+
+  async function start(){
+    if(!applicable()||run?.running)return;
+
+    const items=selected();
+
+    if(!items.length){
+      alert('Selecteer eerst minimaal één product om te controleren.');
+      return;
+    }
+
+    installStyle();
+    clearMarks();
+
+    run={
+      running:true,
+      cancelled:false,
+      results:[]
+    };
+
+    const progress={
+      status:'Controleren…',
+      done:0,
+      total:items.length,
+      errors:0,
+      failed:0,
+      running:true
+    };
+
+    render(progress);
+
+    for(const item of items){
+      if(run.cancelled)break;
+
+      const url=`${location.origin}/admin.php?section=products&action=edit&id=${encodeURIComponent(item.id)}`;
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),30000);
+
+      try{
+        const doc=await fetchProduct(item.id,controller.signal);
+        const result=validateDocument(doc);
+
+        run.results.push({
+          id:item.id,
+          url,
+          item,
+          checks:result.checks,
+          currentChecks:result.checks,
+          error:'',
+          changes:[],
+          applyError:''
+        });
+
+        if(result.issues.length){
+          progress.errors++;
+
+          mark(
+            item,
+            'error',
+            `⚠ ${result.issues.length}`,
+            result.issues.join('\n')
+          );
+        }
+        else {
+          mark(
+            item,
+            'ok',
+            '✓ OK',
+            'Geen afwijkingen gevonden'
+          );
+        }
+      }
+      catch(error){
+        const message=String(error?.message||error);
+
+        run.results.push({
+          id:item.id,
+          url,
+          item,
+          checks:null,
+          currentChecks:null,
+          error:message,
+          changes:[],
+          applyError:''
+        });
+
+        progress.failed++;
+
+        mark(
+          item,
+          'unreadable',
+          '? Mislukt',
+          message
+        );
+
+        console.error(
+          `[DDO Product Validator] Product ${item.id}`,
+          error
+        );
+      }
+      finally{
+        clearTimeout(timer);
+      }
+
+      progress.done++;
+      render(progress);
+    }
+
+    progress.running=false;
+    progress.status=run.cancelled
+      ?'Gestopt'
+      :'Controle afgerond';
+
+    run.running=false;
+    render(progress);
+  }
+
+  document.addEventListener('ddo-toolbox:discover',report);
+
+  document.addEventListener('ddo-toolbox:run-feature',event=>{
+    let detail={};
+
+    try{
+      detail=JSON.parse(event.detail||'{}');
+    }
+    catch{}
+
+    if(detail.id===ID){
+      start();
+    }
+  });
+
+  report();
+})();
+
+  const VERSION='3.8.3', UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/ddo-toolbox.user.js';
   const SETTINGS={updateFlowDefault:true}; // Pas dit per desktop aan als de lokale standaard anders moet zijn.
   const UPDATE_CACHE_KEY='ddo_toolbox_update_cache', UPDATE_INTERVAL=86400000;
   const FLOW_ENABLED_KEY='ddo_toolbox_update_flow_enabled';
@@ -131,7 +1352,8 @@ const DDO_EDI = (() => {
     fluentL:{label:'FluentL',description:'Vertaal product- en paginavelden naar geselecteerde talen.',manager:true,picker:true,icon:'translate',action:true,adapter:true,file:'ddo-adapter-fluentl.user.js'},
     faqSelector:{label:'FAQ Selector',description:'Zoek en selecteer relevante FAQ’s voor de pagina.',manager:true,picker:true,icon:'help',action:true,adapter:true,file:'ddo-adapter-faq-selector.user.js'},
     ggQueue:{label:'GG Queue',description:'Bouw een GoedGepickt-queue op uit selecties of Product ID’s.',manager:true,picker:true,icon:'rocket',action:true,adapter:true,file:'ddo-adapter-gg-queue.user.js'},
-    productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true,adapter:true,file:'ddo-adapter-product-validator.user.js'}
+    productValidator:{label:'Product Validator',description:'Controleer en corrigeer geselecteerde producten op kleur-, prijs- en NME-afwijkingen.',manager:true,picker:true,icon:'checklist',action:true},
+    changeModel:{label:'Change Model',description:'Wijzig merk en model van geselecteerde producten gecontroleerd in bulk.',manager:false,picker:false,icon:'tune',action:true}
   };
   const ADAPTER_CATALOG=[
     {id:'charlie-choe',label:'Charlie Choe / Mila',folder:'EDI',file:'EDI-charlie-choe.user.js'},
@@ -144,7 +1366,6 @@ const DDO_EDI = (() => {
     {id:'lisca',label:'Lisca',file:'ddo-adapter-lisca.user.js'},
     {id:'mey',label:'Mey',file:'ddo-adapter-mey.user.js'},
     {id:'seoWriter',label:'SEO Writer',file:'ddo-adapter-seo-writer.user.js'},
-    {id:'productValidator',label:'Product Validator',file:'ddo-adapter-product-validator.user.js'},
     {id:'triumph-sloggi',label:'Triumph/Sloggi',folder:'EDI',file:'EDI-triumph.user.js'},
     {id:'wacoal-group',label:'Wacoal',file:'ddo-adapter-wacoal.user.js'}
   ].map(item=>({...item,updateUrl:`https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/${item.folder||'adapters'}/${item.file}`}));
@@ -187,8 +1408,8 @@ const DDO_EDI = (() => {
       if(['seoWriter','fluentL','faqSelector'].includes(id)&&!textPage)return{ready:false,reason:'Open een ondersteunde bewerkpagina'};
       return{ready:!!installed?.ready,reason:installed?.reason||(!installed?'Adapter ontbreekt':'Niet beschikbaar op deze pagina')};
     }
-    const params=new URLSearchParams(location.search),section=params.get('section'),action=params.get('action'),product=section==='products',edit=product&&action==='edit',active1=edit&&productTabActive('tabs-1'),active2=edit&&productTabActive('tabs-2'),active3=edit&&tab3(),active7=product&&!action&&productTabActive('tabs-7'),colorSwapPage=product&&action==='list'&&params.get('filter')==='color_id'&&/^\d+$/.test(params.get('id')||''),productList=product&&!action&&!!$('input[name="products[]"]'),sizeChartReady=sizeChartPage()&&!!$('textarea[name="sizechart"],textarea[name="lang[en][sizechart]"],textarea[name="lang[de][sizechart]"],textarea[name="lang[fr][sizechart]"]');
-    const states={edi:[active1||active3,'Open producttab 1 of 3'],cap:[active3&&!!$('#tabs-3 th.product_option_small'),'Open producttab 3'],sizeHelper:[active2&&!!$('select[name="sizes[]"][multiple],select[name="sizes"][multiple]'),'Open producttab 2'],unlockStock:[active3&&!!$('#tabs-3 input[name$="[stock]"]'),'Open producttab 3'],priceHelper:[active1,'Open producttab 1'],photoLoco:[active1&&!!$('input[type="file"][name^="image["]'),'Open producttab 1'],nis:[active3&&!!$(TABLE),'Open producttab 3'],productFinetuner:[active1||productList,'Open producttab 1 of de productlijst'],rowEdit:[!!$('tr.highlight[onmousedown*="Goto"]'),'Open een ondersteunde lijst'],discountPill:[productList,'Open de productlijst'],multiTabber:[productList,'Open de productlijst'],twoOrder:[orderStatusPage()||!!paste2OrderRequest(),'Open een 2Order-statuspagina'],sizeChart:[sizeChartReady,'Open een merk met sizechartvelden'],threeForTwo:[section==='returns'&&['view','line_add'].includes(action),'Open een retour'],colorManagement:[(active7&&!!$('#product_coloradd_dialog form'))||colorSwapPage,'Open Producten → tab 7 of een op kleur gefilterde productlijst']};
+    const params=new URLSearchParams(location.search),section=params.get('section'),action=params.get('action'),product=section==='products',edit=product&&action==='edit',active1=edit&&productTabActive('tabs-1'),active2=edit&&productTabActive('tabs-2'),active3=edit&&tab3(),active7=product&&!action&&productTabActive('tabs-7'),colorSwapPage=product&&action==='list'&&params.get('filter')==='color_id'&&/^\d+$/.test(params.get('id')||''),selectedProductList=product&&action!=='edit'&&!!$('input[name="products[]"]'),productList=product&&!action&&!!$('input[name="products[]"]'),sizeChartReady=sizeChartPage()&&!!$('textarea[name="sizechart"],textarea[name="lang[en][sizechart]"],textarea[name="lang[de][sizechart]"],textarea[name="lang[fr][sizechart]"]');
+    const states={edi:[active1||active3,'Open producttab 1 of 3'],cap:[active3&&!!$('#tabs-3 th.product_option_small'),'Open producttab 3'],sizeHelper:[active2&&!!$('select[name="sizes[]"][multiple],select[name="sizes"][multiple]'),'Open producttab 2'],unlockStock:[active3&&!!$('#tabs-3 input[name$="[stock]"]'),'Open producttab 3'],priceHelper:[active1,'Open producttab 1'],photoLoco:[active1&&!!$('input[type="file"][name^="image["]'),'Open producttab 1'],nis:[active3&&!!$(TABLE),'Open producttab 3'],productFinetuner:[active1||productList,'Open producttab 1 of de productlijst'],rowEdit:[!!$('tr.highlight[onmousedown*="Goto"]'),'Open een ondersteunde lijst'],discountPill:[productList,'Open de productlijst'],multiTabber:[productList,'Open de productlijst'],twoOrder:[orderStatusPage()||!!paste2OrderRequest(),'Open een 2Order-statuspagina'],sizeChart:[sizeChartReady,'Open een merk met sizechartvelden'],threeForTwo:[section==='returns'&&['view','line_add'].includes(action),'Open een retour'],colorManagement:[(active7&&!!$('#product_coloradd_dialog form'))||colorSwapPage,'Open Producten → tab 7 of een op kleur gefilterde productlijst'],productValidator:[selectedProductList,'Open een productlijst'],changeModel:[selectedProductList,'Open een productlijst']};
     const state=states[id]||[false,'Niet van toepassing'];return{ready:!!state[0],reason:state[0]?'Beschikbaar op deze pagina':state[1]};
   }
   function status(id,text,kind='info',ms=0){const button=$(`[data-edi-action="${id}"]`),tile=$('[data-feature="edi"]');if(button){button.dataset.status=kind;button.closest('.ddo-edi-row')?.querySelector('.ddo-edi-status')?.replaceChildren(text||'')}if(tile)tile.dataset.status=kind==='error'?'error':kind==='busy'?'busy':'usable';messages.set(id,ms?Date.now()+ms:kind==='busy'?Infinity:0);if(ms)setTimeout(()=>paint(),ms)}
@@ -274,7 +1495,7 @@ const DDO_EDI = (() => {
   function originalTab3Action(spec){return[...document.querySelectorAll('input[type="submit"],input[type="button"],button,a')].find(element=>!element.closest('#ddo-tab3-actions')&&spec.match.test(controlText(element)))||null}
   function tab3DeleteCount(){const boxes=[...document.querySelectorAll('#tabs-3 input[type="checkbox"][name="options_delete[]"]')];return{selected:boxes.filter(box=>box.checked).length,total:boxes.length,blocked:boxes.filter(box=>box.disabled).length}}
   function refreshTab3ActionLabels(){const button=$('#ddo-tab3-actions [data-action="delete"]');if(!button)return;const count=tab3DeleteCount();button.textContent=`Delete Selected · ${count.selected}/${count.total}`;button.title=`${count.selected} van ${count.total} rijen geselecteerd${count.blocked?` · ${count.blocked} geblokkeerd`:''}; voer de originele DDO-actie “Delete Selected” uit`}
-  function positionTab3Actions(){const toolbox=$('#ddo-toolbox'),bar=$('#ddo-tab3-actions');if(!toolbox||!bar)return;const rect=toolbox.getBoundingClientRect();bar.style.left=`${Math.max(0,Math.min(innerWidth-rect.width,rect.left))}px`;bar.style.top=`${Math.min(innerHeight-bar.offsetHeight,rect.bottom+4)}px`;bar.style.width=`${rect.width}px`}
+  function positionTab3Actions(){const toolbox=$('#ddo-toolbox'),bar=$('#ddo-tab3-actions');if(!toolbox||!bar)return;const collapsed=toolbox.classList.contains('ddo-collapsed');bar.style.display=collapsed?'none':'grid';if(collapsed)return;const rect=toolbox.getBoundingClientRect(),width=Math.round(rect.width),gap=4;let toolboxLeft=Math.round(rect.left);if(toolboxLeft<width+gap&&innerWidth>=width*2+gap){toolboxLeft=width+gap;toolbox.style.left=`${toolboxLeft}px`;toolbox.style.right='auto'}bar.style.width=`${width}px`;bar.style.left=`${Math.max(0,toolboxLeft-width-gap)}px`;bar.style.top=`${Math.max(0,Math.min(innerHeight-bar.offsetHeight,Math.round(rect.top)))}px`}
   function enhanceTab3Actions(){const edit=productEditPage(),active=productTabActive('tabs-3'),sources=new Map(TAB3_ACTIONS.map(spec=>[spec.key,originalTab3Action(spec)]));let bar=$('#ddo-tab3-actions');if(!edit||!active||![...sources.values()].some(Boolean)){bar?.remove();return}if(!bar){bar=document.createElement('aside');bar.id='ddo-tab3-actions';bar.setAttribute('aria-label','DDO acties tab 3');document.body.appendChild(bar);for(const spec of TAB3_ACTIONS){const button=document.createElement('button');button.type='button';button.dataset.action=spec.key;button.textContent=spec.label;button.title=`Voer originele DDO-actie “${spec.label}” uit`;button.addEventListener('click',event=>{event.preventDefault();const original=originalTab3Action(spec);if(original&&!original.disabled)original.click()});bar.appendChild(button)}window.addEventListener('resize',positionTab3Actions)}const tab=$('#tabs-3');if(tab&&!tab.dataset.ddoActionCounter){tab.dataset.ddoActionCounter='1';tab.addEventListener('change',event=>{if(event.target.matches?.('input[type="checkbox"][name="options_delete[]"]'))queueMicrotask(refreshTab3ActionLabels)},true)}for(const spec of TAB3_ACTIONS){const button=bar.querySelector(`[data-action="${spec.key}"]`),original=sources.get(spec.key);button.disabled=!original||!!original.disabled;button.hidden=!original}refreshTab3ActionLabels();positionTab3Actions()}
   function enhanceMultiTabber(){const table=[...document.querySelectorAll('table.control')].find(t=>t.querySelector('input[type="checkbox"][name="products[]"]'));if(!table||table.dataset.ddoMultiTabber)return;table.dataset.ddoMultiTabber='1';if(!$('#ddo-multitabber-style')){const style=document.createElement('style');style.id='ddo-multitabber-style';style.textContent='.ddo-multitabber-toolbar,.ddo-tag-filter-box{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}.ddo-tag-filter-box{align-items:flex-start;padding:8px;border:1px solid #ddd;background:#fafafa;border-radius:6px}.ddo-tag-filter-title{width:100%;font-weight:700}.ddo-tag-filter-group label{display:block;font-weight:700;margin-bottom:3px}.ddo-tag-filter-group select{min-width:250px;min-height:130px}.ddo-tag-pill{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:999px;background:#111;color:#fff;font-size:11px}.ddo-filter-match{background:#e9ffe9!important}.ddo-filter-no-match{opacity:.55}.ddo-clipboard-match{outline:2px solid #7c3aed;outline-offset:-2px}.ddo-multitabber-status{font-weight:600;color:#4b5563}.ddo-multitabber-status.warn{color:#9a5b10}';document.head.appendChild(style)}const boxes=()=>[...table.querySelectorAll('tbody input[type="checkbox"][name="products[]"]')],rows=()=>[...table.querySelectorAll('tbody tr')].filter(r=>r.querySelector('input[name="products[]"]')),toolbar=document.createElement('div');toolbar.className='ddo-multitabber-toolbar';const open=smallInlineButton('','Open selectie','Open geselecteerde producten',()=>openSelected(false)),options=smallInlineButton('','Open Options','Open Options van geselecteerde producten',()=>openSelected(true)),clipboard=smallInlineButton('','Selecteer vanaf klembord','Selecteer Product IDs vanaf klembord',selectClipboard),count=document.createElement('b'),state=document.createElement('span'),tip=document.createElement('span');state.className='ddo-multitabber-status';tip.textContent='Shift = meervoudige selectie';tip.style.opacity='.7';toolbar.append(open,options,clipboard,count,state,tip);table.parentElement.insertBefore(toolbar,table);
     const update=()=>{const n=boxes().filter(b=>b.checked).length;count.textContent=`${n} geselecteerd`;open.disabled=options.disabled=n===0},stop=e=>{e.stopPropagation();if(e.type==='mousedown')e.preventDefault()},url=(box,tab3)=>{const u=new URL(location.href);u.search='';u.hash='';u.searchParams.set('section','products');u.searchParams.set('action','edit');u.searchParams.set('id',box.value.trim());if(tab3)u.hash='tabs-3';return u.href};function openSelected(tab3){boxes().filter(b=>b.checked).forEach(box=>window.open(url(box,tab3),'_blank','noopener'))}async function selectClipboard(){const wantedIds=parseProductIds(await navigator.clipboard.readText()),wanted=new Set(wantedIds),found=new Set();table.querySelectorAll('.ddo-clipboard-match').forEach(r=>r.classList.remove('ddo-clipboard-match'));boxes().forEach(box=>{const id=box.value.trim().toUpperCase(),yes=wanted.has(id);box.checked=yes;box.closest('tr')?.classList.toggle('ddo-clipboard-match',yes);if(yes)found.add(id)});const missing=wantedIds.filter(id=>!found.has(id));state.textContent=missing.length?`${found.size} geselecteerd; mist: ${missing.slice(0,8).join(', ')}`:`${found.size} geselecteerd vanaf klembord`;state.classList.toggle('warn',!!missing.length);update()}
@@ -340,9 +1561,9 @@ const DDO_EDI = (() => {
     const edi=Object.entries(EDI_ACTIONS).map(([id,feature])=>`<div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-edi-action="${id}">${feature.label}</button><small class="ddo-edi-status">Controleren…</small></div>`).join('');
     box.innerHTML=`<header><span>DDO Toolbox</span><span class="ddo-header-controls"><span class="ddo-version">v${VERSION}</span><button type="button" class="ddo-collapse" aria-expanded="true" title="Minimaliseren" aria-label="Toolbox minimaliseren"></button></span></header><div class="ddo-user"><div id="ddo-user-name"></div><div id="ddo-user-role" class="ddo-role"></div></div><div class="ddo-grid">${tiles}</div><section id="ddo-edi-panel" class="ddo-edi-panel"><div class="ddo-edi-title">EDI</div>${edi}</section><section id="ddo-color-panel" class="ddo-module-panel" hidden><div class="ddo-edi-title">Kleurbeheer</div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="add">Nieuwe kleuren toevoegen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="change">Productkleuren wijzigen</button></div><div class="ddo-edi-row"><button type="button" class="ddo-edi-action" data-color-action="titlecheck">Kleur-titels aanvullen</button></div></section><footer><button id="ddo-update">Updates</button><span id="ddo-update-state">Niet gecontroleerd</span></footer>`;
     document.body.appendChild(box);
-    $('[data-edi-action="scraper"]').onclick=()=>runAdapter(false,true);$('[data-edi-action="autopaster"]').onclick=()=>autopaste();$('[data-edi-action="stockfixer"]').onclick=()=>fix(false);$('[data-edi-action="importer"]').onclick=()=>productImport(false);$('[data-edi-action="prune"]').onclick=pruneCurrentProduct;$('[data-feature="sizeChart"]').onclick=injectSizeChart;$('[data-color-action="add"]').onclick=()=>send('color-management',{mode:'add'});$('[data-color-action="change"]').onclick=()=>send('color-management',{mode:'change'});$('[data-color-action="titlecheck"]').onclick=()=>send('color-management',{mode:'titlecheck'});Object.entries(FEATURES).filter(([,feature])=>feature.adapter).forEach(([id])=>{$(`[data-feature="${id}"]`).onclick=()=>{if(enabled(id)&&adapters.get(id)?.ready)send('run-feature',{id})}});$('#ddo-update').onclick=updates;
+    $('[data-edi-action="scraper"]').onclick=()=>runAdapter(false,true);$('[data-edi-action="autopaster"]').onclick=()=>autopaste();$('[data-edi-action="stockfixer"]').onclick=()=>fix(false);$('[data-edi-action="importer"]').onclick=()=>productImport(false);$('[data-edi-action="prune"]').onclick=pruneCurrentProduct;$('[data-feature="sizeChart"]').onclick=injectSizeChart;$('[data-color-action="add"]').onclick=()=>send('color-management',{mode:'add'});$('[data-color-action="change"]').onclick=()=>send('color-management',{mode:'change'});$('[data-color-action="titlecheck"]').onclick=()=>send('color-management',{mode:'titlecheck'});Object.entries(FEATURES).filter(([,feature])=>feature.adapter).forEach(([id])=>{$(`[data-feature="${id}"]`).onclick=()=>{if(enabled(id)&&adapters.get(id)?.ready)send('run-feature',{id})}});for(const id of ['productValidator','changeModel'])$(`[data-feature="${id}"]`).onclick=()=>{if(enabled(id)&&featureContext(id).ready)send('run-feature',{id})};$('#ddo-update').onclick=updates;
     const collapse=$('.ddo-collapse',box),renderCollapse=collapsed=>{box.classList.toggle('ddo-collapsed',collapsed);collapse.setAttribute('aria-expanded',String(!collapsed));collapse.title=collapsed?'Maximaliseren':'Minimaliseren';collapse.setAttribute('aria-label',collapsed?'Toolbox maximaliseren':'Toolbox minimaliseren');collapse.innerHTML=`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">${collapsed?'<rect x="3" y="3" width="10" height="10" rx="1"/>':'<path d="M3 11h10"/>'}</svg>`;positionTab3Actions()};let collapsed=false;try{collapsed=localStorage.getItem('ddoToolboxCollapsed')==='true'}catch{}renderCollapse(collapsed);collapse.onclick=()=>{collapsed=!collapsed;try{localStorage.setItem('ddoToolboxCollapsed',String(collapsed))}catch{}renderCollapse(collapsed)};
-    drag(box,$('header',box));try{const position=JSON.parse(localStorage.getItem('ddoToolboxPosition'));if(position){box.style.left=`${position.left}px`;box.style.top=`${position.top}px`;box.style.right='auto'}}catch{}
+    drag(box,$('header',box));try{const position=JSON.parse(localStorage.getItem('ddoToolboxPosition'));if(position){box.style.left=`${position.left}px`;box.style.top=`${position.top}px`;box.style.right='auto'}}catch{}requestAnimationFrame(positionTab3Actions)
   }
   function boot(){const params=new URLSearchParams(location.search),products=params.get('section')==='products',edit=products&&params.get('action')==='edit';ui();installFlowToggle();document.addEventListener('keydown',e=>{if(!e.ctrlKey&&!e.metaKey||!e.shiftKey||e.altKey)return;const key=e.key.toLowerCase();if(key==='v'&&available().importer.ok){e.preventDefault();e.stopPropagation();productImport(true);return}if(['INPUT','TEXTAREA','SELECT'].includes(e.target?.tagName)||e.target?.isContentEditable)return;if(key==='s'&&available().scraper.ok){e.preventDefault();runAdapter(true,false)}if(key==='e'&&available().autopaster.ok){e.preventDefault();autopaste()}if(key==='q'&&available().autopaster.ok){e.preventDefault();autopaste('1')}if(key==='f'&&available().stockfixer.ok){e.preventDefault();fix(true)}},true);paint();setTimeout(dailyUpdates,1500);enhancePassiveTools();if(edit&&enabled('updateFlow')){performFlowPlan();window.addEventListener('pageshow',performFlowPlan);window.addEventListener('load',performFlowPlan);document.addEventListener('visibilitychange',()=>{if(!document.hidden)performFlowPlan()});setTimeout(performFlowPlan,1000);setTimeout(performFlowPlan,3000)}setInterval(()=>{paint();enhancePassiveTools()},1500)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
