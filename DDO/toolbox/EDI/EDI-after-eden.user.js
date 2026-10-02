@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | After Eden
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.12
+// @version 1.0.13
 // @description Modelcheck, Product, Maten, ordermodule voor After Eden / Elbrina.
 // @match https://bcg.fashionportal.shop/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -157,7 +157,7 @@ const AE_EAN = (() => {
   const pid=()=>$('input[name="supplier_pid"]')?.value.trim()||'';
   const rows=table=>[...table.querySelectorAll('tr')].flatMap(row=>{const input=$('input[name$="[barcode]"]',row),cell=$('td',row);if(!input||!cell)return [];return [{input,size:AE_EAN.size($('input,select',cell)?.value??cell.textContent)}];});
   let busy=false;
-  const announce=()=>send('adapter-state',{id:'after-eden',label:'After Eden / Elbrina',version:'1.0.12',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js',priority:70,available:brand(),capabilities:['ean','edi']});
+  const announce=()=>send('adapter-state',{id:'after-eden',label:'After Eden / Elbrina',version:'1.0.13',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js',priority:70,available:brand(),capabilities:['ean','edi']});
   document.addEventListener('ddo-toolbox:discover',announce);
   document.addEventListener('ddo-toolbox:run-adapter',async event=>{
     let request;try{request=JSON.parse(event.detail);}catch{return;}if(request.id!=='after-eden')return;
@@ -377,7 +377,7 @@ return {build:buildSparklePayloadFromColorWrap};
 
 (() => {
   'use strict';
-  const ID='after-eden', VERSION='1.0.12', BASE='https://bcg.fashionportal.shop';
+  const ID='after-eden', VERSION='1.0.13', BASE='https://bcg.fashionportal.shop';
   const UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js';
   if(window.top!==window.self)return;
   if(location.origin!==BASE)return;
@@ -587,10 +587,10 @@ return {build:buildSparklePayloadFromColorWrap};
     return {wrap,form,action:action.href,map:variants(wrap)};
   }
   function bodyFor(form,wrap,quantities) {
-    const body=new URLSearchParams(),ids=new Set([...quantities.keys()].map(name=>name.slice('proquantity_'.length)));
+    const body=new URLSearchParams(),wraps=new Set(Array.isArray(wrap)?wrap:[wrap]),ids=new Set([...quantities.keys()].map(name=>name.slice('proquantity_'.length)));
     for(const field of $$('input,select,textarea',form)) {
       if(!field.name||field.disabled||['submit','button','file'].includes(field.type)||(['checkbox','radio'].includes(field.type)&&!field.checked))continue;
-      const block=field.closest('.selectqty-wrap');if(block&&block!==wrap)continue;
+      const block=field.closest('.selectqty-wrap');if(block&&!wraps.has(block))continue;
       if(field.name.startsWith('proquantity_')){if(quantities.has(field.name))body.set(field.name,String(quantities.get(field.name)));continue;}
       if(field.name.startsWith('proprice_')&&!ids.has(field.name.slice(9)))continue;
       body.append(field.name,field.value||'');
@@ -619,22 +619,24 @@ return {build:buildSparklePayloadFromColorWrap};
     if(state.ordering)return;state.ordering=true;renderOrder();
     try {
       const active=state.rows.filter(r=>r.state==='ready'||r.state==='error'),groups=new Map();
-      for(const row of active){const parsed=parseRows(`${row.pid}\t${row.size}\t${row.quantity}`)[0];Object.assign(row,parsed);if(!groups.has(row.pid))groups.set(row.pid,[]);groups.get(row.pid).push(row);}
+      for(const row of active){const parsed=parseRows(`${row.pid}\t${row.size}\t${row.quantity}`)[0];Object.assign(row,parsed);const model=row.pid.slice(0,row.pid.lastIndexOf('-'));if(!groups.has(model))groups.set(model,[]);groups.get(model).push(row);}
       for(const [pid,rows] of groups) {
         let data,quantities=new Map();
         try {
-          orderStatus(`${pid}: exacte maten en voorraad controleren…`);data=await matrix(pid);
-          for(const row of rows){const variant=data.map.get(size(row.size));if(!variant?.input||variant.input.disabled||variant.input.readOnly)throw Error(`Maat ${row.size} niet bestelbaar`);row.inputName=variant.input.name;quantities.set(row.inputName,(quantities.get(row.inputName)||0)+row.quantity);}
-          for(const row of rows){const v=data.map.get(row.size),total=quantities.get(row.inputName);const max=v.input.getAttribute('max');if(v.qty!==null&&total>v.qty)throw Error(`Onvoldoende voorraad ${row.size}: ${v.qty}`);if(max!==null&&max!==''&&Number.isFinite(Number(max))&&total>Number(max))throw Error(`Maximum overschreden voor ${row.size}`);}
+          orderStatus(`${pid}: exacte maten en voorraad controleren…`);data=await matrix(rows[0].pid);data.maps=new Map();data.wraps=[];
+          for(const colorPid of new Set(rows.map(r=>r.pid))){const hits=$$('.selectqty-wrap',data.form).filter(w=>wrapCode(w)===colorPid);if(hits.length!==1)throw Error(`Verwacht één exacte kleur ${colorPid}; gevonden: ${hits.length}`);data.wraps.push(hits[0]);data.maps.set(colorPid,variants(hits[0]));}
+          const owners=new Map();
+          for(const row of rows){const variant=data.maps.get(row.pid).get(size(row.size));if(!variant?.input||variant.input.disabled||variant.input.readOnly)throw Error(`Maat ${row.size} niet bestelbaar`);row.inputName=variant.input.name;if(owners.has(row.inputName)&&owners.get(row.inputName)!==row.pid)throw Error('Veldnaam gedeeld door verschillende kleuren');owners.set(row.inputName,row.pid);quantities.set(row.inputName,(quantities.get(row.inputName)||0)+row.quantity);}
+          for(const row of rows){const v=data.maps.get(row.pid).get(row.size),total=quantities.get(row.inputName);const max=v.input.getAttribute('max');if(v.qty!==null&&total>v.qty)throw Error(`Onvoldoende voorraad ${row.size}: ${v.qty}`);if(max!==null&&max!==''&&Number.isFinite(Number(max))&&total>Number(max))throw Error(`Maximum overschreden voor ${row.size}`);}
         }catch(e){rows.forEach(r=>{r.state='error';r.detail=e.message;});orderStatus(e.message,true);renderOrder();continue;}
         // Once a POST is attempted its rows cannot be retried by another click.
         rows.forEach(r=>{r.state='uncertain';r.detail='Aanvraag gestart; controleer mandje voordat je opnieuw toevoegt';});renderOrder();
         try {
-          const response=await fetch(data.action,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:bodyFor(data.form,data.wrap,quantities).toString(),signal:AbortSignal.timeout(20000)});
+          const response=await fetch(data.action,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:bodyFor(data.form,data.wraps,quantities).toString(),signal:AbortSignal.timeout(20000)});
           const text=await response.text();
           if(!response.ok||/onvoldoende voorraad|insufficient stock|niet voldoende voorraad|maximaal beschikbare hoeveelheid|quantity.*adjusted|type=["']password/i.test(text))throw Error('Basketantwoord vereist controle; voeg deze regels niet opnieuw toe');
           let result;try{result=JSON.parse(text);}catch{}
-          const exactProduct=responseConfirmsProduct(result,pid);
+          const exactProduct=[...new Set(rows.map(r=>r.pid))].every(colorPid=>responseConfirmsProduct(result,colorPid));
           if(!result||result.status===false||result.success===false||result.error||(result.status!==true&&result.success!==true&&!exactProduct))throw Error('Aanvraag verstuurd, maar winkelmandantwoord niet herkend; controleer het winkelmandje. Niet opnieuw toevoegen.');
           rows.forEach(r=>{r.state='sent';r.detail='Toevoegen bevestigd door leverancier';});orderStatus(`${pid}: toevoegen bevestigd door leverancier`);
         }catch(e){rows.forEach(r=>r.detail=e.message);orderStatus(`${pid}: ${e.message}`,true);}
