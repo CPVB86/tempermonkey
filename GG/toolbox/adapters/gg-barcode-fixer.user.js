@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Adapter | Barcode Fixer
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.0.0
+// @version      1.1.1
 // @description  Barcode Fixer v2.2 voor GG Toolbox. Toegang wordt bepaald door de core.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        none
@@ -12,7 +12,31 @@
 (() => {
   'use strict';
   if (window.__ggBarcodeFixer) return;
-  window.__ggBarcodeFixer = { version: '1.0.0' };
+  window.__ggBarcodeFixer = { version: '1.1.1', getState, run: scanClipboard };
+  let clipboardBusy = false;
+  const clipboardPage = () => /^\/orders\/view\//.test(window.location.pathname) || /^\/products\/?$/.test(window.location.pathname);
+  function getState() {
+    return {ready:enabled() && clipboardPage() && !clipboardBusy, reason:'Scan één barcode vanaf het klembord op een order of het productoverzicht'};
+  }
+  async function scanClipboard() {
+    if (!getState().ready) return;
+    clipboardBusy = true;
+    try {
+      const value = (await navigator.clipboard.readText()).trim();
+      if (!enabled() || !clipboardPage()) return;
+      if (!/^\d{8,14}$/.test(value)) throw new Error('Zet één barcode van 8 tot 14 cijfers op het klembord.');
+      clearPendingScan();
+      const barcode = normalizeBarcode(value);
+      document.activeElement?.blur?.();
+      for (const key of [...barcode, 'Enter']) {
+        for (const type of ['keydown','keypress','keyup']) {
+          const enter = key === 'Enter', code = enter ? 13 : key.charCodeAt(0);
+          document.body.dispatchEvent(new window.KeyboardEvent(type, {key,code:enter?'Enter':'Digit'+key,keyCode:code,which:code,charCode:type==='keypress'&&!enter?code:0,bubbles:true,cancelable:true,composed:true}));
+        }
+      }
+    } catch (error) { window.__ggToolbox?.flashError?.('barcodeFixer'); }
+    finally { clipboardBusy = false; }
+  }
   function enabled() {
     return window.__ggToolbox?.isEnabled('barcodeFixer') === true;
   }
