@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GG Toolbox | Core
 // @namespace    https://fm-e-warehousing.goedgepickt.nl/
-// @version      1.15.1
+// @version      1.15.2
 // @description  Versleepbare toolbox met Beheerder/Manager+/Manager/Picker-toegang en Barcode Fixer.
 // @match        https://fm-e-warehousing.goedgepickt.nl/*
 // @grant        GM_xmlhttpRequest
@@ -15,7 +15,7 @@
   'use strict';
   const window = unsafeWindow;
   if (window.__ggToolbox) return;
-  const VERSION = '1.15.1';
+  const VERSION = '1.15.2';
   const UPDATE = 'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/GG/toolbox/gg-toolbox.user.js';
   // TOEGANG: managerPlus, manager en picker true/false per functie; Beheerder heeft altijd toegang.
   const USERS = {
@@ -25,7 +25,7 @@
     Picker: ['Chantal Timmer', 'Anke Adams'],
   };
   const FEATURES = {
-    barcodeFixer: { label: 'Barcode Fixer', managerPlus: true, manager: true, picker: true, icon: 'barcode', adapter: '__ggBarcodeFixer', file: 'gg-barcode-fixer.user.js' },
+    barcodeFixer: { label: 'Barcode Fixer', managerPlus: true, manager: true, picker: true, icon: 'barcode', adapter: '__ggBarcodeFixer', file: 'gg-barcode-fixer.user.js', action: true },
     wagroPrio: { label: 'WaGro Prio', managerPlus: true, manager: true, picker: true, icon: 'medal', adapter: '__ggWaGroPrio', file: 'gg-wagro-prio.user.js', action: true },
     ddoProductLinker: { label: 'DDO Productlinker', managerPlus: true, manager: true, picker: false, icon: 'link', adapter: '__ggDDOProductLinker', file: 'gg-ddo-productlinker.user.js' },
     twoOrder: { label: '2Order', managerPlus: true, manager: false, picker: false, icon: 'cart', adapter: '__gg2Order', file: 'gg-2order.user.js' },
@@ -175,7 +175,7 @@
       button.querySelector('.label').textContent = feature.label;
       if (feature.action) button.onclick = () => {
         const adapter = window[feature.adapter];
-        if (enabled(id) && adapter?.getState().ready) adapter.run();
+        if (enabled(id) && adapter?.getState?.().ready) adapter.run();
         paint();
       };
       button.dataset.feature = id;
@@ -191,7 +191,7 @@
         const feature = FEATURES[button.dataset.feature];
         const adapter = window[feature.adapter];
         const available = !!adapter;
-        const state = feature.action && adapter ? adapter.getState() : { ready: true };
+        const state = feature.action && adapter ? (adapter.getState?.() || {ready:false,reason:'Werk de adapter bij'}) : { ready: true };
         const active = enabled(button.dataset.feature) && available && state.ready;
         button.disabled = feature.action && !active;
         button.setAttribute('aria-disabled', String(!feature.action || !active));
