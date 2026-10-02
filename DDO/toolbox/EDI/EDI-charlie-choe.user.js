@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | Charlie Choe / Mila
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.5
+// @version 1.0.9
 // @description Charlie Choe/Mila: modelcheck, Product, Maten, foto's, ordermodule.
 // @match https://vangennip.itsperfect.it/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -647,7 +647,7 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
 
 (() => {
   'use strict';
-  const VERSION='1.0.5', ID='charlie-choe', BASE='https://vangennip.itsperfect.it';
+  const VERSION='1.0.9', ID='charlie-choe', BASE='https://vangennip.itsperfect.it';
   if(window.top!==window.self)return;
   if(location.hostname==='www.dutchdesignersoutlet.com') {
     const announce=()=>document.dispatchEvent(new CustomEvent('ddo-toolbox:adapter-state',{detail:JSON.stringify({id:ID,label:'Charlie Choe / Mila',version:VERSION,available:false,capabilities:['edi'],updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-charlie-choe.user.js'})}));
@@ -658,25 +658,27 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
   const clean=s=>String(s??'').replace(/\s+/g,' ').trim();
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cart=()=>/^\/webshop\/shoppingbag(?:\/|$)/i.test(location.pathname)||DDO_EDI.isCartPage();
-  const CACHE='edi:charlie-choe:ddo:v2', BRANDS=[34,145];
+  const CACHE='edi:charlie-choe:ddo:v5', BRANDS=[34,145];
   const state={map:null,checking:false,ordering:false,downloading:false,rows:[]};
   // Article-colour is the comparison key; the trailing supplier p_id is retained in clipboard data.
   function code(value) {
     const s=clean(value).normalize('NFKC').replace(/[‐‑‒–—]/g,'-').toUpperCase();
     return s.match(/^[A-Z0-9._]+-[A-Z0-9]+(?=-[A-Z0-9]+(?:-\d+)?$|$)/)?.[0]||'';
   }
+  function comparisonCode(value){return code(value).replace(/^[A-Z]+(?=\d)/,'');}
+  function lookup(key){return state.map?.get(comparisonCode(key));}
   function exportMap(buffer) {
     const wb=XLSX.read(buffer,{type:'array'}), map=new Map();let valid=false;
     for(const name of wb.SheetNames||[]) {
       const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false,defval:'',blankrows:false});
       const heads=(rows[0]||[]).map(v=>clean(v).toLowerCase().replace(/[ _-]/g,''));
-      const ci=['supplierpid','supplierproductid','productid'].map(v=>heads.indexOf(v)).find(i=>i>=0);
+      const columns=['supplierpid','supplierproductid','productid'].map(v=>heads.indexOf(v)).filter(i=>i>=0);
       const ii=['image','images','imageurl','afbeelding'].map(v=>heads.indexOf(v)).find(i=>i>=0);
-      if(ci===undefined)continue;valid=true;
+      if(!columns.length)continue;valid=true;
       for(const row of rows.slice(1)) {
-        const key=code(row[ci]);if(!key)continue;
+        const keys=[...new Set(columns.map(i=>comparisonCode(row[i])).filter(Boolean))];if(!keys.length)continue;
         const id=String(row[ii]||'').match(/https:\/\/www\.dutchdesignersoutlet\.com\/img\/product\/(\d+)(?=\D|$)/)?.[1]||'';
-        if(!map.has(key)||id)map.set(key,{id});
+        for(const key of keys)if(!map.has(key)||(!map.get(key).id&&id))map.set(key,{id});
       }
     }
     if(!valid)throw Error('DDO-export mist Product ID / Supplier PID; controleer de DDO-login');
@@ -699,14 +701,14 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
         for(const id of BRANDS){status(`DDO-export ophalen · merk ${id} · ${maps.length+1}/${BRANDS.length}`);maps.push(await exportBrand(id));}
         state.map=new Map(maps.flatMap(m=>[...m]));
         try{localStorage.setItem(CACHE,JSON.stringify({time:Date.now(),entries:[...state.map]}));}catch{}
-        status(`Modelcheck actief · ${state.map.size} producten · beide merken opgehaald`);
+        status(`Modelcheck actief · ${[...state.map.keys()].filter(k=>!k.startsWith('@variant:')).length} producten · beide merken opgehaald`);
       }
     }catch(e){state.map=null;status(e.message,true);}
     finally{state.checking=false;$$('#vg-check,#vg-refresh,#vg-reset').forEach(b=>b.disabled=false);render();}
   }
-  function match(key) {
+  function match(key,supplierId='') {
     if(!state.map)return '';
-    const found=state.map.get(key);
+    const found=lookup(key,supplierId);
     return found?`<span class="edi-match edi-match-ok">${found.id?`✓ <a target="_blank" rel="noopener" href="https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=${encodeURIComponent(found.id)}">${esc(found.id)}</a>`:'✓ Aanwezig'}</span>`:'<span class="edi-match edi-match-miss">× Ontbreekt</span>';
   }
   function colors() {
@@ -760,7 +762,7 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
   function render() {
     if(cart())return;
     const list=colors(),out=$('#vg-colors');if(!out)return;
-    out.innerHTML=list.length?`<div class="edi-pdp-meta"><strong>${esc(list[0].model)}</strong><span>${esc(VG_PRODUCT.getTitleBase())}</span></div>${state.map?`<div class="edi-summary">${list.filter(v=>state.map.has(v.key)).length}/${list.length} leverancierskleuren in DDO</div>`:''}<div class="edi-colors">${list.map((v,i)=>`<div class="edi-color-row"><div class="edi-color-main"><span class="edi-swatch"></span><span class="edi-color-label" title="${esc(v.label)}">${esc(v.label)}</span>${match(v.key)}</div><div class="edi-actions"><button type="button" class="edi-action" data-action="product" data-index="${i}">Product</button><button type="button" class="edi-action" data-action="sizes" data-index="${i}" ${v.sizes.length?'':'disabled'}>Maten</button><button type="button" class="edi-action" disabled title="Geen EAN-bron aangeleverd">EAN</button><button type="button" class="edi-action" data-action="photos" data-index="${i}" ${state.downloading?'disabled':''} title="Download originele foto’s">Foto’s</button></div></div>`).join('')}</div>`:'<p class="edi-module-note">Open een product om Product, Maten en Foto’s te gebruiken.</p>';
+    out.innerHTML=list.length?`<div class="edi-pdp-meta"><strong>${esc(list[0].model)}</strong><span>${esc(VG_PRODUCT.getTitleBase())}</span></div>${state.map?`<div class="edi-summary">${list.filter(v=>lookup(v.key,v.supplierId)).length}/${list.length} leverancierskleuren in DDO</div>`:''}<div class="edi-colors">${list.map((v,i)=>`<div class="edi-color-row"><div class="edi-color-main"><span class="edi-swatch"></span><span class="edi-color-label" title="${esc(v.label)}">${esc(v.label)}</span>${match(v.key,v.supplierId)}</div><div class="edi-actions"><button type="button" class="edi-action" data-action="product" data-index="${i}">Product</button><button type="button" class="edi-action" data-action="sizes" data-index="${i}" ${v.sizes.length?'':'disabled'}>Maten</button><button type="button" class="edi-action" disabled title="Geen EAN-bron aangeleverd">EAN</button><button type="button" class="edi-action" data-action="photos" data-index="${i}" ${state.downloading?'disabled':''} title="Download originele foto’s">Foto’s</button></div></div>`).join('')}</div>`:'<p class="edi-module-note">Open een product om Product, Maten en Foto’s te gebruiken.</p>';
     for(const button of $$('button[data-action]',out))button.onclick=async()=>{
       const v=list[Number(button.dataset.index)];button.disabled=true;
       try {
@@ -774,7 +776,8 @@ return {parseRows,parseProductRef,groupRows,findExactInput,parseQuantityInput,lo
     for(const line of $$('.plp-product__line2')) {
       const card=line.closest('.plp-product, [class*="plp-product__item"], li, article')||line.parentElement;
       const key=code(clean(line.textContent).match(/^([A-Z0-9._]+-[A-Z0-9]+)(?:\s*-|$)/i)?.[1]||'');let badge=$('.vg-catalog-status',card);
-      const html=key?match(key):'';
+      let html=key?match(key):'';
+
       if(!html){badge?.remove();continue;}
       if(!badge){badge=document.createElement('div');badge.className='vg-catalog-status';card.append(badge);}
       if(badge.innerHTML!==html)badge.innerHTML=html;
