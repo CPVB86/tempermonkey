@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | Lisca
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 2.0.2
+// @version 2.0.3
 // @description Lisca EDI: modelcheck, product, maten, EAN, foto's en bestaande DDO-sheetkoppeling.
 // @match https://b2b-eu.lisca.com/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -112,7 +112,7 @@ const DDO_EDI = (() => {
 
 // END SHARED EDI
 // Product extraction adapted from supplied Sparkle Lisca 2.5.0.
-const LISCA_PRODUCT = (document, url, html) => {
+const LISCA_PRODUCT = (document, url, html, colorLabel = '') => {
  const location={href:url}, MARKUP_FACTOR=2.5, SUPPLIER_NAME='Lisca';
  const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
  const normalizeSku=s=>String(s||'').includes('-')?String(s).trim():String(s||'').slice(0,6)+'-'+String(s||'').slice(6);
@@ -237,18 +237,10 @@ const LISCA_PRODUCT = (document, url, html) => {
         .trim();
     const titleClean =
       toTitleCase(titlePart);
-    const kleurRaw =
-      $('.related-list-selected-option')
-        ?.textContent
-        .trim() ||
-      '';
-    const kleurClean =
-      toTitleCase(
-        kleurRaw.replace(
-          /^[^-]+\s*-\s*/,
-          ''
-        )
-      );
+    const colorCode = getCurrentSupplierId().normalized.split('-')[1];
+    const label = String(colorLabel || '').trim();
+    const fallbackColor = label.replace(new RegExp('^' + escapeRegex(colorCode) + '\\s*(?:-\\s*)?', 'i'), '').trim();
+    const kleurClean = toTitleCase(detectCurrentColor().colorName || fallbackColor || $('.related-list-selected-option')?.textContent?.replace(/^\s*[A-Za-z0-9]+\s*-\s*/, '').trim() || '');
     const computedName =
       `${modelName} ${titleClean} ${kleurClean}`
         .replace(/\s+/g, ' ')
@@ -900,7 +892,7 @@ const LISCA_PRODUCT = (document, url, html) => {
 (() => {
   'use strict';
   if(location.hostname!=='www.dutchdesignersoutlet.com'||window.top!==window.self)return;
-  const ID='lisca',VERSION='2.0.2',SHEET='1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww',GID='933070542',TTL=120000,CACHE_SCHEMA=2;
+  const ID='lisca',VERSION='2.0.3',SHEET='1JGQp-sgPp-6DIbauCUSFWTNnljLyMWww',GID='933070542',TTL=120000,CACHE_SCHEMA=2;
   const TABLE='#tabs-3 table.options',PID='#tabs-1 input[name="supplier_pid"]',BRAND='#tabs-1 #select2-brand-container';
   const $=(selector,root=document)=>root.querySelector(selector),decode=event=>{try{return JSON.parse(event.detail||'{}')}catch{return {}}},send=(name,data)=>document.dispatchEvent(new CustomEvent(`ddo-toolbox:${name}`,{detail:JSON.stringify(data)}));
   let sheetMemory=null,busy=false;
@@ -939,7 +931,7 @@ let map=null,busy=false,signature='';
 const status=s=>{$('#lc-status').textContent=s;};
 const link=pid=>{const hit=map?.get(pid);return !map?'—':hit?`<a href="https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=${encodeURIComponent(hit)}" target="_blank" rel="noopener">✓ ${esc(hit)}</a>`:'× Ontbreekt';};
 function colors(){const current=code($('.product-add-form form[data-product-sku]')?.dataset.productSku);if(!current)return [];const entries=new Map();for(const a of $$('.product-info-main .related-list a[href]')){const pid=code(a.href)||code(a.getAttribute('data-product-sku'));if(!pid||pid.split('-')[0]!==current.split('-')[0])continue;const url=new URL(a.href,location.href);if(url.origin!==location.origin)continue;entries.set(pid,{pid,url:url.href,label:a.getAttribute('color')||a.title||pid.split('-')[1]});}if(!entries.has(current))entries.set(current,{pid:current,url:location.href,label:$('.related-list-selected-option')?.textContent.trim()||current.split('-')[1]});return [...entries.values()].sort((a,b)=>a.pid.localeCompare(b.pid));}
-async function pageData(item){const r=await fetch(item.url,{credentials:'include',cache:'no-store'});if(!r.ok)throw Error(`Lisca: HTTP ${r.status}`);const html=await r.text(),doc=new DOMParser().parseFromString(html,'text/html');if(code($('.product-add-form form[data-product-sku]',doc)?.dataset.productSku)!==item.pid)throw Error('Opgehaalde pagina hoort niet bij deze kleur; controleer de login');return {html,reader:LISCA_PRODUCT(doc,item.url,html)};}
+async function pageData(item){const r=await fetch(item.url,{credentials:'include',cache:'no-store'});if(!r.ok)throw Error(`Lisca: HTTP ${r.status}`);const html=await r.text(),doc=new DOMParser().parseFromString(html,'text/html');if(code($('.product-add-form form[data-product-sku]',doc)?.dataset.productSku)!==item.pid)throw Error('Opgehaalde pagina hoort niet bij deze kleur; controleer de login');return {html,reader:LISCA_PRODUCT(doc,item.url,html,item.label)};}
 function gallery(html,url){const urls=[];for(const m of html.matchAll(/"full"\s*:\s*("(?:\\.|[^"\\])*")/g)){try{const u=new URL(JSON.parse(m[1]),url);if(/^https?:$/.test(u.protocol))urls.push(u.href);}catch{}}return [...new Set(urls)];}
 async function action(item,kind,button){button.disabled=true;try{status(`${item.pid}: ophalen…`);const {html,reader}=await pageData(item);if(kind==='photos'){const urls=gallery(html,item.url);if(!urls.length)throw Error('Geen originele foto’s gevonden');for(let i=0;i<urls.length;i++)await new Promise((resolve,reject)=>GM_download({url:urls[i],name:`${item.pid}_${i+1}.jpg`,onload:resolve,onerror:()=>reject(Error('Foto downloaden mislukt')),ontimeout:()=>reject(Error('Foto downloaden duurde te lang'))}));status(`${urls.length} foto’s gedownload`);return;}let text;if(kind==='product')text=DDO_EDI.productClipboard(reader.product());else{const rows=await reader.variants();text=kind==='sizes'?DDO_EDI.sizesClipboard('Lisca',item.pid,rows.map(r=>r.size)):DDO_EDI.eanTSV(rows.filter(r=>r.ean),item.pid);}if(!text)throw Error('Geen beschikbare EAN-codes');GM_setClipboard(text);status(`${item.pid}: ${kind==='product'?'Product':kind==='sizes'?'Maten':'EAN-codes'} gekopieerd`);}catch(e){status(e.message);}finally{button.disabled=false;}}
 function render(){const cart=DDO_EDI.isCartPage(),items=cart?[]:colors();$('#lc-edi').hidden=cart;$('#lc-order').hidden=!cart;if(cart)return;const sig=JSON.stringify([items,map?[...map]:null]);if(sig!==signature){signature=sig;$('#lc-colors').innerHTML=items.length?`<div class="edi-pdp-meta"><strong>${esc(items[0].pid.split('-')[0])}</strong></div><div class="edi-summary">${map?`${items.filter(i=>map.has(i.pid)).length}/${items.length} leverancierskleuren in DDO`:''}</div><div class="edi-colors">${items.map((i,n)=>`<div class="edi-color-row"><div class="edi-color-main"><a class="edi-color-select" href="${esc(i.url)}"><span class="edi-swatch"></span><span class="edi-color-label" title="${esc(i.label)}">${esc(i.label)}</span></a><span class="edi-match ${map?(map.has(i.pid)?'edi-match-ok':'edi-match-miss'):''}">${link(i.pid)}</span></div><div class="edi-actions">${[['product','Product'],['sizes','Maten'],['ean','EAN'],['photos','Foto’s']].map(([k,t])=>`<button type="button" class="edi-action" data-index="${n}" data-action="${k}">${t}</button>`).join('')}</div></div>`).join('')}</div>`:'Open een product om Product, Maten, EAN en Foto’s te gebruiken.';$$('[data-action]',$('#lc-colors')).forEach(b=>b.onclick=()=>action(items[Number(b.dataset.index)],b.dataset.action,b));}
@@ -950,7 +942,7 @@ async function check(force=false){if(busy)return;busy=true;$$('.edi-toolbar butt
 const style=document.createElement('style');style.textContent=`#edi-lisca,#edi-lisca :where(*){all:revert;box-sizing:border-box}#edi-lisca :where(*){font:inherit;color:inherit;letter-spacing:normal;text-transform:none}#edi-lisca :where(*::before,*::after){content:none}#edi-lisca{margin:0;padding:0;text-align:left;direction:ltr;position:fixed;top:18px;right:18px;width:430px;max-width:calc(100vw - 24px);z-index:2147483000;overflow:hidden}#edi-lisca .edi-head{display:flex;align-items:center}#edi-lisca button{all:unset;box-shadow:none;background-image:none;appearance:none;transform:none;text-shadow:none;box-sizing:border-box;display:inline-block;text-align:center;cursor:pointer;width:auto;min-width:0;max-width:100%;height:auto;margin:0;float:none;position:static;letter-spacing:normal;text-transform:none;white-space:normal}#edi-lisca a{color:inherit;text-decoration:none}.lc-card-status{font:600 12px system-ui;margin:6px 0}.lc-card-status a{color:inherit}`+DDO_EDI.theme.replaceAll('#edi-lingadore','#edi-lisca')+DDO_EDI.layout.replaceAll('#edi-lingadore','#edi-lisca');document.head.append(style);
 // Promote only panel rules; preserve the shared layout and its cascade order.
 for(const rule of style.sheet.cssRules){if(!rule.selectorText?.includes('#edi-lisca'))continue;rule.selectorText=rule.selectorText.replaceAll('#edi-lisca','#edi-lisca#edi-lisca');const declarations=[...rule.style].map(property=>[property,rule.style.getPropertyValue(property)]);for(const [property,value] of declarations)rule.style.setProperty(property,value,'important');}
-const panel=document.createElement('section');panel.id='edi-lisca';panel.innerHTML=`<div class="edi-head"><div class="edi-title">Toolbox · Lisca<span class="edi-version">v2.0.2</span></div><button type="button" class="edi-icon-btn" id="lc-collapse" aria-label="Inklappen">−</button></div><div class="edi-body"><details class="edi-module" id="lc-edi" open><summary>EDI-module</summary><div class="edi-toolbar"><button type="button" class="edi-btn" id="lc-check">Controleer in DDO</button><button type="button" class="edi-btn" id="lc-refresh">Opnieuw checken</button><button type="button" class="edi-btn edi-danger" id="lc-reset">Reset</button></div><div class="edi-status" id="lc-status" role="status">Modelcheck wacht op startsignaal</div><div id="lc-colors"></div></details><details class="edi-module" id="lc-order" open><summary>Ordermodule</summary><p class="edi-module-note">Ordermodule niet van toepassing op deze leverancier.</p></details></div>`;document.body.append(panel);
+const panel=document.createElement('section');panel.id='edi-lisca';panel.innerHTML=`<div class="edi-head"><div class="edi-title">Toolbox · Lisca<span class="edi-version">v2.0.3</span></div><button type="button" class="edi-icon-btn" id="lc-collapse" aria-label="Inklappen">−</button></div><div class="edi-body"><details class="edi-module" id="lc-edi" open><summary>EDI-module</summary><div class="edi-toolbar"><button type="button" class="edi-btn" id="lc-check">Controleer in DDO</button><button type="button" class="edi-btn" id="lc-refresh">Opnieuw checken</button><button type="button" class="edi-btn edi-danger" id="lc-reset">Reset</button></div><div class="edi-status" id="lc-status" role="status">Modelcheck wacht op startsignaal</div><div id="lc-colors"></div></details><details class="edi-module" id="lc-order" open><summary>Ordermodule</summary><p class="edi-module-note">Ordermodule niet van toepassing op deze leverancier.</p></details></div>`;document.body.append(panel);
 $('#lc-collapse').onclick=()=>{const body=$('.edi-body',panel);body.hidden=!body.hidden;$('#lc-collapse').textContent=body.hidden?'+':'−';};$('#lc-check').onclick=()=>check();$('#lc-refresh').onclick=()=>check(true);$('#lc-reset').onclick=()=>{map=null;localStorage.removeItem(CACHE);status('Modelcheck gereset');render();};
 render();let timer;new MutationObserver(records=>{if(records.every(r=>panel.contains(r.target)||r.target.closest?.('.lc-card-status')))return;clearTimeout(timer);timer=setTimeout(render,150);}).observe(document.body,{childList:true,subtree:true});
 })();
