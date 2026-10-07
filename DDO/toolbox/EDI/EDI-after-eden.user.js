@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDO Toolbox | EDI | After Eden
 // @namespace https://dutchdesignersoutlet.nl/
-// @version 1.0.13
+// @version 1.0.14
 // @description Modelcheck, Product, Maten, ordermodule voor After Eden / Elbrina.
 // @match https://bcg.fashionportal.shop/*
 // @match https://www.dutchdesignersoutlet.com/admin.php*
@@ -123,7 +123,7 @@ const AE_EAN = (() => {
     const header=rows.shift()?.map(x=>x.toLowerCase())||[];
     const si=header.indexOf('size'),ei=header.indexOf('ean'),pi=header.indexOf('supplier id');
     if([si,ei,pi].some(i=>i<0))throw Error('EAN-sheet mist Size, Ean of Supplier ID');
-    return DDO_EDI.variantMap(rows.filter(r=>r[pi]?.toUpperCase()===pid.trim().toUpperCase()).map(r=>({size:size(r[si]),ean:r[ei]})));
+    return DDO_EDI.variantMap(rows.filter(r=>r[pi]?.toUpperCase()===pid.trim().toUpperCase()&&r[ei]?.trim()).map(r=>({size:size(r[si]),ean:r[ei]})));
   }
   function request(url){return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url,anonymous:false,timeout:12000,onload:resolve,onerror:()=>reject(Error('Netwerkfout bij EAN-sheet')),ontimeout:()=>reject(Error('Timeout bij EAN-sheet'))}));}
   async function load(force){
@@ -143,10 +143,8 @@ const AE_EAN = (() => {
   }
   async function get(pid,sizes,force=false){
     const map=parse(await load(force),pid),wanted=[...new Set(sizes.map(size))];
-    const missing=wanted.filter(s=>!map.has(s));
-    if(missing.length)throw Error(`Geen EAN voor ${pid}: ${missing.join(', ')}`);
     if(!wanted.length)throw Error('Geen maten gevonden');
-    return wanted.map(s=>map.get(s));
+    return wanted.filter(s=>map.has(s)).map(s=>map.get(s));
   }
   return {size,parse,get};
 })();
@@ -157,19 +155,19 @@ const AE_EAN = (() => {
   const pid=()=>$('input[name="supplier_pid"]')?.value.trim()||'';
   const rows=table=>[...table.querySelectorAll('tr')].flatMap(row=>{const input=$('input[name$="[barcode]"]',row),cell=$('td',row);if(!input||!cell)return [];return [{input,size:AE_EAN.size($('input,select',cell)?.value??cell.textContent)}];});
   let busy=false;
-  const announce=()=>send('adapter-state',{id:'after-eden',label:'After Eden / Elbrina',version:'1.0.13',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js',priority:70,available:brand(),capabilities:['ean','edi']});
+  const announce=()=>send('adapter-state',{id:'after-eden',label:'After Eden / Elbrina',version:'1.0.14',updateUrl:'https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js',priority:70,available:brand(),capabilities:['ean','edi']});
   document.addEventListener('ddo-toolbox:discover',announce);
   document.addEventListener('ddo-toolbox:run-adapter',async event=>{
     let request;try{request=JSON.parse(event.detail);}catch{return;}if(request.id!=='after-eden')return;
-    const status=(text,kind='busy',done=false,changed=0)=>send('adapter-status',{requestId:request.requestId,text,kind,done,changed,autoSave:done&&kind==='success'&&!!request.autoSave});
+    const status=(text,kind='busy',done=false,changed=0)=>send('adapter-status',{requestId:request.requestId,text,kind,done,changed,autoSave:done&&kind==='success'&&changed>0&&!!request.autoSave});
     if(busy)return status('After Eden is al bezig','error',true);busy=true;
     try{
       const table=$('#tabs-3 table.options'),original=pid();if(!brand()||!table||!original)throw Error('Open een After Eden / Elbrina product met Supplier ID en maten');
       const before=rows(table);status('After Eden EAN-sheet ophalen');
       const entries=await AE_EAN.get(original,before.map(r=>r.size),!!request.forceRefresh),map=DDO_EDI.variantMap(entries),current=rows(table);
       if(!table.isConnected||table!==$('#tabs-3 table.options')||pid()!==original||!brand()||current.length!==before.length||before.some((r,i)=>r.input!==current[i].input||r.size!==current[i].size))throw Error('Product of maten gewijzigd; start opnieuw');
-      let changed=0;for(const row of before){const ean=map.get(row.size).ean;if(row.input.value===ean)continue;row.input.value=ean;row.input.dispatchEvent(new Event('input',{bubbles:true}));row.input.dispatchEvent(new Event('change',{bubbles:true}));changed++;}
-      status(`${changed} EAN-rijen gevuld · voorraad ongewijzigd`,'success',true,changed);
+      let changed=0,skipped=0;for(const row of before){const entry=map.get(row.size);if(!entry){skipped++;continue;}const ean=entry.ean;if(row.input.value===ean)continue;row.input.value=ean;row.input.dispatchEvent(new Event('input',{bubbles:true}));row.input.dispatchEvent(new Event('change',{bubbles:true}));changed++;}
+      status(`${changed} EAN-rijen gevuld${skipped?` · ${skipped} overgeslagen (geen EAN)`:""} · voorraad ongewijzigd`,'success',true,changed);
     }catch(e){status(e.message,'error',true);}finally{busy=false;}
   });
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',announce,{once:true});else announce();
@@ -377,7 +375,7 @@ return {build:buildSparklePayloadFromColorWrap};
 
 (() => {
   'use strict';
-  const ID='after-eden', VERSION='1.0.13', BASE='https://bcg.fashionportal.shop';
+  const ID='after-eden', VERSION='1.0.14', BASE='https://bcg.fashionportal.shop';
   const UPDATE='https://raw.githubusercontent.com/CPVB86/tempermonkey/main/DDO/toolbox/EDI/EDI-after-eden.user.js';
   if(window.top!==window.self)return;
   if(location.origin!==BASE)return;
@@ -528,7 +526,7 @@ return {build:buildSparklePayloadFromColorWrap};
       if(match?.id){const label=$('.edi-match',row),link=document.createElement('a');link.textContent=label.textContent;link.href=`https://www.dutchdesignersoutlet.com/admin.php?section=products&action=edit&id=${encodeURIComponent(match.id)}`;link.target='_blank';link.rel='noopener';label.replaceChildren(link);}
       $('[data-action="product"]',row).onclick=async()=>{try{if(!wrap.isConnected)throw Error('Modal gewijzigd; open opnieuw');const payload=AE_PRODUCT.build(wrap);if(code(payload.productCode)!==pid)throw Error('Product gewijzigd');await clipboard(DDO_EDI.productClipboard(payload));status(`${pid}: productgegevens gekopieerd`);}catch(e){status(e.message,true);}};
       $('[data-action="sizes"]',row).onclick=async()=>{try{const sizes=[...variants(wrap).keys()];if(!sizes.length)throw Error('Geen maten gevonden');await clipboard(DDO_EDI.sizesClipboard('After Eden / Elbrina',pid,sizes));status(`${pid}: ${sizes.length} maten gekopieerd`);}catch(e){status(e.message,true);}};
-      $('[data-action="ean"]',row).onclick=async()=>{try{status(`${pid}: EAN-sheet ophalen`);const sizes=[...variants(wrap).keys()],entries=await AE_EAN.get(pid,sizes);if(!wrap.isConnected||wrapCode(wrap)!==pid)throw Error('Product gewijzigd; start opnieuw');await clipboard(DDO_EDI.eanTSV(entries,pid));status(`${pid}: ${entries.length} EAN-codes gekopieerd`);}catch(e){status(e.message,true);}};
+      $('[data-action="ean"]',row).onclick=async()=>{try{status(`${pid}: EAN-sheet ophalen`);const sizes=[...variants(wrap).keys()],entries=await AE_EAN.get(pid,sizes);if(!wrap.isConnected||wrapCode(wrap)!==pid)throw Error('Product gewijzigd; start opnieuw');const skipped=new Set(sizes.map(AE_EAN.size)).size-entries.length;if(entries.length)await clipboard(DDO_EDI.eanTSV(entries,pid));status(`${pid}: ${entries.length} EAN-codes gekopieerd${skipped?` · ${skipped} maten overgeslagen (geen EAN)`:""}${entries.length?"":" · klembord ongewijzigd"}`);}catch(e){status(e.message,true);}};
       $('[data-action="photos"]',row).onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{await photos(pid);}catch(e){status(e.message,true);}finally{button.disabled=false;}};
       $('.edi-colors',groups.get(model)).append(row);
     }
